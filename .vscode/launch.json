@@ -11,7 +11,7 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "console":"integratedTerminal",
-            "preLaunchTask": "Compile"
+            // "preLaunchTask": "Compile"
         },
         {
             "name": "Launch Release with MSVC Debugger",

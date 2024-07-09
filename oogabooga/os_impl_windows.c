@@ -440,7 +440,7 @@ Spinlock *os_make_spinlock(Allocator allocator) {
 void os_spinlock_lock(Spinlock *l) {
     while (true) {
         bool expected = false;
-        if (os_compare_and_swap_bool(&l->locked, true, expected)) {
+        if (compare_and_swap_bool(&l->locked, true, expected)) {
             return;
         }
         while (l->locked) {
@@ -451,7 +451,7 @@ void os_spinlock_lock(Spinlock *l) {
 
 void os_spinlock_unlock(Spinlock *l) {
     bool expected = true;
-    bool success = os_compare_and_swap_bool(&l->locked, false, expected);
+    bool success = compare_and_swap_bool(&l->locked, false, expected);
     assert(success, "This thread should have acquired the spinlock but compare_and_swap failed");
 }
 
@@ -947,8 +947,8 @@ void os_update() {
 	}
 
 	if (last_window.scaled_width != window.scaled_width || last_window.scaled_height != window.scaled_height) {
-		window.width = window.scaled_width*dpi_scale_factor;
-		window.height = window.scaled_height*dpi_scale_factor;
+		window.width = window.scaled_width/dpi_scale_factor;
+		window.height = window.scaled_height/dpi_scale_factor;
 	}
 	
 	BOOL ok;
@@ -966,7 +966,7 @@ void os_update() {
 	    assert(ok != 0, "AdjustWindowRectEx failed with error code %lu", GetLastError());
 	
 	    u32 actual_x = update_rect.left;
-	    u32 actual_y = update_rect.top; 
+	    u32 actual_y = screen_height - update_rect.top - window.height;
 	    u32 actual_width = update_rect.right - update_rect.left;
 	    u32 actual_height = update_rect.bottom - update_rect.top;
 	    

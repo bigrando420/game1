@@ -178,9 +178,26 @@ int entry(int argc, char **argv) {
 
 		// mouse pos in world space test
 		{
-			Vector2 pos = screen_to_world();
-			// log("%f, %f", pos.x, pos.y);
-			draw_text(font, sprint(temp, STR("%f %f"), pos.x, pos.y), font_height, pos, v2(0.1, 0.1), COLOR_RED);
+			Vector2 mouse_pos = screen_to_world();
+			// log("%f, %f", mouse_pos.x, mouse_pos.y);
+			// draw_text(font, sprint(temp, STR("%f %f"), mouse_pos.x, mouse_pos.y), font_height, mouse_pos, v2(0.1, 0.1), COLOR_RED);
+
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* en = &world->entities[i];
+				if (en->is_valid) {
+					Sprite* sprite = get_sprite(en->sprite_id);
+					Range2f bounds = range2f_make_bottom_center(sprite->size);
+					bounds = range2f_shift(bounds, en->pos);
+
+					Vector4 col = COLOR_WHITE;
+					col.a = 0.4;
+					if (range2f_contains(bounds, mouse_pos)) {
+						col.a = 1.0;
+					}
+
+					draw_rect(bounds.min, range2f_size(bounds), col);
+				}
+			}
 		}
 
 		// :render
@@ -198,7 +215,8 @@ int entry(int argc, char **argv) {
 						xform         = m4_translate(xform, v3(sprite->size.x * -0.5, 0.0, 0));
 						draw_image_xform(sprite->image, xform, sprite->size, COLOR_WHITE);
 
-						draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);
+						// debug pos 
+						// draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);
 
 						break;
 					}
@@ -232,7 +250,7 @@ int entry(int argc, char **argv) {
 		seconds_counter += delta_t;
 		frame_count += 1;
 		if (seconds_counter > 1.0) {
-			log("fps: %i", frame_count);
+			// log("fps: %i", frame_count);
 			seconds_counter = 0.0;
 			frame_count = 0;
 		}

@@ -36,6 +36,7 @@ void animate_v2_to_target(Vector2* value, Vector2 target, float delta_t, float r
 
 const int tile_width = 8;
 const float entity_selection_radius = 16.0f;
+const float player_pickup_radius = 20.0f;
 
 const int rock_health = 3;
 const int tree_health = 3;
@@ -102,8 +103,14 @@ typedef struct Entity {
 // :entity
 #define MAX_ENTITY_COUNT 1024
 
+typedef struct ItemData {
+	int amount;
+} ItemData; 
+
+// :world
 typedef struct World {
 	Entity entities[MAX_ENTITY_COUNT];
+	ItemData inventory_items[ARCH_MAX];
 } World;
 World* world = 0;
 
@@ -201,6 +208,13 @@ int entry(int argc, char **argv) {
 	assert(font, "Failed loading arial.ttf, %d", GetLastError());
 	const u32 font_height = 48;
 
+	// :init
+
+	// test item adding
+	{
+		world->inventory_items[arch_item_pine_wood].amount = 5;
+	}
+
 	Entity* player_en = entity_create();
 	setup_player(player_en);
 
@@ -292,6 +306,21 @@ int entry(int argc, char **argv) {
 			}
 
 			// draw_rect(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y) + tile_width * -0.5), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5));
+		}
+		
+		// :update entities
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			if (en->is_valid) {
+				// pick up item
+				if (en->is_item) {
+					// TODO - epic physics pickup like arcana
+					if (fabsf(v2_dist(en->pos, player_en->pos)) < player_pickup_radius) {
+						world->inventory_items[en->arch].amount += 1;
+						entity_destroy(en);
+					}
+				}
+			}
 		}
 
 		// clicky click thing

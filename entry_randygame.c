@@ -90,6 +90,14 @@ typedef enum EntityArchetype {
 	ARCH_MAX,
 } EntityArchetype;
 
+SpriteID get_sprite_id_from_archetype(EntityArchetype arch) {
+	switch (arch) {
+		case arch_item_pine_wood: return SPRITE_item_pine_wood; break;
+		case arch_item_rock: return SPRITE_item_rock; break;
+		default: return 0;
+	}
+}
+
 typedef struct Entity {
 	bool is_valid;
 	EntityArchetype arch;
@@ -162,6 +170,11 @@ void setup_item_pine_wood(Entity* en) {
 	en->sprite_id = SPRITE_item_pine_wood;
 	en->is_item = true;
 }
+void setup_item_rock(Entity* en) {
+	en->arch = arch_item_rock;
+	en->sprite_id = SPRITE_item_rock;
+	en->is_item = true;
+}
 
 Vector2 screen_to_world() {
 	float mouse_x = input_frame.mouse_x;
@@ -197,12 +210,13 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
+	sprites[0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/missing_tex.png"), get_heap_allocator()) };
 	sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
 	sprites[SPRITE_tree0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree0.png"), get_heap_allocator()) };
 	sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree1.png"), get_heap_allocator()) };
 	sprites[SPRITE_rock0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/rock0.png"), get_heap_allocator()) };
-	sprites[SPRITE_item_pine_wood] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_rock.png"), get_heap_allocator()) };
-	sprites[SPRITE_item_rock] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_pine_wood.png"), get_heap_allocator()) };
+	sprites[SPRITE_item_pine_wood] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_pine_wood.png"), get_heap_allocator()) };
+	sprites[SPRITE_item_rock] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_rock.png"), get_heap_allocator()) };
 
 	Gfx_Font *font = load_font_from_disk(STR("C:/windows/fonts/arial.ttf"), get_heap_allocator());
 	assert(font, "Failed loading arial.ttf, %d", GetLastError());
@@ -213,6 +227,7 @@ int entry(int argc, char **argv) {
 	// test item adding
 	{
 		world->inventory_items[arch_item_pine_wood].amount = 5;
+		// world->inventory_items[arch_item_rock].amount = 5;
 	}
 
 	Entity* player_en = entity_create();
@@ -323,7 +338,7 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// clicky click thing
+		// :click destroy
 		{
 			Entity* selected_en = world_frame.selected_entity;
 
@@ -345,7 +360,9 @@ int entry(int argc, char **argv) {
 							} break;
 
 							case arch_rock: {
-								// 
+								Entity* en = entity_create();
+								setup_item_rock(en);
+								en->pos = selected_en->pos;
 							} break;
 
 							default: { } break;
@@ -357,7 +374,7 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// :render
+		// :render entities
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
@@ -387,6 +404,51 @@ int entry(int argc, char **argv) {
 
 						break;
 					}
+				}
+			}
+		}
+
+		// do UI rendering
+		{
+			float width = 240.0;
+			float height = 135.0;
+			draw_frame.view = m4_scalar(1.0);
+			draw_frame.projection = m4_make_orthographic_projection(0.0, width, 0.0, height, -1, 10);
+
+			float y_pos = 70.0;
+
+			int item_count = 0;
+			for (int i = 0; i < ARCH_MAX; i++) {
+				ItemData* item = &world->inventory_items[i];
+				if (item->amount > 0) {
+					item_count += 1;
+				}
+			}
+
+			const float icon_thing = 8.0;
+			const float padding = 2.0;
+			float icon_width = icon_thing + padding;
+
+			float entire_thing_width_idk = item_count * icon_width;
+			float x_start_pos = (width/2.0)-(entire_thing_width_idk/2.0) + (icon_width * 0.5);
+
+			int slot_index = 0;
+			for (int i = 0; i < ARCH_MAX; i++) {
+				ItemData* item = &world->inventory_items[i];
+				if (item->amount > 0) {
+
+					float slot_index_offset = slot_index * icon_width;
+
+					Matrix4 xform = m4_scalar(1.0);
+					xform = m4_translate(xform, v3(x_start_pos + slot_index_offset, y_pos, 0.0));
+					xform = m4_translate(xform, v3(-4, -4, 0.0));
+					draw_rect_xform(xform, v2(8, 8), COLOR_BLACK);
+
+					Sprite* sprite = get_sprite(get_sprite_id_from_archetype(i));
+
+					draw_image_xform(sprite->image, xform, get_sprite_size(sprite), COLOR_WHITE);
+
+					slot_index += 1;
 				}
 			}
 		}

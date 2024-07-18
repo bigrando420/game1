@@ -472,123 +472,127 @@ int entry(int argc, char **argv) {
 			draw_frame.view = m4_scalar(1.0);
 			draw_frame.projection = m4_make_orthographic_projection(0.0, width, 0.0, height, -1, 10);
 
-			float y_pos = 70.0;
-
-			int item_count = 0;
-			for (int i = 0; i < ARCH_MAX; i++) {
-				ItemData* item = &world->inventory_items[i];
-				if (item->amount > 0) {
-					item_count += 1;
-				}
-			}
-
-			const float icon_thing = 8.0;
-			float icon_width = icon_thing;
-
-			const int icon_row_count = 8;
-
-			float entire_thing_width_idk = icon_row_count * icon_width;
-			float x_start_pos = (width/2.0)-(entire_thing_width_idk/2.0);
-
-			// bg box rendering thing
+			// :inventory UI
+			if (false)
 			{
-				Matrix4 xform = m4_identity;
-				xform = m4_translate(xform, v3(x_start_pos, y_pos, 0.0));
-				draw_rect_xform(xform, v2(entire_thing_width_idk, icon_width), bg_box_col);
-			}
+				float y_pos = 70.0;
 
-			int slot_index = 0;
-			for (int i = 0; i < ARCH_MAX; i++) {
-				ItemData* item = &world->inventory_items[i];
-				if (item->amount > 0) {
-
-					float slot_index_offset = slot_index * icon_width;
-
-					Matrix4 xform = m4_scalar(1.0);
-					xform = m4_translate(xform, v3(x_start_pos + slot_index_offset, y_pos, 0.0));
-
-					Sprite* sprite = get_sprite(get_sprite_id_from_archetype(i));
-
-					float is_selected_alpha = 0.0;
-
-					Draw_Quad* quad = draw_rect_xform(xform, v2(8, 8), v4(1, 1, 1, 0.2));
-					Range2f icon_box = quad_to_range(*quad);
-					if (range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
-						is_selected_alpha = 1.0;
+				int item_count = 0;
+				for (int i = 0; i < ARCH_MAX; i++) {
+					ItemData* item = &world->inventory_items[i];
+					if (item->amount > 0) {
+						item_count += 1;
 					}
+				}
 
-					Matrix4 box_bottom_right_xform = xform;
+				const float icon_thing = 8.0;
+				float icon_width = icon_thing;
 
-					xform = m4_translate(xform, v3(icon_width * 0.5, icon_width * 0.5, 0.0));
+				const int icon_row_count = 8;
 
-					if (is_selected_alpha == 1.0)
-					{
-						float scale_adjust = 0.3; //0.1 * sin_breathe(os_get_current_time_in_seconds(), 20.0);
-						xform = m4_scale(xform, v3(1 + scale_adjust, 1 + scale_adjust, 1));
-					}
-					{
-						// could also rotate ...
-						// float adjust = PI32 * 2.0 * sin_breathe(os_get_current_time_in_seconds(), 1.0);
-						// xform = m4_rotate_z(xform, adjust);
-					}
-					xform = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, get_sprite_size(sprite).y * -0.5, 0));
-					draw_image_xform(sprite->image, xform, get_sprite_size(sprite), COLOR_WHITE);
+				float entire_thing_width_idk = icon_row_count * icon_width;
+				float x_start_pos = (width/2.0)-(entire_thing_width_idk/2.0);
 
-					// draw_text_xform(font, STR("5"), font_height, box_bottom_right_xform, v2(0.1, 0.1), COLOR_WHITE);
+				// bg box rendering thing
+				{
+					Matrix4 xform = m4_identity;
+					xform = m4_translate(xform, v3(x_start_pos, y_pos, 0.0));
+					draw_rect_xform(xform, v2(entire_thing_width_idk, icon_width), bg_box_col);
+				}
 
-					// tooltip
-					if (is_selected_alpha == 1.0)
-					{
-						Draw_Quad screen_quad = ndc_quad_to_screen_quad(*quad);
-						Range2f screen_range = quad_to_range(screen_quad);
-						Vector2 icon_center = range2f_get_center(screen_range);
+				int slot_index = 0;
+				for (int i = 0; i < ARCH_MAX; i++) {
+					ItemData* item = &world->inventory_items[i];
+					if (item->amount > 0) {
 
-						// icon_center
+						float slot_index_offset = slot_index * icon_width;
+
 						Matrix4 xform = m4_scalar(1.0);
+						xform = m4_translate(xform, v3(x_start_pos + slot_index_offset, y_pos, 0.0));
 
-						// TODO - we're guessing at the Y box size here.
-						// in order to automate this, we would need to move it down below after we do all the element advance things for the text.
-						// ... but then the box would be drawing in front of everyone. So we'd have to do Z sorting.
-						// Solution for now is to just guess at the size and OOGA BOOGA.
-						Vector2 box_size = v2(40, 14);
+						Sprite* sprite = get_sprite(get_sprite_id_from_archetype(i));
 
-						// xform = m4_pivot_box(xform, box_size, PIVOT_top_center);
-						xform = m4_translate(xform, v3(box_size.x * -0.5, -box_size.y - icon_width * 0.5, 0));
-						xform = m4_translate(xform, v3(icon_center.x, icon_center.y, 0));
-						draw_rect_xform(xform, box_size, bg_box_col);
+						float is_selected_alpha = 0.0;
 
-						float current_y_pos = icon_center.y;
-						{
-							string title = get_archetype_pretty_name(i);
-							Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
-							Vector2 draw_pos = icon_center;
-							draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-							draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
-
-							draw_pos = v2_add(draw_pos, v2(0, icon_width * -0.5));
-							draw_pos = v2_add(draw_pos, v2(0, -2.0)); // padding
-
-							draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-
-							current_y_pos = draw_pos.y;
+						Draw_Quad* quad = draw_rect_xform(xform, v2(8, 8), v4(1, 1, 1, 0.2));
+						Range2f icon_box = quad_to_range(*quad);
+						if (range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
+							is_selected_alpha = 1.0;
 						}
 
+						Matrix4 box_bottom_right_xform = xform;
+
+						xform = m4_translate(xform, v3(icon_width * 0.5, icon_width * 0.5, 0.0));
+
+						if (is_selected_alpha == 1.0)
 						{
-							string text = STR("x%i");
-							text = sprint(temp, text, item->amount);
-
-							Gfx_Text_Metrics metrics = measure_text(font, text, font_height, v2(0.1, 0.1));
-							Vector2 draw_pos = v2(icon_center.x, current_y_pos);
-							draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-							draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
-
-							draw_pos = v2_add(draw_pos, v2(0, -2.0)); // padding
-
-							draw_text(font, text, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+							float scale_adjust = 0.3; //0.1 * sin_breathe(os_get_current_time_in_seconds(), 20.0);
+							xform = m4_scale(xform, v3(1 + scale_adjust, 1 + scale_adjust, 1));
 						}
+						{
+							// could also rotate ...
+							// float adjust = PI32 * 2.0 * sin_breathe(os_get_current_time_in_seconds(), 1.0);
+							// xform = m4_rotate_z(xform, adjust);
+						}
+						xform = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, get_sprite_size(sprite).y * -0.5, 0));
+						draw_image_xform(sprite->image, xform, get_sprite_size(sprite), COLOR_WHITE);
+
+						// draw_text_xform(font, STR("5"), font_height, box_bottom_right_xform, v2(0.1, 0.1), COLOR_WHITE);
+
+						// tooltip
+						if (is_selected_alpha == 1.0)
+						{
+							Draw_Quad screen_quad = ndc_quad_to_screen_quad(*quad);
+							Range2f screen_range = quad_to_range(screen_quad);
+							Vector2 icon_center = range2f_get_center(screen_range);
+
+							// icon_center
+							Matrix4 xform = m4_scalar(1.0);
+
+							// TODO - we're guessing at the Y box size here.
+							// in order to automate this, we would need to move it down below after we do all the element advance things for the text.
+							// ... but then the box would be drawing in front of everyone. So we'd have to do Z sorting.
+							// Solution for now is to just guess at the size and OOGA BOOGA.
+							Vector2 box_size = v2(40, 14);
+
+							// xform = m4_pivot_box(xform, box_size, PIVOT_top_center);
+							xform = m4_translate(xform, v3(box_size.x * -0.5, -box_size.y - icon_width * 0.5, 0));
+							xform = m4_translate(xform, v3(icon_center.x, icon_center.y, 0));
+							draw_rect_xform(xform, box_size, bg_box_col);
+
+							float current_y_pos = icon_center.y;
+							{
+								string title = get_archetype_pretty_name(i);
+								Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
+								Vector2 draw_pos = icon_center;
+								draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+								draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
+
+								draw_pos = v2_add(draw_pos, v2(0, icon_width * -0.5));
+								draw_pos = v2_add(draw_pos, v2(0, -2.0)); // padding
+
+								draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+
+								current_y_pos = draw_pos.y;
+							}
+
+							{
+								string text = STR("x%i");
+								text = sprint(temp, text, item->amount);
+
+								Gfx_Text_Metrics metrics = measure_text(font, text, font_height, v2(0.1, 0.1));
+								Vector2 draw_pos = v2(icon_center.x, current_y_pos);
+								draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+								draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
+
+								draw_pos = v2_add(draw_pos, v2(0, -2.0)); // padding
+
+								draw_text(font, text, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+							}
+						}
+
+						slot_index += 1;
 					}
-
-					slot_index += 1;
 				}
 			}
 		}

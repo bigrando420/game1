@@ -115,27 +115,27 @@ Vector2 get_sprite_size(Sprite* sprite) {
 }
 
 typedef enum EntityArchetype {
-	arch_nil = 0,
-	arch_rock = 1,
-	arch_tree = 2,
-	arch_player = 3,
-	arch_item_rock = 4,
-	arch_item_pine_wood = 5,
+	ARCH_nil = 0,
+	ARCH_rock = 1,
+	ARCH_tree = 2,
+	ARCH_player = 3,
+	ARCH_item_rock = 4,
+	ARCH_item_pine_wood = 5,
 	ARCH_MAX,
 } EntityArchetype;
 
 SpriteID get_sprite_id_from_archetype(EntityArchetype arch) {
 	switch (arch) {
-		case arch_item_pine_wood: return SPRITE_item_pine_wood; break;
-		case arch_item_rock: return SPRITE_item_rock; break;
+		case ARCH_item_pine_wood: return SPRITE_item_pine_wood; break;
+		case ARCH_item_rock: return SPRITE_item_rock; break;
 		default: return 0;
 	}
 }
 
 string get_archetype_pretty_name(EntityArchetype arch) {
 	switch (arch) {
-		case arch_item_pine_wood: return STR("Pine Wood");
-		case arch_item_rock: return STR("Rock");
+		case ARCH_item_pine_wood: return STR("Pine Wood");
+		case ARCH_item_rock: return STR("Rock");
 		default: return STR("nil");
 	}
 }
@@ -153,6 +153,7 @@ typedef struct Entity {
 // :entity
 #define MAX_ENTITY_COUNT 1024
 
+// :item
 typedef struct ItemData {
 	int amount;
 } ItemData; 
@@ -196,19 +197,19 @@ void entity_destroy(Entity* entity) {
 }
 
 void setup_player(Entity* en) {
-	en->arch = arch_player;
+	en->arch = ARCH_player;
 	en->sprite_id = SPRITE_player;
 }
 
 void setup_rock(Entity* en) {
-	en->arch = arch_rock;
+	en->arch = ARCH_rock;
 	en->sprite_id = SPRITE_rock0;
 	en->health = rock_health;
 	en->destroyable_world_item = true;
 }
 
 void setup_tree(Entity* en) {
-	en->arch = arch_tree;
+	en->arch = ARCH_tree;
 	en->sprite_id = SPRITE_tree1;
 	// en->sprite_id = SPRITE_tree1;
 	en->health = tree_health;
@@ -216,12 +217,12 @@ void setup_tree(Entity* en) {
 }
 
 void setup_item_pine_wood(Entity* en) {
-	en->arch = arch_item_pine_wood;
+	en->arch = ARCH_item_pine_wood;
 	en->sprite_id = SPRITE_item_pine_wood;
 	en->is_item = true;
 }
 void setup_item_rock(Entity* en) {
-	en->arch = arch_item_rock;
+	en->arch = ARCH_item_rock;
 	en->sprite_id = SPRITE_item_rock;
 	en->is_item = true;
 }
@@ -291,8 +292,8 @@ int entry(int argc, char **argv) {
 
 	// test item adding
 	{
-		world->inventory_items[arch_item_pine_wood].amount = 5;
-		// world->inventory_items[arch_item_rock].amount = 5;
+		world->inventory_items[ARCH_item_pine_wood].amount = 5;
+		// world->inventory_items[ARCH_item_rock].amount = 5;
 	}
 
 	Entity* player_en = entity_create();
@@ -415,7 +416,7 @@ int entry(int argc, char **argv) {
 					if (selected_en->health <= 0) {
 
 						switch (selected_en->arch) {
-							case arch_tree: {
+							case ARCH_tree: {
 								// spawn thing
 								{
 									Entity* en = entity_create();
@@ -424,7 +425,7 @@ int entry(int argc, char **argv) {
 								}
 							} break;
 
-							case arch_rock: {
+							case ARCH_rock: {
 								Entity* en = entity_create();
 								setup_item_rock(en);
 								en->pos = selected_en->pos;

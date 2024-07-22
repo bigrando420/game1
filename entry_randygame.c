@@ -100,13 +100,21 @@ typedef enum SpriteID {
 	SPRITE_rock0,
 	SPRITE_item_rock,
 	SPRITE_item_pine_wood,
+	SPRITE_furnace,
+	SPRITE_workbench,
+	// :sprite
 	SPRITE_MAX,
 } SpriteID;
 // randy: maybe we make this an X macro?? https://chatgpt.com/share/260222eb-2738-4d1e-8b1d-4973a097814d
 Sprite sprites[SPRITE_MAX];
 Sprite* get_sprite(SpriteID id) {
 	if (id >= 0 && id < SPRITE_MAX) {
-		return &sprites[id];
+		Sprite* sprite = &sprites[id];
+		if (sprite->image) {
+			return sprite;
+		} else {
+			return &sprites[0];
+		}
 	}
 	return &sprites[0];
 }
@@ -121,6 +129,8 @@ typedef enum EntityArchetype {
 	ARCH_player = 3,
 	ARCH_item_rock = 4,
 	ARCH_item_pine_wood = 5,
+	ARCH_furnace = 6,
+	// ARCH_workbench = 7,
 	ARCH_MAX,
 } EntityArchetype;
 
@@ -161,6 +171,7 @@ typedef struct ItemData {
 typedef enum UXState {
 	UX_nil,
 	UX_inventory,
+	UX_building,
 } UXState;
 
 // :world
@@ -194,6 +205,13 @@ Entity* entity_create() {
 
 void entity_destroy(Entity* entity) {
 	memset(entity, 0, sizeof(Entity));
+}
+
+// :setup things
+
+void setup_furnace(Entity* en) {
+	en->arch = ARCH_furnace;
+	en->sprite_id = SPRITE_furnace;
 }
 
 void setup_player(Entity* en) {
@@ -283,6 +301,16 @@ int entry(int argc, char **argv) {
 	sprites[SPRITE_rock0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/rock0.png"), get_heap_allocator()) };
 	sprites[SPRITE_item_pine_wood] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_pine_wood.png"), get_heap_allocator()) };
 	sprites[SPRITE_item_rock] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_rock.png"), get_heap_allocator()) };
+	sprites[SPRITE_furnace] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/furnace.png"), get_heap_allocator()) };
+	sprites[SPRITE_workbench] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/workbench.png"), get_heap_allocator()) };
+
+	// @ship debug this off
+	{
+		for (SpriteID i = 0; i < SPRITE_MAX; i++) {
+			Sprite* sprite = &sprites[i];
+			assert(sprite->image, "Sprite was not setup properly");
+		}
+	}
 
 	Gfx_Font *font = load_font_from_disk(STR("C:/windows/fonts/arial.ttf"), get_heap_allocator());
 	assert(font, "Failed loading arial.ttf, %d", GetLastError());
@@ -290,10 +318,14 @@ int entry(int argc, char **argv) {
 
 	// :init
 
-	// test item adding
+	// test stuff
+	// TODO - @ship debug this off
 	{
 		world->inventory_items[ARCH_item_pine_wood].amount = 5;
 		// world->inventory_items[ARCH_item_rock].amount = 5;
+
+		Entity* en = entity_create();
+		setup_furnace(en);
 	}
 
 	Entity* player_en = entity_create();
@@ -611,6 +643,11 @@ int entry(int argc, char **argv) {
 						slot_index += 1;
 					}
 				}
+			}
+		
+			// :building ui
+			{
+				// draw a row of icons for buildable structures
 			}
 		}
 

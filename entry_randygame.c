@@ -1,9 +1,9 @@
-inline float v2_length(Vector2 a) {
-    return sqrt(a.x * a.x + a.y * a.y);
-}
-// randy: is this something that's usually standard in math libraries or am I tripping?
+// things to talk to charlie about
+// - stable z sort?
+// - startup time feels slower now?
+
 inline float v2_dist(Vector2 a, Vector2 b) {
-    return v2_length(v2_sub(a, b));
+  return v2_length(v2_sub(a, b));
 }
 
 #define m4_identity m4_make_scale(v3(1, 1, 1))
@@ -73,6 +73,8 @@ const float entity_selection_radius = 16.0f;
 const float player_pickup_radius = 20.0f;
 const int rock_health = 3;
 const int tree_health = 3;
+const s32 layer_ui = 20;
+const s32 layer_world = 10;
 
 // :global app stuff
 float64 delta_t;
@@ -135,6 +137,7 @@ typedef enum EntityArchetype {
 	ARCH_item_pine_wood = 5,
 	ARCH_furnace = 6,
 	ARCH_workbench = 7,
+	// :arch
 	ARCH_MAX,
 } EntityArchetype;
 
@@ -142,6 +145,7 @@ SpriteID get_sprite_id_from_archetype(EntityArchetype arch) {
 	switch (arch) {
 		case ARCH_item_pine_wood: return SPRITE_item_pine_wood; break;
 		case ARCH_item_rock: return SPRITE_item_rock; break;
+		// :arch
 		default: return 0;
 	}
 }
@@ -150,6 +154,7 @@ string get_archetype_pretty_name(EntityArchetype arch) {
 	switch (arch) {
 		case ARCH_item_pine_wood: return STR("Pine Wood");
 		case ARCH_item_rock: return STR("Rock");
+		// :arch
 		default: return STR("nil");
 	}
 }
@@ -218,6 +223,7 @@ typedef struct WorldFrame {
 	Entity* selected_entity;
 	Matrix4 world_proj;
 	Matrix4 world_view;
+	bool hover_consumed;
 	// :frame state
 } WorldFrame;
 WorldFrame world_frame;
@@ -278,6 +284,14 @@ void setup_item_rock(Entity* en) {
 	en->is_item = true;
 }
 
+void entity_setup(Entity* en, EntityArchetype id) {
+	switch (id) {
+		case ARCH_furnace: setup_furnace(en); break;
+		// :arch
+		default: log_error("missing entity_setup case entry"); break;
+	}
+}
+
 Vector2 get_mouse_pos_in_ndc() {
 	float mouse_x = input_frame.mouse_x;
 	float mouse_y = input_frame.mouse_y;
@@ -329,6 +343,7 @@ void set_world_space() {
 // :func dump
 void do_ui_stuff() {
 	set_screen_space();
+	push_z_layer(layer_ui);
 
 	// "screen space"
 
@@ -504,6 +519,7 @@ void do_ui_stuff() {
 
 				if (range2f_contains(box, get_mouse_pos_in_ndc())) {
 					// if hover, do tooltip, that follows the mouse around
+					world_frame.hover_consumed = true;
 
 					// if click, go into place mode
 					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
@@ -522,24 +538,38 @@ void do_ui_stuff() {
 	// TODO - alpha animation for place mode
 	if (world->ux_state == UX_place_mode)
 	{
-		Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
-
 		// TODO - put this into macro :)
 		set_world_space();
 		{
-			// mouse_pos_world;
+			Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
 			BuildingData building = get_building_data(world->placing_building);
 			Sprite* icon = get_sprite(building.icon);
 
+			Vector2 pos = mouse_pos_world;
+			pos = round_v2_to_tile(pos);
+
 			Matrix4 xform = m4_identity;
-			xform = m4_translate(xform, v3(mouse_pos_world.x, mouse_pos_world.y, 0));
+			xform = m4_translate(xform, v3(pos.x, pos.y, 0));
+
+			// @volatile with entity rendering
+			xform = m4_translate(xform, v3(0, tile_width * -0.5, 0));
 			xform = m4_translate(xform, v3(get_sprite_size(icon).x * -0.5, 0.0, 0));
+
 			draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
+
+			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+				Entity* en = entity_create();
+				entity_setup(en, building.to_build);
+				en->pos = pos;
+				world->ux_state = 0;
+			}
 		}
 		set_screen_space();
 	}
 
 	set_world_space();
+	pop_z_layer();
 }
 
 int entry(int argc, char **argv) {
@@ -626,6 +656,9 @@ int entry(int argc, char **argv) {
 		last_time = now;
 		os_update();
 
+		// :frame :update
+		draw_frame.enable_z_sorting = true;
+
 		world_frame.world_proj = m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
 		// :camera
 		{
@@ -637,6 +670,7 @@ int entry(int argc, char **argv) {
 			world_frame.world_view = m4_mul(world_frame.world_view, m4_make_scale(v3(1.0/zoom, 1.0/zoom, 1.0)));
 		}
 		set_world_space();
+		push_z_layer(layer_world);
 
 		Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
 		int mouse_tile_x = world_pos_to_tile_pos(mouse_pos_world.x);
@@ -644,6 +678,8 @@ int entry(int argc, char **argv) {
 
 		do_ui_stuff();
 
+		// select entity
+		if (!world_frame.hover_consumed)
 		{
 			// log("%f, %f", mouse_pos_world.x, mouse_pos_world.y);
 			// draw_text(font, sprint(temp, STR("%f %f"), mouse_pos_world.x, mouse_pos_world.y), font_height, mouse_pos_world, v2(0.1, 0.1), COLOR_RED);
@@ -753,6 +789,7 @@ int entry(int argc, char **argv) {
 						if (en->is_item) {
 							xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_current_time_in_seconds(), 5.0), 0));
 						}
+						// @volatile with entity placement
 						xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));
 						xform         = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
 						xform         = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, 0.0, 0));

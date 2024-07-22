@@ -28,7 +28,7 @@ int entry(int argc, char **argv) {
 	
 	render_atlas_if_not_yet_rendered(font, 32, 'A');
 	
-	seed_for_random = os_get_current_cycle_count();
+	seed_for_random = rdtsc();
 	
 	const float64 fps_limit = 69000;
 	const float64 min_frametime = 1.0 / fps_limit;
@@ -36,7 +36,7 @@ int entry(int argc, char **argv) {
 	Matrix4 camera_view = m4_scalar(1.0);
 	
 	float64 last_time = os_get_current_time_in_seconds();
-	while (!window.should_close) tm_scope_cycles("Frame") {
+	while (!window.should_close) tm_scope("Frame") {
 		reset_temporary_storage();
 		
 		float64 now = os_get_current_time_in_seconds();
@@ -47,7 +47,7 @@ int entry(int argc, char **argv) {
 			delta = now - last_time;
 		}
 		last_time = now;
-		tm_scope_cycles("os_update") {
+		tm_scope("os_update") {
 			os_update(); 
 		}
 		
@@ -87,8 +87,19 @@ int entry(int argc, char **argv) {
 		camera_view = m4_translate(camera_view, v3(v2_expand(cam_move), 0));
 		draw_frame.view = camera_view;
 		
+		local_persist bool do_enable_z_sorting = false;
+		draw_frame.enable_z_sorting = do_enable_z_sorting;
+		if (is_key_just_pressed('Z')) do_enable_z_sorting = !do_enable_z_sorting;
+		
+		if (do_enable_z_sorting) {
+			push_window_scissor(
+				v2(input_frame.mouse_x-256, input_frame.mouse_y-256), 
+				v2(input_frame.mouse_x+256, input_frame.mouse_y+256)
+			);
+		}
+		
 		seed_for_random = 69;
-		for (u64 i = 0; i < 100000; i++) {
+		for (u64 i = 0; i < 30000; i++) {
 			float32 aspect = (float32)window.width/(float32)window.height;
 			float min_x = -aspect;
 			float max_x = aspect;
@@ -98,19 +109,22 @@ int entry(int argc, char **argv) {
 			float x = get_random_float32() * (max_x-min_x) + min_x;
 			float y = get_random_float32() * (max_y-min_y) + min_y;
 			
+			push_z_layer((s32)(y*100));
 			draw_image(bush_image, v2(x, y), v2(0.1, 0.1), COLOR_WHITE);
+			pop_z_layer();
 		}
-		seed_for_random = os_get_current_cycle_count();
-		
+		seed_for_random = rdtsc();
 		
 		Matrix4 hammer_xform = m4_scalar(1.0);
 		hammer_xform         = m4_rotate_z(hammer_xform, (f32)now);
 		hammer_xform         = m4_translate(hammer_xform, v3(-.25f, -.25f, 0));
+		push_z_layer(1000001);
 		draw_image_xform(hammer_image, hammer_xform, v2(.5f, .5f), COLOR_RED);
+		pop_z_layer();
 		
 		Vector2 hover_position = v2_rotate_point_around_pivot(v2(-.5, -.5), v2(0, 0), (f32)now);
 		Vector2 local_pivot = v2(.125f, .125f);
-		draw_rect(v2_sub(hover_position, local_pivot), v2(.25f, .25f), v4((sin(now)+1.0)/2.0, 1.0, 0.0, 1.0));
+		draw_circle(v2_sub(hover_position, local_pivot), v2(.25f, .25f), v4((sin(now)+1.0)/2.0, 1.0, 0.0, 1.0));
 		
 		draw_image(bush_image, v2(0.65, 0.65), v2(0.2*sin(now), 0.2*sin(now)), COLOR_WHITE);
 		
@@ -127,7 +141,11 @@ int entry(int argc, char **argv) {
 		
 		if (show) draw_image(atlas->image, v2(-1.6, -1), v2(4, 4), COLOR_WHITE);
 		
-		tm_scope_cycles("gfx_update") {
+		if (do_enable_z_sorting) {
+			pop_window_scissor();
+		}
+		
+		tm_scope("gfx_update") {
 			gfx_update();
 		}
 		

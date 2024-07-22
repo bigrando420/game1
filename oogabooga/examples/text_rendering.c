@@ -10,11 +10,11 @@ int entry(int argc, char **argv) {
 	window.clear_color = hex_to_rgba(0x6495EDff);
 	
 	Gfx_Font *font = load_font_from_disk(STR("C:/windows/fonts/arial.ttf"), get_heap_allocator());
-	assert(font, "Failed loading arial.ttf, %d", GetLastError());
+	assert(font, "Failed loading arial.ttf");
 	
 	const u32 font_height = 48;
 	
-	while (!window.should_close) tm_scope_cycles("Frame") {
+	while (!window.should_close) tm_scope("Frame") {
 		reset_temporary_storage();
 		
 		// Text is easiest to deal with if our projection matches window pixel size, because
@@ -47,11 +47,11 @@ int entry(int argc, char **argv) {
 		// ... So we have to justify that bottom_left according to text metrics
 		Vector2 justified = v2_sub(bottom_left, hello_metrics.functional_pos_min);
 		
+		// If we wanted to center it:
+		// justified = v2_sub(justified, v2_divf(hello_metrics.functional_size, 2));
+		
 		draw_text(font, hello_str, font_height, justified,  v2(1, 1), COLOR_WHITE);
 		
-		// If for example we wanted to center the text, we would do the same but then add
-		// the text size divided by two:
-		// justified = v2_add(justified, v2_divf(hello_metrics.functional_size, 2.0));
 		
 		local_persist bool show_bounds = false;
 		if (is_key_just_pressed('E')) show_bounds = !show_bounds;

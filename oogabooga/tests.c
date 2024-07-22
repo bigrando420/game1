@@ -212,11 +212,12 @@ void test_thread_proc1(Thread* t) {
 
 void test_threads() {
 	
-	Thread* t = os_make_thread(test_thread_proc1, get_heap_allocator());
-	os_start_thread(t);
+	Thread t;
+	os_thread_init(&t, test_thread_proc1);
+	os_thread_start(&t);
 	os_sleep(20);
 	print("This should be printed in middle of thread execution\n");
-	os_join_thread(t);
+	os_thread_join(&t);
 	print("Thread is joined\n");
 	
 	Mutex_Handle m = os_make_mutex();
@@ -333,8 +334,7 @@ void test_strings() {
 	    // Test handling of empty strings
 	    string empty_str = STR("");
 	    string concat_empty_str = string_concat(empty_str, empty_str, heap);
-	    assert(concat_empty_str.count == 0, "Failed: string_concat with empty strings");
-	    dealloc_string(heap, concat_empty_str);
+	    assert(concat_empty_str.count == 0 && !concat_empty_str.data, "Failed: string_concat with empty strings");
 	
 	    // Test very large strings (performance test)
 	    string large_str1 = alloc_string(heap, 1024 * 1024);
@@ -395,7 +395,7 @@ void test_strings() {
     assert(memcmp(builder.buffer, expected_result, builder.count) == 0, "Failed: string_builder_printf");
     
     // Test string_builder_get_string
-    string result_str = string_builder_get_string(&builder);
+    string result_str = string_builder_get_string(builder);
     assert(result_str.count == builder.count, "Failed: string_builder_get_string");
     assert(memcmp(result_str.data, builder.buffer, result_str.count) == 0, "Failed: string_builder_get_string");
     
@@ -405,7 +405,7 @@ void test_strings() {
     // Test handling of empty builder
     String_Builder empty_builder;
     string_builder_init(&empty_builder, heap);
-    result_str = string_builder_get_string(&empty_builder);
+    result_str = string_builder_get_string(empty_builder);
     assert(result_str.count == 0, "Failed: empty builder handling");
     dealloc(heap, empty_builder.buffer);
     
@@ -441,6 +441,15 @@ void test_strings() {
     assert(multi_append_builder.count == strlen(expected_result), "Failed: multiple appends");
     assert(memcmp(multi_append_builder.buffer, expected_result, multi_append_builder.count) == 0, "Failed: multiple appends");
     dealloc(heap, multi_append_builder.buffer);
+    
+    
+    
+    string cheese_hello = STR("HeCHEESElloCHEESE, WorCHEESEld!");
+    string hello = string_replace_all(cheese_hello, STR("CHEESE"), STR(""), heap);
+    assert(strings_match(hello, STR("Hello, World!")), "Failed: string_replace");
+    string hello_balls = string_replace_all(hello, STR("Hello"), STR("Greetings"), heap);
+    hello_balls        = string_replace_all(hello_balls, STR("World"), STR("Balls"), heap);
+    assert(strings_match(hello_balls, STR("Greetings, Balls!")), "Failed: string_replace");
 }
 
 void test_file_io() {
@@ -768,65 +777,65 @@ void test_simd() {
     memset(samples_a, 2, _TEST_NUM_SAMPLES*sizeof(float));
     memset(samples_b, 2, _TEST_NUM_SAMPLES*sizeof(float));
     
-    u64 start = os_get_current_cycle_count();
+    u64 start = rdtsc();
     
     for (u64 i = 0; i < _TEST_NUM_SAMPLES; i += 16) {
     	simd_mul_float32_512_aligned(&samples_a[i], &samples_b[i], &samples_a[i]);
     }
     
-    u64 end = os_get_current_cycle_count();
+    u64 end = rdtsc();
     u64 cycles = end-start;
     print("simd 512 float32 mul took %llu cycles\n", cycles);
     
     memset(samples_a, 2, _TEST_NUM_SAMPLES*sizeof(float));
     memset(samples_b, 2, _TEST_NUM_SAMPLES*sizeof(float));
     
-    start = os_get_current_cycle_count();
+    start = rdtsc();
     
     for (u64 i = 0; i < _TEST_NUM_SAMPLES; i += 8) {
     	simd_mul_float32_256_aligned(&samples_a[i], &samples_b[i], &samples_a[i]);
     }
     
-    end = os_get_current_cycle_count();
+    end = rdtsc();
     cycles = end-start;
     print("simd 256 float32 mul took %llu cycles\n", cycles);
     
     memset(samples_a, 2, _TEST_NUM_SAMPLES*sizeof(float));
     memset(samples_b, 2, _TEST_NUM_SAMPLES*sizeof(float));
     
-    start = os_get_current_cycle_count();
+    start = rdtsc();
     
     for (u64 i = 0; i < _TEST_NUM_SAMPLES; i += 4) {
     	simd_mul_float32_128_aligned(&samples_a[i], &samples_b[i], &samples_a[i]);
     }
     
-    end = os_get_current_cycle_count();
+    end = rdtsc();
     cycles = end-start;
     print("simd 128 float32 mul took %llu cycles\n", cycles);
     
     memset(samples_a, 2, _TEST_NUM_SAMPLES*sizeof(float));
     memset(samples_b, 2, _TEST_NUM_SAMPLES*sizeof(float));
     
-    start = os_get_current_cycle_count();
+    start = rdtsc();
     
     for (u64 i = 0; i < _TEST_NUM_SAMPLES; i += 2) {
     	simd_mul_float32_64(&samples_a[i], &samples_b[i], &samples_a[i]);
     }
     
-    end = os_get_current_cycle_count();
+    end = rdtsc();
     cycles = end-start;
     print("simd 64 float32 mul took %llu cycles\n", cycles);
     
     memset(samples_a, 2, _TEST_NUM_SAMPLES*sizeof(float));
     memset(samples_b, 2, _TEST_NUM_SAMPLES*sizeof(float));
     
-    start = os_get_current_cycle_count();
+    start = rdtsc();
     
     for (u64 i = 0; i < _TEST_NUM_SAMPLES; i += 1) {
     	samples_a[i] = samples_a[i] + samples_b[i];
     }
     
-    end = os_get_current_cycle_count();
+    end = rdtsc();
     cycles = end-start;
     print("NO SIMD float32 mul took %llu cycles\n", cycles);
 }
@@ -1012,13 +1021,13 @@ void test_linmath() {
     assert(mixed_v4_result.x == 1.0f && mixed_v4_result.y == 2.0f && mixed_v4_result.z == 3.0f && mixed_v4_result.w == 4.0f, "Mixed Vector4 scalar multiplication failed");
     
     
-    float v2_dot = v2_dot_product(v2(2, 7), v2(3, 2));
-    float v3_dot = v3_dot_product(v3(2, 7, 2), v3(3, 2, 9));
-    float v4_dot = v4_dot_product(v4(2, 7, 6, 1), v4(3, 2, 1, 4));
+    float v2_dot_product = v2_dot(v2(2, 7), v2(3, 2));
+    float v3_dot_product = v3_dot(v3(2, 7, 2), v3(3, 2, 9));
+    float v4_dot_product = v4_dot(v4(2, 7, 6, 1), v4(3, 2, 1, 4));
     
-    assert(floats_roughly_match(v2_dot, 20), "Failed: v2_dot_product");
-	assert(floats_roughly_match(v3_dot, 38), "Failed: v3_dot_product");
-	assert(floats_roughly_match(v4_dot, 30), "Failed: v4_dot_product");
+    assert(floats_roughly_match(v2_dot_product, 20), "Failed: v2_dot");
+	assert(floats_roughly_match(v3_dot_product, 38), "Failed: v3_dot");
+	assert(floats_roughly_match(v4_dot_product, 30), "Failed: v4_dot");
 }
 void test_hash_table() {
     Hash_Table table = make_hash_table(string, int, get_heap_allocator());
@@ -1062,7 +1071,7 @@ void test_hash_table() {
 
 void test_random_distribution() {
     int bins[NUM_BINS] = {0};
-    seed_for_random = os_get_current_cycle_count();
+    seed_for_random = rdtsc();
     for (int i = 0; i < NUM_SAMPLES; i++) {
         f32 rand_val = get_random_float32();
         int bin = (int)(rand_val * NUM_BINS);
@@ -1125,21 +1134,91 @@ void test_mutex() {
 
 	const int num_threads = 100;
 
-	Thread **threads = alloc(allocator, sizeof(Thread*)*num_threads);
+	Thread *threads = alloc(allocator, sizeof(Thread)*num_threads);
 	for (u64 i = 0; i < num_threads; i++) {
-		threads[i] = os_make_thread(mutex_test_increment_counter, allocator);
-		threads[i]->data = &data;
+		os_thread_init(&threads[i], mutex_test_increment_counter);
+		threads[i].data = &data;
 	}
 	for (u64 i = 0; i < num_threads; i++) {
-    	os_start_thread(threads[i]);
+    	os_thread_start(&threads[i]);
 	}
 	for (u64 i = 0; i < num_threads; i++) {
-    	os_join_thread(threads[i]);
+    	os_thread_join(&threads[i]);
 	}
 
     assert(data.counter == num_threads * MUTEX_TEST_TASK_COUNT, "Failed: Counter does not match expected value after threading tasks");
 
     mutex_destroy(&data.mutex);
+}
+
+int compare_draw_quads(const void *a, const void *b) {
+    return ((Draw_Quad*)a)->z-((Draw_Quad*)b)->z;
+}
+void test_sort() {
+    
+    int num_samples = 100;
+    u64 id_bits = 21;
+    u64 item_count = 5000;
+    
+    f64 seconds = 0;
+    u64 cycles = 0;
+    
+    Draw_Quad *items = alloc(get_heap_allocator(), (item_count * 2) * sizeof(Draw_Quad));
+    Draw_Quad *buffer = items + item_count;
+
+    for (int a = 0; a < num_samples; a++) {
+        
+        for (u64 i = 0; i < item_count; i++) {
+            if (i % 2 == 0) items[i].z = get_random_int_in_range(0, pow(2, id_bits) / 2);
+            else items[i].z = i;
+        }
+    
+        u64 item_size = sizeof(Draw_Quad);
+        u64 sort_value_offset_in_item = offsetof(Draw_Quad, z);
+    
+        float64 start_seconds = os_get_current_time_in_seconds();
+        u64 start_cycles = rdtsc();
+        radix_sort(items, buffer, item_count, item_size, sort_value_offset_in_item, id_bits);
+        u64 end_cycles = rdtsc();
+        float64 end_seconds = os_get_current_time_in_seconds();
+    
+        for (u64 i = 1; i < item_count; i++) {
+            assert(items[i].z >= items[i-1].z, "Failed: not correctly sorted");
+        }
+        
+        seconds += end_seconds - start_seconds;
+        cycles += end_cycles - start_cycles;
+    }
+    
+    print("Radix sort took on average %llu cycles and %.2f ms\n", cycles / num_samples, (seconds * 1000.0) / (float64)num_samples);
+
+	seconds = 0;
+    cycles = 0;
+	for (int a = 0; a < num_samples; a++) {
+        
+        for (u64 i = 0; i < item_count; i++) {
+            if (i % 2 == 0) items[i].z = get_random_int_in_range(0, pow(2, id_bits) / 2);
+            else items[i].z = i;
+        }
+    
+        u64 item_size = sizeof(Draw_Quad);
+        u64 sort_value_offset_in_item = offsetof(Draw_Quad, z);
+    
+        float64 start_seconds = os_get_current_time_in_seconds();
+        u64 start_cycles = rdtsc();
+        merge_sort(items, buffer, item_count, item_size, compare_draw_quads);
+        u64 end_cycles = rdtsc();
+        float64 end_seconds = os_get_current_time_in_seconds();
+    
+        for (u64 i = 1; i < item_count; i++) {
+            assert(items[i].z >= items[i-1].z, "Failed: not correctly sorted");
+        }
+        
+        seconds += end_seconds - start_seconds;
+        cycles += end_cycles - start_cycles;
+    }
+    
+    print("Merge sort took on average %llu cycles and %.2f ms\n", cycles / num_samples, (seconds * 1000.0) / (float64)num_samples);
 }
 void oogabooga_run_tests() {
 	
@@ -1180,5 +1259,9 @@ void oogabooga_run_tests() {
 	test_mutex();
 	print("OK!\n");
 	
+	print("Testing radix sort... ");
+	test_sort();
+	print("OK!\n");
 	
+	print("All tests ok!\n");
 }

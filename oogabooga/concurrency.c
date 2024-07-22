@@ -3,6 +3,13 @@ typedef struct Spinlock Spinlock;
 typedef struct Mutex Mutex;
 typedef struct Binary_Semaphore Binary_Semaphore;
 
+// These are probably your best friend for sync-free multi-processing.
+inline bool compare_and_swap_8(uint8_t *a, uint8_t b, uint8_t old);
+inline bool compare_and_swap_16(uint16_t *a, uint16_t b, uint16_t old);
+inline bool compare_and_swap_32(uint32_t *a, uint32_t b, uint32_t old);
+inline bool compare_and_swap_64(uint64_t *a, uint64_t b, uint64_t old);
+inline bool compare_and_swap_bool(bool *a, bool b, bool old);
+
 ///
 // Spinlock "primitive"
 // Like a mutex but it eats up the entire core while waiting.
@@ -39,13 +46,16 @@ void spinlock_init(Spinlock *l) {
 void spinlock_acquire_or_wait(Spinlock* l) {
 	while (true) {
         bool expected = false;
+        MEMORY_BARRIER;
         if (compare_and_swap_bool(&l->locked, true, expected)) {
         	MEMORY_BARRIER;
             return;
         }
         while (l->locked) {
             // spinny boi
+            MEMORY_BARRIER;
         }
+        MEMORY_BARRIER;
     }
 }
 // Returns true on aquired, false if timeout seconds reached
@@ -53,6 +63,7 @@ bool spinlock_acquire_or_wait_timeout(Spinlock* l, f64 timeout_seconds) {
     f64 start = os_get_current_time_in_seconds();
 	while (true) {
         bool expected = false;
+        MEMORY_BARRIER;
         if (compare_and_swap_bool(&l->locked, true, expected)) {
         	MEMORY_BARRIER;
             return true;
@@ -60,15 +71,17 @@ bool spinlock_acquire_or_wait_timeout(Spinlock* l, f64 timeout_seconds) {
         while (l->locked) {
             // spinny boi
             if ((os_get_current_time_in_seconds()-start) >= timeout_seconds) return false;
+            MEMORY_BARRIER;
         }
     }
     return true;
 }
 void spinlock_release(Spinlock* l) {
 	bool expected = true;
-    bool success = compare_and_swap_bool(&l->locked, false, expected);
-    assert(success, "This thread should have acquired the spinlock but compare_and_swap failed");
     MEMORY_BARRIER;
+    bool success = compare_and_swap_bool(&l->locked, false, expected);
+    MEMORY_BARRIER;
+    assert(success, "This thread should have acquired the spinlock but compare_and_swap failed");
 }
 
 

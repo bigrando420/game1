@@ -83,6 +83,13 @@ u64 format_string_to_buffer(char* buffer, u64 count, const char* fmt, va_list ar
     
     return bufp - buffer;
 }
+u64 format_string_to_buffer_va(char* buffer, u64 count, const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	u64 r = format_string_to_buffer(buffer, count, fmt, args);
+	va_end(args);
+	return r;
+}
 string sprint_null_terminated_string_va_list_to_buffer(const char *fmt, va_list args, void* buffer, u64 buffer_size) {
     u64 formatted_length = format_string_to_buffer((char*)buffer, buffer_size, fmt, args);
     
@@ -160,7 +167,7 @@ string tprintf(const char *fmt, ...) {
 	return s;
 }
 
-// print for 'string' and printf for 'char*'
+// prints for 'string' and printf for 'char*'
 
 #define PRINT_BUFFER_SIZE 4096
 // Avoids all and any allocations but overhead in speed and memory.
@@ -223,57 +230,8 @@ typedef void(*Logger_Proc)(Log_Level level, string s);
 
 #define log(...) LOG_BASE(LOG_INFO, __VA_ARGS__)
 
-void default_logger(Log_Level level, string s) {
-	switch (level) {
-		case LOG_VERBOSE: print("[VERBOSE]: %s\n", s); break;
-		case LOG_INFO:    print("[INFO]:    %s\n", s); break;
-		case LOG_WARNING: print("[WARNING]: %s\n", s); break;
-		case LOG_ERROR:   print("[ERROR]:   %s\n", s); break;
-		case LOG_LEVEL_COUNT: break;
-	}
-}
 
 
-typedef struct String_Builder {
-	union {
-		struct {u64 count;u8 *buffer;};
-		string result;
-	};
-	u64 buffer_capacity;
-	Allocator allocator;
-} String_Builder;
-
-
-void string_builder_reserve(String_Builder *b, u64 required_capacity) {
-	if (b->buffer_capacity >= required_capacity) return;
-	
-	u64 new_capacity = max(b->buffer_capacity*2, (u64)(required_capacity*1.5));
-	u8 *new_buffer = alloc(b->allocator, new_capacity);
-	if (b->buffer) {
-		memcpy(new_buffer, b->buffer, b->count);
-		dealloc(b->allocator, b->buffer);
-	}
-	b->buffer = new_buffer;
-	b->buffer_capacity = new_capacity;
-}
-void string_builder_init_reserve(String_Builder *b, u64 reserved_capacity, Allocator allocator) {
-	reserved_capacity = max(reserved_capacity, 128);
-	b->allocator = allocator;
-	b->buffer_capacity = 0;
-	b->buffer = 0;
-	string_builder_reserve(b, reserved_capacity);
-	b->count = 0;
-}
-void string_builder_init(String_Builder *b, Allocator allocator) {
-	string_builder_init_reserve(b, 128, allocator);
-}
-void string_builder_append(String_Builder *b, string s) {
-	assert(b->allocator.proc, "String_Builder is missing allocator");
-	string_builder_reserve(b, b->count+s.count);
-	
-	memcpy(b->buffer+b->count, s.data, s.count);
-	b->count += s.count;
-}
 
 void string_builder_prints(String_Builder *b, string fmt, ...) {
 	assert(b->allocator.proc, "String_Builder is missing allocator");
@@ -318,8 +276,3 @@ void string_builder_printf(String_Builder *b, const char *fmt, ...) {
                            string:  string_builder_prints, \
                            default: string_builder_printf \
                           )(__VA_ARGS__)
-
-string string_builder_get_string(String_Builder *b) {
-	return b->result;
-}
-

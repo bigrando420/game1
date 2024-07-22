@@ -1,3 +1,108 @@
+## v0.01.001 - Spacial audio, custom shading, scissor boxing
+	- Audio
+		- Implemented spacial audio playback
+			Simply set player->position (it's in ndc space (-1 to 1), see audio_test.c)
+			Save some computation with player->disable_spacialization = true
+		- Added position overloads for play_one_clip
+			play_one_audio_clip_source_at_position(source, pos)
+			play_one_audio_clip_at_position(path, pos)
+		- Implemented volume control with player->volume
+	- Renderer
+		- Implemented custom shading
+			- Recompile shader with your extension to the pixel stage with
+				shader_recompile_with_extension(source, cbuffer_size)
+			- pass a buffer to the shader constant buffer at b0 with
+				draw_frame.cbuffer = &my_cbuffer_data
+			- pass userdata in the form of Vector4's
+				define VERTEX_2D_USER_DATA_COUNT for the amount of Vertex4 userdata's to be part of each vertex.
+				You can set the userdata in Draw_Quad->userdata which is a Vector4[VERTEX_2D_USER_DATA_COUNT].
+				See custom_shading.c example.
+		- Added window scissor boxing (screen space)
+			push_window_scissor(min, max);
+			pop_window_scissor();
+		- Added draw_circle() and draw_circle_xform in drawing.c
+		- Made an example for custom shading (oogabooga/examples/custom_shading.c)
+		- Embed default shader into codebase & always compile
+		- Added draw_line(p0, p1, width, color)
+		- Implemented culling of quads out of view
+		- Fixed culling bug where big rectangles that overlapped the screen but had all corners outside the screen would get culled.
+	- Misc
+		- Improved text measure and added a better explanation for it in font.c.
+		- Added some useful Vector procedures:
+			vx_length()
+			vx_normalize()
+			vx_average()
+			vx_dot()
+			vx_abs()
+			vx_cross()
+		- added os_get_file_size_from_Path()
+		- Some simple restructuring of existing code
+	- Made heap corruption detection more robust
+
+## v0.01.000 - AUDIO!
+	- Added audio sources
+		- File stream sources & Fully decoded sources
+		- 16-bit int & 32-bit float support
+		- WAV & OGG support (in-house wav decoder, stb_vorbis for ogg)
+		- Usage:
+			bool audio_open_source_stream(*src, path, allocator)
+			bool audio_open_source_load(*src, path, allocator)
+			void audio_source_destroy(*src)
+	- Added audio playback
+		- The simple way:
+			play_one_audio_clip_source(source);
+			play_one_audio_clip(path);
+		- With Audio_Player:
+			audio_player_get_one();
+			audio_player_release(*player);
+			audio_player_set_state(*player, state);
+			audio_player_set_time_stamp(*player, time_in_seconds);
+			audio_player_set_progression_factor(*player, factor);
+			audio_player_get_time_stamp(*player);
+			audio_player_get_current_progression_factor(*player);
+			audio_player_set_source(*player, src, bool retain_progression_factor);
+			audio_player_clear_source(*player);
+			audio_player_set_looping(*player, bool looping);
+	- Added some basic features in the audio system
+		- Conversion & resampling between audio formats
+		- Automatically detects new default device
+		- Small fade in pause/play for less noise from sudden changes in playback buffer
+	- Added a audio_test.c example
+	- More OS procuedres
+		- os_file_set_pos(file, pos)
+		- os_file_get_pos(file)
+		- os_file_get_size(file)
+		- os_get_stack_trace(allocator)
+	- Misc
+		- Win32 audio impl
+		- Link to more win32 junk
+		- Make default logger thread safe
+		- Rename tm_scope_cycles & tm_scope_cycles_xxx -> tm_scope & tm_scope_xxx
+		- Minor cleanups
+		- Fix Vector types align woopsies
+		- Fix bug in heap allocator which caused internal heap corruption
+		- Maybe fixed spinlocks with memory barriers?
+		- Bunch of more asserts & better detection for heap allocation issues
+		- lerpf, lerpi, smerpf, smerpi
+		- Failed asserts now prints the stack trace.
+		
+
+## v0.00.005 - Z layers
+
+Renderer:
+	- Added optional Z-sorting
+		- Either set quad->z or call push_z_layer(s64) (and pop_z_layer())
+		- Enable with draw_frame.enable_z_sorting = true
+	- Refactored the quad buffering to just be a growing quad buffer rather than a linked list of quad blocks. Your CPU will be thankful.
+	- Fixed crashing when D3D11 DEBUG flag fails in ID3D11CreateDevice, and instead log a descriptive error then continue as usual
+	
+Misc:
+	- removed gfx_impl_legacy_opengl.c
+	- Sorting procedures
+		- merge_sort()
+		- radix_sort()
+	- sorting tests
+
 ## v0.00.004 - Custom logging, more concurrency & bugfixing
 
 Concurrency:

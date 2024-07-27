@@ -154,6 +154,7 @@ string get_archetype_pretty_name(EntityArchetype arch) {
 	switch (arch) {
 		case ARCH_item_pine_wood: return STR("Pine Wood");
 		case ARCH_item_rock: return STR("Rock");
+		case ARCH_furnace: return STR("Furnace");
 		// :arch
 		default: return STR("nil");
 	}
@@ -168,6 +169,7 @@ typedef struct Entity {
 	int health;
 	bool destroyable_world_item;
 	bool is_item;
+	bool workbench_thing;
 } Entity;
 // :entity
 #define MAX_ENTITY_COUNT 1024
@@ -204,9 +206,9 @@ typedef enum UXState {
 	UX_inventory,
 	UX_building,
 	UX_place_mode,
+	UX_workbench,
 } UXState;
 
-// :world
 typedef struct World {
 	Entity entities[MAX_ENTITY_COUNT];
 	ItemData inventory_items[ARCH_MAX];
@@ -216,6 +218,8 @@ typedef struct World {
 	float building_alpha;
 	float building_alpha_target;
 	BuildingID placing_building;
+	Entity* open_workbench;
+	// :world
 } World;
 World* world = 0;
 
@@ -251,6 +255,7 @@ void entity_destroy(Entity* entity) {
 void setup_furnace(Entity* en) {
 	en->arch = ARCH_furnace;
 	en->sprite_id = SPRITE_furnace;
+	en->workbench_thing = true;
 }
 
 void setup_player(Entity* en) {
@@ -568,6 +573,49 @@ void do_ui_stuff() {
 		set_screen_space();
 	}
 
+	// :workbench ui
+	if (world->ux_state == UX_workbench && world->open_workbench) {
+
+		Vector2 section_size = v2(50.0, 70.0);
+		float padding = 10.0;
+		float text_padding = 4.0;
+
+		float ui_width_thing = section_size.x * 2.0 + padding;
+
+		float x0 = screen_width * 0.5 - ui_width_thing * 0.5;
+		float y0 = screen_height * 0.5 - section_size.y * 0.5;
+		{
+			Matrix4 xform = m4_identity;
+			xform = m4_translate(xform, v3(x0, y0, 0));
+			draw_rect_xform(xform, section_size, COLOR_BLACK);
+
+			// title
+			{
+				string title = get_archetype_pretty_name(world->open_workbench->arch);
+				Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
+
+				float x1 = x0 + section_size.x * 0.5;
+				float y1 = y0 + section_size.y;
+
+				Vector2 draw_pos = v2(x1, y1);
+				draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+				draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
+				draw_pos.y -= text_padding;
+
+				draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+			}
+		}
+		
+		x0 += section_size.x;
+		x0 += padding;
+
+		{
+			Matrix4 xform = m4_identity;
+			xform = m4_translate(xform, v3(x0, y0, 0));
+			draw_rect_xform(xform, section_size, COLOR_BLACK);
+		}
+	}
+
 	set_world_space();
 	pop_z_layer();
 }
@@ -687,7 +735,7 @@ int entry(int argc, char **argv) {
 			float smallest_dist = INFINITY;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
-				if (en->is_valid && en->destroyable_world_item) {
+				if (en->is_valid && (en->destroyable_world_item || en->workbench_thing)) {
 					Sprite* sprite = get_sprite(en->sprite_id);
 
 					int entity_tile_x = world_pos_to_tile_pos(en->pos.x);
@@ -739,38 +787,49 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// :click destroy
+		// :selection stuff
 		{
 			Entity* selected_en = world_frame.selected_entity;
 
-			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+			// :click destroy
+			if (selected_en && selected_en->destroyable_world_item) {
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-				if (selected_en) {
 					selected_en->health -= 1;
 					if (selected_en->health <= 0) {
 
-						switch (selected_en->arch) {
-							case ARCH_tree: {
-								// spawn thing
-								{
+							switch (selected_en->arch) {
+								case ARCH_tree: {
+									// spawn thing
+									{
+										Entity* en = entity_create();
+										setup_item_pine_wood(en);
+										en->pos = selected_en->pos;
+									}
+								} break;
+
+								case ARCH_rock: {
 									Entity* en = entity_create();
-									setup_item_pine_wood(en);
+									setup_item_rock(en);
 									en->pos = selected_en->pos;
-								}
-							} break;
+								} break;
 
-							case ARCH_rock: {
-								Entity* en = entity_create();
-								setup_item_rock(en);
-								en->pos = selected_en->pos;
-							} break;
+								default: { } break;
+							}
 
-							default: { } break;
+							entity_destroy(selected_en);
 						}
+				}
+			}
 
-						entity_destroy(selected_en);
-					}
+			// :interact
+			if (selected_en && selected_en->workbench_thing) {
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+
+					world->ux_state = UX_workbench;
+					world->open_workbench = selected_en;
 				}
 			}
 		}

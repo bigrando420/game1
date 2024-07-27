@@ -128,41 +128,47 @@ Vector2 get_sprite_size(Sprite* sprite) {
 	return (Vector2) { sprite->image->width, sprite->image->height };
 }
 
+typedef enum ItemID {
+	ITEM_nil,
+	ITEM_rock,
+	ITEM_pine_wood,
+	// :item
+	ITEM_MAX,
+} ItemID;
+
+typedef struct InventoryItemData {
+	int amount;
+} InventoryItemData; 
+
 typedef enum EntityArchetype {
 	ARCH_nil = 0,
 	ARCH_rock = 1,
 	ARCH_tree = 2,
 	ARCH_player = 3,
-	ARCH_item_rock = 4,
-	ARCH_item_pine_wood = 5,
+	ARCH_item = 4,
+	// 5
 	ARCH_furnace = 6,
 	ARCH_workbench = 7,
 	// :arch
 	ARCH_MAX,
 } EntityArchetype;
 
-SpriteID get_sprite_id_from_archetype(EntityArchetype arch) {
-	switch (arch) {
-		case ARCH_item_pine_wood: return SPRITE_item_pine_wood; break;
-		case ARCH_item_rock: return SPRITE_item_rock; break;
-		// :arch
-		default: return 0;
-	}
-}
-
-string get_archetype_pretty_name(EntityArchetype arch) {
-	switch (arch) {
-		case ARCH_item_pine_wood: return STR("Pine Wood");
-		case ARCH_item_rock: return STR("Rock");
-		case ARCH_furnace: return STR("Furnace");
-		// :arch
-		default: return STR("nil");
-	}
+typedef struct ItemData {
+	string pretty_name;
+	// :recipe crafting
+	EntityArchetype for_structure;
+	ItemID output;
+	ItemID input[8];
+} ItemData;
+ItemData item_data[ITEM_MAX];
+ItemData get_item_data(ItemID id) {
+	return item_data[id];
 }
 
 typedef struct Entity {
 	bool is_valid;
 	EntityArchetype arch;
+	ItemID item_id;
 	Vector2 pos;
 	bool render_sprite;
 	SpriteID sprite_id;
@@ -173,11 +179,6 @@ typedef struct Entity {
 } Entity;
 // :entity
 #define MAX_ENTITY_COUNT 1024
-
-// :item
-typedef struct ItemData {
-	int amount;
-} ItemData; 
 
 // :building resource
 // NOTE, a "resource" is a thing that we set up during startup, and is constant.
@@ -211,7 +212,7 @@ typedef enum UXState {
 
 typedef struct World {
 	Entity entities[MAX_ENTITY_COUNT];
-	ItemData inventory_items[ARCH_MAX];
+	InventoryItemData inventory_items[ITEM_MAX];
 	UXState ux_state;
 	float inventory_alpha;
 	float inventory_alpha_target;
@@ -231,6 +232,22 @@ typedef struct WorldFrame {
 	// :frame state
 } WorldFrame;
 WorldFrame world_frame;
+
+SpriteID get_sprite_id_from_item(ItemID item) {
+	switch (item) {
+		case ITEM_pine_wood: return SPRITE_item_pine_wood; break;
+		case ITEM_rock: return SPRITE_item_rock; break;
+		default: return 0;
+	}
+}
+
+string get_archetype_pretty_name(EntityArchetype arch) {
+	switch (arch) {
+		case ARCH_furnace: return STR("Furnace");
+		// :arch
+		default: return STR("nil");
+	}
+}
 
 Entity* entity_create() {
 	Entity* entity_found = 0;
@@ -278,15 +295,11 @@ void setup_tree(Entity* en) {
 	en->destroyable_world_item = true;
 }
 
-void setup_item_pine_wood(Entity* en) {
-	en->arch = ARCH_item_pine_wood;
-	en->sprite_id = SPRITE_item_pine_wood;
+void setup_item(Entity* en, ItemID item_id) {
+	en->arch = ARCH_item;
+	en->sprite_id = get_sprite_id_from_item(item_id);
 	en->is_item = true;
-}
-void setup_item_rock(Entity* en) {
-	en->arch = ARCH_item_rock;
-	en->sprite_id = SPRITE_item_rock;
-	en->is_item = true;
+	en->item_id = item_id;
 }
 
 void entity_setup(Entity* en, EntityArchetype id) {
@@ -368,7 +381,7 @@ void do_ui_stuff() {
 
 			int item_count = 0;
 			for (int i = 0; i < ARCH_MAX; i++) {
-				ItemData* item = &world->inventory_items[i];
+				InventoryItemData* item = &world->inventory_items[i];
 				if (item->amount > 0) {
 					item_count += 1;
 				}
@@ -390,8 +403,9 @@ void do_ui_stuff() {
 			}
 
 			int slot_index = 0;
-			for (int i = 0; i < ARCH_MAX; i++) {
-				ItemData* item = &world->inventory_items[i];
+			for (int i = 0; i < ITEM_MAX; i++) {
+				ItemData item_data = get_item_data(i);
+				InventoryItemData* item = &world->inventory_items[i];
 				if (item->amount > 0) {
 
 					float slot_index_offset = slot_index * icon_width;
@@ -399,7 +413,7 @@ void do_ui_stuff() {
 					Matrix4 xform = m4_scalar(1.0);
 					xform = m4_translate(xform, v3(x_start_pos + slot_index_offset, y_pos, 0.0));
 
-					Sprite* sprite = get_sprite(get_sprite_id_from_archetype(i));
+					Sprite* sprite = get_sprite(get_sprite_id_from_item(i));
 
 					float is_selected_alpha = 0.0;
 
@@ -451,7 +465,7 @@ void do_ui_stuff() {
 
 						float current_y_pos = icon_center.y;
 						{
-							string title = get_archetype_pretty_name(i);
+							string title = item_data.pretty_name;
 							Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
 							Vector2 draw_pos = icon_center;
 							draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
@@ -604,6 +618,10 @@ void do_ui_stuff() {
 
 				draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
 			}
+
+			// todo - draw all the recipes from the workbench
+			// output item (result)
+			// bunch of input items with counts
 		}
 		
 		x0 += section_size.x;
@@ -659,12 +677,18 @@ int entry(int argc, char **argv) {
 		buildings[BUILDING_workbench] = (BuildingData){ .to_build=ARCH_workbench, .icon=SPRITE_workbench };
 	}
 
+	// :item data resource setup
+	{
+		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), };
+		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), };
+	}
+
 	// :init
 
 	// test stuff
 	// TODO - @ship debug this off
 	{
-		world->inventory_items[ARCH_item_pine_wood].amount = 5;
+		world->inventory_items[ITEM_pine_wood].amount = 5;
 		// world->inventory_items[ARCH_item_rock].amount = 5;
 
 		Entity* en = entity_create();
@@ -776,11 +800,11 @@ int entry(int argc, char **argv) {
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
-				// pick up item
+				// pickup item
 				if (en->is_item) {
 					// TODO - epic physics pickup like arcana
 					if (fabsf(v2_dist(en->pos, player_en->pos)) < player_pickup_radius) {
-						world->inventory_items[en->arch].amount += 1;
+						world->inventory_items[en->item_id].amount += 1;
 						entity_destroy(en);
 					}
 				}
@@ -804,14 +828,14 @@ int entry(int argc, char **argv) {
 									// spawn thing
 									{
 										Entity* en = entity_create();
-										setup_item_pine_wood(en);
+										setup_item(en, ITEM_pine_wood);
 										en->pos = selected_en->pos;
 									}
 								} break;
 
 								case ARCH_rock: {
 									Entity* en = entity_create();
-									setup_item_rock(en);
+									setup_item(en, ITEM_rock);
 									en->pos = selected_en->pos;
 								} break;
 

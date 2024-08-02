@@ -12,6 +12,10 @@ Vector2 range2f_get_center(Range2f r) {
 	return (Vector2) { (r.max.x - r.min.x) * 0.5 + r.min.x, (r.max.y - r.min.y) * 0.5 + r.min.y };
 }
 
+Range2f range2f_make_bottom_right(Vector2 pos, Vector2 size) {
+  return (Range2f){pos, v2_add(pos, size)};
+}
+
 // ^^^ engine changes
 
 // the scuff zone
@@ -731,7 +735,7 @@ void do_ui_stuff() {
 							// ...
 						}
 					}
-
+					
 					string txt = STR("3/5");
 					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
 					float center_pos = bottom_left_right_pane.x + section_size.x * 0.5;
@@ -749,12 +753,54 @@ void do_ui_stuff() {
 					y0 -= 2.0f; // padding @cleanup
 				}
 
+				// craft button
+				{
+					Vector2 size = v2(section_size.x * 0.8, 6.0);
+
+					x0 = bottom_left_right_pane.x + (section_size.x - size.x) * 0.5;
+					y0 = bottom_left_right_pane.y;
+					y0 += 5.0f; // padding from bottom @cleanup
+
+					Range2f btn_range = range2f_make_bottom_right(v2(x0, y0), size);
+					Vector4 col = v4(0.5, 0.5, 0.5, 0.5);
+					if (range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
+						col = COLOR_RED;
+						world_frame.hover_consumed = true;
+						// TODO - where do we put the state for the animation of the button?
+						// Either just manually rip it via the App state, or some kind of hash string thing that's probably overcomplicated as shit.
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						}
+					}
+					draw_rect(v2(x0, y0), size, col);
+
+					string txt = STR("CRAFT");
+					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
+					float center_pos = bottom_left_right_pane.x + section_size.x * 0.5;
+					Vector2 draw_pos = v2(center_pos, y0 + size.y * 0.5);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
+
+					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+				}
+
 			} else {
 				// select item first text
+				y0 += section_size.y * 0.5;
+				{
+					string title = STR("Select Item to Craft");
+					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
+
+					Vector2 draw_pos = v2(x0 + section_size.x * 0.5, y0);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
+
+					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+				}
 			}
-
-
 		}
+
+		world_frame.hover_consumed = true;
 	}
 
 	set_world_space();

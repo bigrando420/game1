@@ -140,6 +140,11 @@ typedef struct InventoryItemData {
 	int amount;
 } InventoryItemData; 
 
+typedef struct ItemAmount {
+	ItemID id;
+	int amount;
+} ItemAmount; 
+
 typedef enum EntityArchetype {
 	ARCH_nil = 0,
 	ARCH_rock = 1,
@@ -153,16 +158,26 @@ typedef enum EntityArchetype {
 	ARCH_MAX,
 } EntityArchetype;
 
+#define MAX_RECIPE_INGREDIENTS 8
 typedef struct ItemData {
 	string pretty_name;
 	// :recipe crafting
 	EntityArchetype for_structure;
-	ItemID output;
-	ItemID input[8];
+	ItemAmount crafting_recipe[MAX_RECIPE_INGREDIENTS];
 } ItemData;
 ItemData item_data[ITEM_MAX];
 ItemData get_item_data(ItemID id) {
 	return item_data[id];
+}
+int get_crafting_recipe_count(ItemData item_data) {
+	int count = 0;
+	for (int i = 0; i < MAX_RECIPE_INGREDIENTS; i++) {
+		if (item_data.crafting_recipe[i].id == 0) {
+			break;
+		}
+		count += 1;
+	}
+	return count;
 }
 
 typedef struct Entity {
@@ -220,7 +235,8 @@ typedef struct World {
 	float building_alpha_target;
 	BuildingID placing_building;
 	Entity* open_workbench;
-	// :world
+	ItemID selected_crafting_item;
+	// :world :state
 } World;
 World* world = 0;
 
@@ -591,10 +607,10 @@ void do_ui_stuff() {
 	if (world->ux_state == UX_workbench && world->open_workbench) {
 
 		Vector2 section_size = v2(50.0, 70.0);
-		float padding = 10.0;
-		float text_padding = 4.0;
+		float gap_between_panels = 10.0;
+		float text_height_pad = 4.0;
 
-		float ui_width_thing = section_size.x * 2.0 + padding;
+		float ui_width_thing = section_size.x * 2.0 + gap_between_panels;
 
 		float x0 = screen_width * 0.5 - ui_width_thing * 0.5;
 		float y0 = screen_height * 0.5 - section_size.y * 0.5;
@@ -604,33 +620,140 @@ void do_ui_stuff() {
 			draw_rect_xform(xform, section_size, COLOR_BLACK);
 
 			// title
+			float x1 = x0;
+			float y1 = y0 + section_size.y;
 			{
 				string title = get_archetype_pretty_name(world->open_workbench->arch);
 				Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
 
-				float x1 = x0 + section_size.x * 0.5;
-				float y1 = y0 + section_size.y;
-
-				Vector2 draw_pos = v2(x1, y1);
+				float center_pos = x0 + section_size.x * 0.5;
+				Vector2 draw_pos = v2(center_pos, y1);
 				draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
 				draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
-				draw_pos.y -= text_padding;
+				draw_pos.y -= text_height_pad;
 
 				draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+
+				y1 = draw_pos.y; // TODO - workie?
+				y1 -= text_height_pad;
+				// y1 -= 20.0;
 			}
 
-			// todo - draw all the recipes from the workbench
+			Vector2 item_icon_size = v2(8, 8);
+
+			y1 -= item_icon_size.y;
+
+			// draw all item recipes
+			for (int i = 1; i < ITEM_MAX; i++) {
+				ItemData data = get_item_data(i);
+				if (get_crafting_recipe_count(data)) {
+					Matrix4 xform = m4_identity;
+					xform = m4_translate(xform, v3(x1, y1, 0));
+
+					Vector4 col = COLOR_WHITE;
+					if (world->selected_crafting_item == i) {
+						col = COLOR_RED;
+					}
+
+					Draw_Quad* quad = draw_image_xform(get_sprite(get_sprite_id_from_item(i))->image, xform, item_icon_size, col);
+					Range2f icon_box = quad_to_range(*quad);
+					if (range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
+						// ...
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							world->selected_crafting_item = i;
+						}
+					}
+				}
+				
+				x1 += item_icon_size.x;
+			}
 			// output item (result)
 			// bunch of input items with counts
 		}
 		
 		x0 += section_size.x;
-		x0 += padding;
+		x0 += gap_between_panels;
+		Vector2 bottom_left_right_pane = v2(x0, y0);
+		Vector2 top_left_right_pane = v2(x0, y0 + section_size.y);
 
+		// right pane
 		{
 			Matrix4 xform = m4_identity;
 			xform = m4_translate(xform, v3(x0, y0, 0));
 			draw_rect_xform(xform, section_size, COLOR_BLACK);
+
+			if (world->selected_crafting_item) {
+				ItemData selected_item_data = get_item_data(world->selected_crafting_item);
+
+				// title of item
+				y0 += section_size.y;
+				{
+					string title = selected_item_data.pretty_name;
+					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
+
+					float center_pos = x0 + section_size.x * 0.5;
+					Vector2 draw_pos = v2(center_pos, y0);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
+					draw_pos.y -= text_height_pad;
+
+					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+
+					y0 = draw_pos.y; // TODO - workie?
+					y0 -= text_height_pad;
+					// y1 -= 20.0;
+				}
+
+				y0 = bottom_left_right_pane.y + 30.0; // @cleanup
+
+				// list out the ingredients
+				for (int i = 0; i < get_crafting_recipe_count(selected_item_data); i++) {
+					ItemAmount item_amount = selected_item_data.crafting_recipe[i];
+					ItemData item_data = get_item_data(item_amount.id);
+
+					Vector2 element_size = v2(section_size.x * 0.8, 6.0);
+
+					x0 = bottom_left_right_pane.x + (section_size.x - element_size.x) * 0.5;
+
+					// icon
+					{
+						float item_icon_length = element_size.y * 0.8;
+
+						float x1 = bottom_left_right_pane.x + section_size.x * 0.5 - element_size.y;
+						float y1 = y0 + (item_icon_length - element_size.y) * -0.5;
+
+						Matrix4 xform = m4_identity;
+						xform = m4_translate(xform, v3(x1, y1, 0));
+						Draw_Quad* quad = draw_image_xform(get_sprite(get_sprite_id_from_item(item_amount.id))->image, xform, v2(item_icon_length, item_icon_length), COLOR_WHITE);
+						Range2f icon_box = quad_to_range(*quad);
+						if (range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
+							// ...
+						}
+					}
+
+					string txt = STR("3/5");
+					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
+					float center_pos = bottom_left_right_pane.x + section_size.x * 0.5;
+					Vector2 draw_pos = v2(center_pos, y0 + element_size.y * 0.5);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0, 0.5)));
+
+					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+
+					// y0 += metrics.visual_size.y;
+
+					draw_rect(v2(x0, y0), element_size, v4(0.5, 0.5, 0.5, 0.5));
+					y0 -= element_size.y;
+
+					y0 -= 2.0f; // padding @cleanup
+				}
+
+			} else {
+				// select item first text
+			}
+
+
 		}
 	}
 
@@ -679,8 +802,8 @@ int entry(int argc, char **argv) {
 
 	// :item data resource setup
 	{
-		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), };
-		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), };
+	item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .crafting_recipe={ {ITEM_pine_wood, 2} } };
+		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} } };
 	}
 
 	// :init

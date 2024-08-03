@@ -195,8 +195,10 @@ typedef struct Entity {
 	bool destroyable_world_item;
 	bool is_item;
 	bool workbench_thing;
+	ItemID current_crafting_item;
+	int current_crafting_amount;
+	// :entity
 } Entity;
-// :entity
 #define MAX_ENTITY_COUNT 1024
 
 // :building resource
@@ -379,6 +381,8 @@ void set_world_space() {
 }
 
 // :func dump
+
+// :ui
 void do_ui_stuff() {
 	set_screen_space();
 	push_z_layer(layer_ui);
@@ -575,8 +579,7 @@ void do_ui_stuff() {
 
 	// :placement mode
 	// TODO - alpha animation for place mode
-	if (world->ux_state == UX_place_mode)
-	{
+	if (world->ux_state == UX_place_mode) {
 		// TODO - put this into macro :)
 		set_world_space();
 		{
@@ -609,6 +612,7 @@ void do_ui_stuff() {
 
 	// :workbench ui
 	if (world->ux_state == UX_workbench && world->open_workbench) {
+		Entity* workbench_en = world->open_workbench;
 
 		Vector2 section_size = v2(50.0, 70.0);
 		float gap_between_panels = 10.0;
@@ -627,7 +631,7 @@ void do_ui_stuff() {
 			float x1 = x0;
 			float y1 = y0 + section_size.y;
 			{
-				string title = get_archetype_pretty_name(world->open_workbench->arch);
+				string title = get_archetype_pretty_name(workbench_en->arch);
 				Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
 
 				float center_pos = x0 + section_size.x * 0.5;
@@ -713,8 +717,8 @@ void do_ui_stuff() {
 
 				// list out the ingredients
 				for (int i = 0; i < get_crafting_recipe_count(selected_item_data); i++) {
-					ItemAmount item_amount = selected_item_data.crafting_recipe[i];
-					ItemData item_data = get_item_data(item_amount.id);
+					ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
+					ItemData ingredient_item_data = get_item_data(ingredient_amount.id);
 
 					Vector2 element_size = v2(section_size.x * 0.8, 6.0);
 
@@ -729,14 +733,15 @@ void do_ui_stuff() {
 
 						Matrix4 xform = m4_identity;
 						xform = m4_translate(xform, v3(x1, y1, 0));
-						Draw_Quad* quad = draw_image_xform(get_sprite(get_sprite_id_from_item(item_amount.id))->image, xform, v2(item_icon_length, item_icon_length), COLOR_WHITE);
+						Draw_Quad* quad = draw_image_xform(get_sprite(get_sprite_id_from_item(ingredient_amount.id))->image, xform, v2(item_icon_length, item_icon_length), COLOR_WHITE);
 						Range2f icon_box = quad_to_range(*quad);
 						if (range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
 							// ...
 						}
 					}
-					
-					string txt = STR("3/5");
+
+					InventoryItemData inv_item = world->inventory_items[ingredient_amount.id];
+					string txt = tprint("%i/%i", inv_item.amount, ingredient_amount.amount);
 					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
 					float center_pos = bottom_left_right_pane.x + section_size.x * 0.5;
 					Vector2 draw_pos = v2(center_pos, y0 + element_size.y * 0.5);
@@ -761,17 +766,37 @@ void do_ui_stuff() {
 					y0 = bottom_left_right_pane.y;
 					y0 += 5.0f; // padding from bottom @cleanup
 
+					// check for all ingredients met
+					bool has_enough_for_crafting = true;
+					for (int i = 0; i < get_crafting_recipe_count(selected_item_data); i++) {
+						ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
+						if (ingredient_amount.amount > world->inventory_items[ingredient_amount.id].amount) {
+							has_enough_for_crafting = false;
+							break;
+						}
+					}
+
 					Range2f btn_range = range2f_make_bottom_right(v2(x0, y0), size);
 					Vector4 col = v4(0.5, 0.5, 0.5, 0.5);
-					if (range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
+					if (has_enough_for_crafting && range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
 						col = COLOR_RED;
 						world_frame.hover_consumed = true;
 						// TODO - where do we put the state for the animation of the button?
 						// Either just manually rip it via the App state, or some kind of hash string thing that's probably overcomplicated as shit.
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							// :craft!
+							workbench_en->current_crafting_item = world->selected_crafting_item;
+							workbench_en->current_crafting_amount += 1;
+							// remove ingredients from inventory
+							for (int i = 0; i < get_crafting_recipe_count(selected_item_data); i++) {
+								ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
+								world->inventory_items[ingredient_amount.id].amount -= ingredient_amount.amount;
+								assert(world->inventory_items[ingredient_amount.id].amount >= 0, "removed too many items. the check above must have failed!");
+							}
 						}
 					}
+					// todo - disable button with has_enough_for_crafting
 					draw_rect(v2(x0, y0), size, col);
 
 					string txt = STR("CRAFT");
@@ -801,6 +826,11 @@ void do_ui_stuff() {
 		}
 
 		world_frame.hover_consumed = true;
+	}
+
+	if (world->ux_state != UX_nil && is_key_just_pressed(KEY_ESCAPE)) {
+		consume_key_just_pressed(KEY_ESCAPE);
+		world->ux_state = 0;
 	}
 
 	set_world_space();
@@ -1060,11 +1090,6 @@ int entry(int argc, char **argv) {
 					}
 				}
 			}
-		}
-
-		// @ship debug don't do this lol
-		if (is_key_just_pressed(KEY_ESCAPE)) {
-			window.should_close = true;
 		}
 
 		Vector2 input_axis = v2(0, 0);

@@ -181,6 +181,7 @@ typedef enum EntityArchetype {
 } EntityArchetype;
 
 #define MAX_RECIPE_INGREDIENTS 8
+// :item
 typedef struct ItemData {
 	string pretty_name;
 	// :recipe crafting
@@ -283,9 +284,11 @@ SpriteID get_sprite_id_from_item(ItemID item) {
 	}
 }
 
+// TODO - probs move this into an ArchetypeData thing ??
 string get_archetype_pretty_name(EntityArchetype arch) {
 	switch (arch) {
 		case ARCH_furnace: return STR("Furnace");
+		case ARCH_workbench: return STR("Workbench");
 		// :arch
 		default: return STR("nil");
 	}
@@ -314,6 +317,12 @@ void entity_destroy(Entity* entity) {
 void setup_furnace(Entity* en) {
 	en->arch = ARCH_furnace;
 	en->sprite_id = SPRITE_furnace;
+	en->workbench_thing = true;
+}
+
+void setup_workbench(Entity* en) {
+	en->arch = ARCH_workbench;
+	en->sprite_id = SPRITE_workbench;
 	en->workbench_thing = true;
 }
 
@@ -347,6 +356,7 @@ void setup_item(Entity* en, ItemID item_id) {
 void entity_setup(Entity* en, EntityArchetype id) {
 	switch (id) {
 		case ARCH_furnace: setup_furnace(en); break;
+		case ARCH_workbench: setup_workbench(en); break;
 		// :arch
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -644,6 +654,7 @@ void do_ui_stuff() {
 
 		float x0 = screen_width * 0.5 - ui_width_thing * 0.5;
 		float y0 = screen_height * 0.5 - section_size.y * 0.5;
+		// left pane
 		{
 			Matrix4 xform = m4_identity;
 			xform = m4_translate(xform, v3(x0, y0, 0));
@@ -676,7 +687,7 @@ void do_ui_stuff() {
 			// draw all item recipes
 			for (int i = 1; i < ITEM_MAX; i++) {
 				ItemData data = get_item_data(i);
-				if (get_crafting_recipe_count(data)) {
+				if (data.for_structure == workbench_en->arch && get_crafting_recipe_count(data)) {
 					Matrix4 xform = m4_identity;
 					xform = m4_translate(xform, v3(x1, y1, 0));
 
@@ -694,12 +705,9 @@ void do_ui_stuff() {
 							world->selected_crafting_item = i;
 						}
 					}
+					x1 += item_icon_size.x;
 				}
-				
-				x1 += item_icon_size.x;
 			}
-			// output item (result)
-			// bunch of input items with counts
 		}
 		
 		x0 += section_size.x;
@@ -910,8 +918,8 @@ int entry(int argc, char **argv) {
 			data->craft_length = 2.0;
 		}
 
-		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .crafting_recipe={ {ITEM_pine_wood, 2} } };
-		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} } };
+		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} } };
+		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} } };
 	}
 
 	// :init

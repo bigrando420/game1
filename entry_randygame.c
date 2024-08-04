@@ -20,6 +20,17 @@ Range2f range2f_make_bottom_right(Vector2 pos, Vector2 size) {
 
 // the scuff zone
 
+// CONFIGURATION can be RELEASE or DEBUG, depending on build
+// TODO
+// #if CONFIGURATION == RELEASE
+// 	#define GAME_RELEASE
+// #endif
+// #if CONFIGURATION == RELEASE
+
+// :config
+
+// #define DEV_TESTING
+
 float float_alpha(float x, float min, float max) {
 	float res = (x-min) / (max-min);
 	res = clamp(res, 0.0, 1.0);
@@ -940,8 +951,8 @@ int entry(int argc, char **argv) {
 
 	// :init
 
-	// test stuff
-	// TODO - @ship debug this off
+	// :test stuff
+	#if defined(DEV_TESTING)
 	{
 		world->inventory_items[ITEM_pine_wood].amount = 50;
 		world->inventory_items[ITEM_rock].amount = 50;
@@ -949,6 +960,7 @@ int entry(int argc, char **argv) {
 		Entity* en = entity_create();
 		setup_furnace(en);
 	}
+	#endif
 
 	Entity* player_en = entity_create();
 	setup_player(player_en);

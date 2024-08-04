@@ -130,6 +130,7 @@ typedef enum SpriteID {
 	SPRITE_item_pine_wood,
 	SPRITE_furnace,
 	SPRITE_workbench,
+	SPRITE_research_station,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -176,6 +177,7 @@ typedef enum EntityArchetype {
 	// 5
 	ARCH_furnace = 6,
 	ARCH_workbench = 7,
+	ARCH_research_station = 8,
 	// :arch
 	ARCH_MAX,
 } EntityArchetype;
@@ -222,12 +224,14 @@ typedef struct Entity {
 } Entity;
 #define MAX_ENTITY_COUNT 1024
 
-// :building resource
+// building resource
 // NOTE, a "resource" is a thing that we set up during startup, and is constant.
 typedef enum BuildingID {
 	BUILDING_nil,
 	BUILDING_furnace,
 	BUILDING_workbench,
+	BUILDING_research_station,
+	// :building resource
 	BUILDING_MAX,
 } BuildingID;
 typedef struct BuildingData {
@@ -289,7 +293,6 @@ string get_archetype_pretty_name(EntityArchetype arch) {
 	switch (arch) {
 		case ARCH_furnace: return STR("Furnace");
 		case ARCH_workbench: return STR("Workbench");
-		// :arch
 		default: return STR("nil");
 	}
 }
@@ -320,10 +323,16 @@ void setup_furnace(Entity* en) {
 	en->workbench_thing = true;
 }
 
+
 void setup_workbench(Entity* en) {
 	en->arch = ARCH_workbench;
 	en->sprite_id = SPRITE_workbench;
 	en->workbench_thing = true;
+}
+
+void setup_research_station(Entity* en) {
+	en->arch = ARCH_research_station;
+	en->sprite_id = SPRITE_research_station;
 }
 
 void setup_player(Entity* en) {
@@ -357,6 +366,7 @@ void entity_setup(Entity* en, EntityArchetype id) {
 	switch (id) {
 		case ARCH_furnace: setup_furnace(en); break;
 		case ARCH_workbench: setup_workbench(en); break;
+		case ARCH_research_station: setup_research_station(en); break;
 		// :arch
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -882,22 +892,27 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
-	sprites[0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/missing_tex.png"), get_heap_allocator()) };
-	sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
-	sprites[SPRITE_tree0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree0.png"), get_heap_allocator()) };
-	sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree1.png"), get_heap_allocator()) };
-	sprites[SPRITE_rock0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/rock0.png"), get_heap_allocator()) };
-	sprites[SPRITE_item_pine_wood] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_pine_wood.png"), get_heap_allocator()) };
-	sprites[SPRITE_item_rock] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_rock.png"), get_heap_allocator()) };
-	sprites[SPRITE_furnace] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/furnace.png"), get_heap_allocator()) };
-	sprites[SPRITE_workbench] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/workbench.png"), get_heap_allocator()) };
-
-	// @ship debug this off
+	// :sprite setup
 	{
-		for (SpriteID i = 0; i < SPRITE_MAX; i++) {
-			Sprite* sprite = &sprites[i];
-			assert(sprite->image, "Sprite was not setup properly");
+		sprites[0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/missing_tex.png"), get_heap_allocator()) };
+		sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
+		sprites[SPRITE_tree0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree0.png"), get_heap_allocator()) };
+		sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree1.png"), get_heap_allocator()) };
+		sprites[SPRITE_rock0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/rock0.png"), get_heap_allocator()) };
+		sprites[SPRITE_item_pine_wood] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_pine_wood.png"), get_heap_allocator()) };
+		sprites[SPRITE_item_rock] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_rock.png"), get_heap_allocator()) };
+		sprites[SPRITE_furnace] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/furnace.png"), get_heap_allocator()) };
+		sprites[SPRITE_workbench] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/workbench.png"), get_heap_allocator()) };
+		sprites[SPRITE_research_station] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/research_station.png"), get_heap_allocator()) };
+
+		#if CONFIGURATION == DEBUG
+		{
+			for (SpriteID i = 0; i < SPRITE_MAX; i++) {
+				Sprite* sprite = &sprites[i];
+				assert(sprite->image, "Sprite was not setup properly");
+			}
 		}
+		#endif
 	}
 
 	font = load_font_from_disk(STR("C:/windows/fonts/arial.ttf"), get_heap_allocator());
@@ -908,6 +923,7 @@ int entry(int argc, char **argv) {
 		// buildings[0] = 
 		buildings[BUILDING_furnace] = (BuildingData){ .to_build=ARCH_furnace, .icon=SPRITE_furnace };
 		buildings[BUILDING_workbench] = (BuildingData){ .to_build=ARCH_workbench, .icon=SPRITE_workbench };
+		buildings[BUILDING_research_station] = (BuildingData){ .to_build=ARCH_research_station, .icon=SPRITE_research_station };
 	}
 
 	// :item data resource setup

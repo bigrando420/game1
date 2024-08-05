@@ -1380,15 +1380,31 @@ int entry(int argc, char **argv) {
 
 		Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
 		int mouse_tile_x = world_pos_to_tile_pos(mouse_pos_world.x);
-		int mouse_tile_y = world_pos_to_tile_pos(mouse_pos_world.y);
+		int mouse_tile_y = world_pos_to_tile_pos(mouse_pos_world.y + tile_width * -0.5); // offset to y-center mouse on tile. 
 
 		do_ui_stuff();
 
-		// select entity
 		if (!world_frame.hover_consumed)
 		{
-			// log("%f, %f", mouse_pos_world.x, mouse_pos_world.y);
-			// draw_text(font, sprint(temp, STR("%f %f"), mouse_pos_world.x, mouse_pos_world.y), font_height, mouse_pos_world, v2(0.1, 0.1), COLOR_RED);
+			// :mouse pos debug tool
+			log("%f, %f", mouse_pos_world.x, mouse_pos_world.y);
+			draw_text(font, sprint(temp, STR("%f %f"), mouse_pos_world.x, mouse_pos_world.y), font_height, mouse_pos_world, v2(0.1, 0.1), COLOR_RED);
+
+			// :entity box debug tool
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* en = &world->entities[i];
+				if (en->is_valid) {
+					Sprite* sprite = get_sprite(en->sprite_id);
+					Range2f bounds = range2f_make_bottom_center(get_sprite_size(sprite));
+					bounds = range2f_shift(bounds, en->pos);
+					Vector4 col = COLOR_BLACK;
+					col.a = 0.4;
+					if (range2f_contains(bounds, mouse_pos_world)) {
+						col.a = 1.0;
+					}
+					draw_rect(bounds.min, range2f_size(bounds), col);
+				}
+			}
 
 			float smallest_dist = INFINITY;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -1426,12 +1442,13 @@ int entry(int argc, char **argv) {
 						Vector4 col = v4(0.1, 0.1, 0.1, 0.1);
 						float x_pos = x * tile_width;
 						float y_pos = y * tile_width;
-						draw_rect(v2(x_pos + tile_width * -0.5, y_pos + tile_width * -0.5), v2(tile_width, tile_width), col);
+						draw_rect(v2(x_pos + tile_width * -0.5, y_pos), v2(tile_width, tile_width), col);
 					}
 				}
 			}
 
-			// draw_rect(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y) + tile_width * -0.5), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5));
+			// :mouse tile hover debug tool
+			draw_rect(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y)), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5));
 		}
 		
 		// :update entities
@@ -1559,18 +1576,22 @@ int entry(int argc, char **argv) {
 						}
 						// @volatile with entity placement
 						xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));
-						xform         = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
+						xform         = m4_translate(xform, v3(en->pos.x, en->pos.y + (tile_width * 0.5), 0));
 						xform         = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, 0.0, 0));
 
+						// Please update the "colorchange-on-hover" feature. (I changed it to green.)
+						// The center of the "colorchange-on-hover" around entity has to be
+						// entity position (x, y + (entity_height * 0.5)) 
+						// assuming entity position is the middle of its feet/bottom border.
 						Vector4 col = COLOR_WHITE;
 						if (world_frame.selected_entity == en) {
-							col = COLOR_RED;
+							col = COLOR_GREEN;
 						}
 
 						draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
 
-						// debug pos 
-						// draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);
+						// :debug pos 
+						draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);
 
 						break;
 					}

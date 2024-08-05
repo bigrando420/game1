@@ -1,6 +1,4 @@
-// things to talk to charlie about
-// - stable z sort?
-// - startup time feels slower now?
+#include "range.c"
 
 inline float v2_dist(Vector2 a, Vector2 b) {
   return v2_length(v2_sub(a, b));
@@ -8,13 +6,6 @@ inline float v2_dist(Vector2 a, Vector2 b) {
 
 #define m4_identity m4_make_scale(v3(1, 1, 1))
 
-Vector2 range2f_get_center(Range2f r) {
-	return (Vector2) { (r.max.x - r.min.x) * 0.5 + r.min.x, (r.max.y - r.min.y) * 0.5 + r.min.y };
-}
-
-Range2f range2f_make_bottom_left(Vector2 pos, Vector2 size) {
-  return (Range2f){pos, v2_add(pos, size)};
-}
 
 // ^^^ engine changes
 

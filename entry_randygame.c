@@ -29,7 +29,7 @@ Range2f range2f_make_bottom_left(Vector2 pos, Vector2 size) {
 
 // :config
 
-// #define DEV_TESTING
+#define DEV_TESTING
 
 float float_alpha(float x, float min, float max) {
 	float res = (x-min) / (max-min);
@@ -142,6 +142,7 @@ typedef enum SpriteID {
 	SPRITE_furnace,
 	SPRITE_workbench,
 	SPRITE_research_station,
+	SPRITE_exp,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -166,6 +167,7 @@ typedef enum ItemID {
 	ITEM_nil,
 	ITEM_rock,
 	ITEM_pine_wood,
+	ITEM_exp,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -300,10 +302,13 @@ typedef struct WorldFrame {
 } WorldFrame;
 WorldFrame world_frame;
 
+// TODO - move this into item data??
 SpriteID get_sprite_id_from_item(ItemID item) {
 	switch (item) {
 		case ITEM_pine_wood: return SPRITE_item_pine_wood; break;
 		case ITEM_rock: return SPRITE_item_rock; break;
+		case ITEM_exp: return SPRITE_exp; break;
+		// :sprite
 		default: return 0;
 	}
 }
@@ -1135,7 +1140,7 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
-	// :sprite setup
+	// sprite setup
 	{
 		sprites[0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/missing_tex.png"), get_heap_allocator()) };
 		sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
@@ -1147,6 +1152,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_furnace] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/furnace.png"), get_heap_allocator()) };
 		sprites[SPRITE_workbench] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/workbench.png"), get_heap_allocator()) };
 		sprites[SPRITE_research_station] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/research_station.png"), get_heap_allocator()) };
+		sprites[SPRITE_exp] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp.png"), get_heap_allocator()) };
+		// :sprite
 
 		#if CONFIGURATION == DEBUG
 		{
@@ -1169,7 +1176,7 @@ int entry(int argc, char **argv) {
 		buildings[BUILDING_research_station] = (BuildingData){ .to_build=ARCH_research_station, .icon=SPRITE_research_station };
 	}
 
-	// :item data resource setup
+	// item data resource setup
 	{
 		// do defaults
 		for (ItemID i = 1; i < ITEM_MAX; i++) {
@@ -1177,6 +1184,8 @@ int entry(int argc, char **argv) {
 			data->craft_length = 2.0;
 		}
 
+		// :item
+		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Essence") };
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} } };
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} } };
 	}
@@ -1188,9 +1197,15 @@ int entry(int argc, char **argv) {
 	{
 		world->inventory_items[ITEM_pine_wood].amount = 50;
 		world->inventory_items[ITEM_rock].amount = 50;
+		world->inventory_items[ITEM_exp].amount = 50;
 
 		Entity* en = entity_create();
 		setup_furnace(en);
+		en->pos.y = 20.0;
+
+		en = entity_create();
+		setup_research_station(en);
+		en->pos.x = -20.0;
 	}
 	#endif
 

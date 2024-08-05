@@ -12,7 +12,7 @@ Vector2 range2f_get_center(Range2f r) {
 	return (Vector2) { (r.max.x - r.min.x) * 0.5 + r.min.x, (r.max.y - r.min.y) * 0.5 + r.min.y };
 }
 
-Range2f range2f_make_bottom_right(Vector2 pos, Vector2 size) {
+Range2f range2f_make_bottom_left(Vector2 pos, Vector2 size) {
   return (Range2f){pos, v2_add(pos, size)};
 }
 
@@ -179,7 +179,7 @@ typedef struct ItemAmount {
 	int amount;
 } ItemAmount; 
 
-typedef enum EntityArchetype {
+typedef enum ArchetypeID {
 	ARCH_nil = 0,
 	ARCH_rock = 1,
 	ARCH_tree = 2,
@@ -191,14 +191,14 @@ typedef enum EntityArchetype {
 	ARCH_research_station = 8,
 	// :arch
 	ARCH_MAX,
-} EntityArchetype;
+} ArchetypeID;
 
 #define MAX_RECIPE_INGREDIENTS 8
 // :item
 typedef struct ItemData {
 	string pretty_name;
 	// :recipe crafting
-	EntityArchetype for_structure;
+	ArchetypeID for_structure;
 	ItemAmount crafting_recipe[MAX_RECIPE_INGREDIENTS];
 	float craft_length;
 } ItemData;
@@ -219,7 +219,7 @@ int get_crafting_recipe_count(ItemData item_data) {
 
 typedef struct Entity {
 	bool is_valid;
-	EntityArchetype arch;
+	ArchetypeID arch;
 	ItemID item_id;
 	Vector2 pos;
 	bool render_sprite;
@@ -246,7 +246,7 @@ typedef enum BuildingID {
 	BUILDING_MAX,
 } BuildingID;
 typedef struct BuildingData {
-	EntityArchetype to_build;
+	ArchetypeID to_build;
 	SpriteID icon;
 	// display name
 	// cost
@@ -258,14 +258,21 @@ BuildingData get_building_data(BuildingID id) {
 	return buildings[id];
 }
 
-// :ux
 typedef enum UXState {
 	UX_nil,
 	UX_inventory,
 	UX_building,
 	UX_place_mode,
 	UX_workbench,
+	UX_research,
+	// :ux
+	UX_MAX,
 } UXState;
+
+typedef struct UnlockState {
+	bool is_known; // this'll be true when we discover the recipes
+	bool is_researched; // we then research it in the table
+} UnlockState;
 
 typedef struct World {
 	Entity entities[MAX_ENTITY_COUNT];
@@ -276,8 +283,10 @@ typedef struct World {
 	float building_alpha;
 	float building_alpha_target;
 	BuildingID placing_building;
-	Entity* open_workbench;
+	Entity* interacting_with_entity;
 	ItemID selected_crafting_item;
+	BuildingID selected_research_thing;
+	UnlockState building_unlocks[BUILDING_MAX];
 	// :world :state
 } World;
 World* world = 0;
@@ -300,7 +309,7 @@ SpriteID get_sprite_id_from_item(ItemID item) {
 }
 
 // TODO - probs move this into an ArchetypeData thing ??
-string get_archetype_pretty_name(EntityArchetype arch) {
+string get_archetype_pretty_name(ArchetypeID arch) {
 	switch (arch) {
 		case ARCH_furnace: return STR("Furnace");
 		case ARCH_workbench: return STR("Workbench");
@@ -373,7 +382,7 @@ void setup_item(Entity* en, ItemID item_id) {
 	en->item_id = item_id;
 }
 
-void entity_setup(Entity* en, EntityArchetype id) {
+void entity_setup(Entity* en, ArchetypeID id) {
 	switch (id) {
 		case ARCH_furnace: setup_furnace(en); break;
 		case ARCH_workbench: setup_workbench(en); break;
@@ -429,6 +438,25 @@ void set_screen_space() {
 void set_world_space() {
 	draw_frame.projection = world_frame.world_proj;
 	draw_frame.view = world_frame.world_view;
+}
+
+// pad_pct just shrinks the rect by a % of itself ... 0.2 is a nice default
+Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, float pad_pct) {
+	Sprite* sprite = get_sprite(sprite_id);
+
+	// make it smoller
+	Vector2 size = range2f_size(rect);
+	Vector2 offset = rect.min;
+	rect = range2f_shift(rect, v2_mulf(rect.min, -1));
+	rect.min.x += size.x * pad_pct * 0.5;
+	rect.min.y += size.y * pad_pct * 0.5;
+	rect.max.x -= size.x * pad_pct * 0.5;
+	rect.max.y -= size.y * pad_pct * 0.5;
+	rect = range2f_shift(rect, offset);
+
+	// todo - ratio render lock
+
+	return draw_image(sprite->image, rect.min, range2f_size(rect), col);
 }
 
 // :func dump
@@ -662,8 +690,8 @@ void do_ui_stuff() {
 	}
 
 	// :workbench ui
-	if (world->ux_state == UX_workbench && world->open_workbench) {
-		Entity* workbench_en = world->open_workbench;
+	if (world->ux_state == UX_workbench && world->interacting_with_entity) {
+		Entity* workbench_en = world->interacting_with_entity;
 
 		Vector2 section_size = v2(50.0, 70.0);
 		float gap_between_panels = 10.0;
@@ -831,7 +859,7 @@ void do_ui_stuff() {
 						}
 					}
 
-					Range2f btn_range = range2f_make_bottom_right(v2(x0, y0), size);
+					Range2f btn_range = range2f_make_bottom_left(v2(x0, y0), size);
 					Vector4 col = fill_col;
 					if (has_enough_for_crafting && range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
 						col = COLOR_RED;
@@ -883,6 +911,210 @@ void do_ui_stuff() {
 		world_frame.hover_consumed = true;
 	}
 
+	// :research ui
+	if (world->ux_state == UX_research) {
+		Entity* entity = world->interacting_with_entity;
+
+		Vector2 section_size = v2(50.0, 70.0);
+		float gap_between_panels = 10.0;
+		float text_height_pad = 4.0;
+		Vector4 bg_col = v4(0, 0, 0, 0.7);
+		Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
+
+		float ui_width_thing = section_size.x * 2.0 + gap_between_panels;
+
+		float x0 = screen_width * 0.5 - ui_width_thing * 0.5;
+		float y0 = screen_height * 0.5 - section_size.y * 0.5;
+		float x_left_pane_start = x0;
+		float y_bottom = y0;
+		float y_top = y0 + section_size.y;
+
+		// left pane
+		{
+			Matrix4 xform = m4_identity;
+			xform = m4_translate(xform, v3(x0, y0, 0));
+			draw_rect_xform(xform, section_size, bg_col);
+
+			y0 = y_top;
+
+			// title
+			{
+				string title = get_archetype_pretty_name(entity->arch);
+				Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
+
+				float center_pos = x0 + section_size.x * 0.5;
+				Vector2 draw_pos = v2(center_pos, y0);
+				draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+				draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
+				draw_pos.y -= text_height_pad;
+
+				draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+
+				y0 = draw_pos.y; // TODO - workie?
+				y0 -= text_height_pad;
+				// y1 -= 20.0;
+			}
+
+			Vector2 item_icon_size = v2(8, 8);
+
+			y0 -= item_icon_size.y;
+
+			// draw research list
+			// TODO - make this an icon list like the crafting. That way it's more close to the final design of the tech tree
+			for (int i = 1; i < BUILDING_MAX; i++) {
+				UnlockState unlock_state = world->building_unlocks[i];
+				BuildingData building_data = get_building_data(i);
+				if (unlock_state.is_researched) {
+					continue;
+				}
+
+				Vector2 element_size = v2(section_size.x * 0.8, 6.0);
+
+				x0 = x_left_pane_start + (section_size.x - element_size.x) * 0.5;
+
+				// bg box thing
+				Vector2 box_start = v2(x0, y0);
+				Range2f box = range2f_make_bottom_left(box_start, element_size);
+				if (range2f_contains(box, get_mouse_pos_in_world_space())) {
+					// todo - hover ux
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						world->selected_research_thing = i;
+					}
+				}
+				draw_rect(box_start, element_size, fill_col);
+
+				// get icon size
+				float item_icon_length = element_size.y;
+
+				// get text size
+				string txt = get_archetype_pretty_name(building_data.to_build);
+				Vector2 txt_size;
+				Vector2 txt_offset_for_center;
+				{
+					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
+					txt_size = metrics.visual_size;
+					txt_offset_for_center = metrics.visual_pos_min;
+					txt_offset_for_center = v2_sub(txt_offset_for_center, v2_mul(metrics.visual_size, v2(0, 0.5)));
+				}
+
+				float pad_between_elements = 2.0;
+				float total_width = item_icon_length + txt_size.x + pad_between_elements;
+
+				// draw icon
+				{
+					x0 = (box_start.x + element_size.x * 0.5) - total_width * 0.5;
+					y0 = box_start.y;
+
+					Range2f box = range2f_make_bottom_left(v2(x0, y0), v2(item_icon_length, item_icon_length));
+					draw_sprite_in_rect(building_data.icon, box, COLOR_WHITE, 0.2);
+				}
+				x0 += item_icon_length;
+				x0 += pad_between_elements;
+				y0 = box_start.y; // reset the Y for the next txt element
+
+				// draw txt
+				{
+					Vector2 draw_pos = v2(x0, y0 + element_size.y * 0.5);
+					draw_pos = v2_add(draw_pos, txt_offset_for_center);
+					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+				}
+
+				y0 -= element_size.y;
+				y0 -= 2.0f; // padding @cleanup
+			}
+		}
+		
+		y0 = y_bottom;
+		x0 = x_left_pane_start;
+		x0 += section_size.x;
+		x0 += gap_between_panels;
+
+
+		// right pane
+		float x_right_pane_start = x0;
+		{
+			Matrix4 xform = m4_identity;
+			xform = m4_translate(xform, v3(x0, y0, 0));
+			draw_rect_xform(xform, section_size, bg_col);
+
+			if (world->selected_research_thing) {
+
+				y0 += section_size.y;
+				{
+					string title = get_archetype_pretty_name(get_building_data(world->selected_research_thing).to_build);
+					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
+
+					float center_pos = x0 + section_size.x * 0.5;
+					Vector2 draw_pos = v2(center_pos, y0);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
+					draw_pos.y -= text_height_pad;
+
+					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+
+					y0 = draw_pos.y; // TODO - workie?
+					y0 -= text_height_pad;
+					// y1 -= 20.0;
+				}
+
+				y0 = y_bottom + 30.0; // @cleanup
+				// todo - material cost
+				{
+				}
+
+				// craft button
+				{
+					Vector2 size = v2(section_size.x * 0.8, 6.0);
+
+					x0 = x_right_pane_start + (section_size.x - size.x) * 0.5;
+					y0 = y_bottom;
+					y0 += 5.0f; // padding from bottom @cleanup
+
+					// todo - check for cost
+
+					Range2f btn_range = range2f_make_bottom_left(v2(x0, y0), size);
+					Vector4 col = fill_col;
+					if (range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
+						col = COLOR_RED;
+						world_frame.hover_consumed = true;
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							// todo
+						}
+					}
+					// todo - disable button with has_enough_for_crafting
+					draw_rect(v2(x0, y0), size, col);
+
+					string txt = STR("RESEARCH");
+					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
+					Vector2 draw_pos = v2(x0 + size.x * 0.5, y0 + size.y * 0.5);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
+
+					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+				}
+
+			} else {
+				// select item first text
+				y0 += section_size.y * 0.5;
+				{
+					string title = STR("Select Recipe");
+					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
+
+					Vector2 draw_pos = v2(x0 + section_size.x * 0.5, y0);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
+
+					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+				}
+			}
+		}
+
+		world_frame.hover_consumed = true;
+	}
+
+	// esc exit
 	if (world->ux_state != UX_nil && is_key_just_pressed(KEY_ESCAPE)) {
 		consume_key_just_pressed(KEY_ESCAPE);
 		world->ux_state = 0;
@@ -1026,7 +1258,11 @@ int entry(int argc, char **argv) {
 			float smallest_dist = INFINITY;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
-				if (en->is_valid && (en->destroyable_world_item || en->workbench_thing)) {
+				bool has_interaction = en->destroyable_world_item
+					|| en->workbench_thing
+					|| en->arch == ARCH_research_station;
+				// add extra :interact cases here ^^
+				if (en->is_valid && has_interaction) {
 					Sprite* sprite = get_sprite(en->sprite_id);
 
 					int entity_tile_x = world_pos_to_tile_pos(en->pos.x);
@@ -1071,6 +1307,7 @@ int entry(int argc, char **argv) {
 					// ...
 				// }
 
+				// :workbench update
 				if (en->workbench_thing) {
 					if (en->current_crafting_item) {
 						float length = en->current_crafting_item;
@@ -1145,13 +1382,21 @@ int entry(int argc, char **argv) {
 				}
 			}
 
-			// :interact
+			// :interact workbench
 			if (selected_en && selected_en->workbench_thing) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-
 					world->ux_state = UX_workbench;
-					world->open_workbench = selected_en;
+					world->interacting_with_entity = selected_en;
+				}
+			}
+
+			// interact research station
+			if (selected_en && selected_en->arch == ARCH_research_station) {
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+					world->ux_state = UX_research;
+					world->interacting_with_entity = selected_en;
 				}
 			}
 		}
@@ -1189,7 +1434,8 @@ int entry(int argc, char **argv) {
 					}
 				}
 
-				// craft progress bar thing
+				// :workbench render
+				// craft progress thing
 				if (en->current_crafting_item && en->workbench_thing) {
 					float radius = 4.0; 
 

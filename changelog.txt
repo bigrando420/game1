@@ -1,3 +1,70 @@
+
+## v0.01.003 - Mouse pointers, Audio improvement & features, bug fixes
+	- Os layer
+		- Implemented setting of mouse pointers, either to system standard pointers or a custom image
+			os_set_mouse_pointer_standard(kind)
+			os_set_mouse_pointer_custom(pointer)
+			os_make_custom_mouse_pointer(image, width, height, hotspot_x, hotspot_y)
+			os_make_custom_mouse_pointer_from_file(path, hotspot_x, hotspot_y, allocator)
+		- Ignore SETCURSOR events unless for window resize pointer
+		- Store SYSTEM_INFO in init
+		- os_get_number_of_logical_processors()
+	
+	- Renderer
+		- Fix bad uv sampling bug when uneven window dimensions
+	
+	- Memory
+		- Made program_memory act more like an arena (see os_reserve_next_memory_pages() & os_unlock_program_memory_pages())
+		- In debug, default program memory to PAGE_NOACCESS which needs to be unlocked with os_unlock_program_memory_pages() (better crashes if we touch that memory)
+		- os_lock_program_memory_pages
+		- Heap locks pages when completely free
+	
+	- Audio
+		- Implemented playback speed configuration
+		- Implemented a way to recognize audio sources which start playing at the exact same time so we can avoid phase cancellation
+		- Refactor playback configuration members in Audio_Player to be in a struct Audio_Playback_Configuration
+			Example: player.volume -> player.config.volume
+		- bool disable_spacialization -> bool enable_spacialization (inverted)
+		- Deprecated:
+			play_one_audio_clip_source_at_position()
+			play_one_audio_clip_at_position()
+		- Added:
+			play_one_audio_clip_source_with_config()
+			play_one_audio_clip_with_config()
+		- Removed 'bool retain_progression_factor' parameter in audio_player_set_source()
+		- Fixed a bug where players didn't loop when set to do so
+		- Fixed a bug where wav sources would return 4 garbage samples at the start of playback, causing a glitch in the sound
+		- Fixed a crash when default audio device could not be initialized
+		- Fixed a bunch of bugs & woopsies
+		- Updated audio_test.c
+	
+	- Misc
+		- Deprecated Rangef stuff
+		- added peek_random()
+		- Updated #Contributions
+		- Cleaned up memory barriers in concurrency.c and use volatile instead
+		- Made hr fails output d3d11 debug messages before crash
+		- Made temporary storage size runtime-configurable for new threads
+		- Cleanup temporary storage after thread destroy
+		- Added Header checking in growing array
+		- Unfucked linmath alignment
+
+
+## v0.01.002 - Flexible build options, Hotloading, growing array
+    - Build system
+        - We can now compile with:
+            OOGABOOGA_HEADLESS: No window, graphics or audio
+            OOGABOOGA_BUILD_SHARED_LIBRARY: Build oogabooga as a shared library (dll)
+            OOGABOOGA_LINK_EXTERNAL_INSTANCE: Link to an external oogabooga global state instance
+        - See oogabooga/examples/hotload for an example on how we can set up a project with hotloaded code
+    
+    - Misc
+        - Better examples in custom_shader.c, & outlined circle
+        - Z-Sorting in the renderer is now stable
+        - Growing array
+            - oogabooga/examples/growing_array_example.c
+        
+
 ## v0.01.001 - Spacial audio, custom shading, scissor boxing
 	- Audio
 		- Implemented spacial audio playback
@@ -37,7 +104,7 @@
 			vx_cross()
 		- added os_get_file_size_from_Path()
 		- Some simple restructuring of existing code
-	- Made heap corruption detection more robust
+	   - Made heap corruption detection more robust
 
 ## v0.01.000 - AUDIO!
 	- Added audio sources

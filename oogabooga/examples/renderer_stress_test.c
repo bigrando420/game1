@@ -15,6 +15,11 @@ int entry(int argc, char **argv) {
 	Gfx_Image *hammer_image = load_image_from_disk(STR("oogabooga/examples/hammer.png"), get_heap_allocator());
 	assert(hammer_image, "Failed loading hammer.png");
 	
+	Custom_Mouse_Pointer hammer_pointer 
+	   = os_make_custom_mouse_pointer_from_file(STR("oogabooga/examples/hammer.png"), 16, 16, get_heap_allocator());
+	assert(hammer_pointer != 0, "Could not load hammer pointer");
+	
+	
 	void *my_data = alloc(get_heap_allocator(), 32*32*4);
 	memset(my_data, 0xffffffff, 32*32*4);
 	Gfx_Image *my_image = make_image(32, 32, 4, my_data, get_heap_allocator());
@@ -54,7 +59,7 @@ int entry(int argc, char **argv) {
 		if (is_key_just_released(KEY_ESCAPE)) {
 			window.should_close = true;
 		}
-		
+		os_set_mouse_pointer_custom(hammer_pointer);
 		if (is_key_just_pressed(KEY_ARROW_LEFT)) {
 			window.x -= 10;
 		}
@@ -97,7 +102,7 @@ int entry(int argc, char **argv) {
 				v2(input_frame.mouse_x+256, input_frame.mouse_y+256)
 			);
 		}
-		
+
 		seed_for_random = 69;
 		for (u64 i = 0; i < 30000; i++) {
 			float32 aspect = (float32)window.width/(float32)window.height;
@@ -108,7 +113,7 @@ int entry(int argc, char **argv) {
 			
 			float x = get_random_float32() * (max_x-min_x) + min_x;
 			float y = get_random_float32() * (max_y-min_y) + min_y;
-			
+
 			push_z_layer((s32)(y*100));
 			draw_image(bush_image, v2(x, y), v2(0.1, 0.1), COLOR_WHITE);
 			pop_z_layer();
@@ -120,6 +125,7 @@ int entry(int argc, char **argv) {
 		hammer_xform         = m4_translate(hammer_xform, v3(-.25f, -.25f, 0));
 		push_z_layer(1000001);
 		draw_image_xform(hammer_image, hammer_xform, v2(.5f, .5f), COLOR_RED);
+		draw_image_xform(hammer_image, hammer_xform, v2(.25f, .25f), COLOR_GREEN);
 		pop_z_layer();
 		
 		Vector2 hover_position = v2_rotate_point_around_pivot(v2(-.5, -.5), v2(0, 0), (f32)now);

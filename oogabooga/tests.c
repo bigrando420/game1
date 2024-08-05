@@ -122,11 +122,11 @@ void test_allocator(bool do_log_heap) {
     reset_temporary_storage();
     
     
-    int* foo = (int*)alloc(temp, 72);
+    int* foo = (int*)alloc(get_temporary_allocator(), 72);
     *foo = 1337;
-    void* bar = alloc(temp, 69);
+    void* bar = alloc(get_temporary_allocator(), 69);
     (void)bar;
-    void* baz = alloc(temp, 420);
+    void* baz = alloc(get_temporary_allocator(), 420);
     (void)baz;
     
     assert(*foo == 1337, "Temp memory corruptada");
@@ -135,7 +135,7 @@ void test_allocator(bool do_log_heap) {
     
     reset_temporary_storage();
     
-    foo = (int*)alloc(temp, 72);
+    foo = (int*)alloc(get_temporary_allocator(), 72);
     
     assert(old_foo == foo, "Temp allocator goof");
     
@@ -454,7 +454,7 @@ void test_strings() {
 
 void test_file_io() {
 
-#if TARGET_OS == WINDOWS
+#if TARGET_OS == WINDOWS && !OOGABOOGA_LINK_EXTERNAL_INSTANCE
     // Test win32_fixed_utf8_to_null_terminated_wide
     string utf8_str = STR("Test");
     u16 *wide_str = win32_fixed_utf8_to_null_terminated_wide(utf8_str, get_heap_allocator());
@@ -838,7 +838,8 @@ void test_simd() {
     end = rdtsc();
     cycles = end-start;
     print("NO SIMD float32 mul took %llu cycles\n", cycles);
-}
+} 
+
 // Indirect testing of some simd stuff
 void test_linmath() {
 
@@ -1029,6 +1030,81 @@ void test_linmath() {
 	assert(floats_roughly_match(v3_dot_product, 38), "Failed: v3_dot");
 	assert(floats_roughly_match(v4_dot_product, 30), "Failed: v4_dot");
 }
+
+void test_intmath() {
+    // Test vector creation and access
+    Vector2i v2i_test = v2i(1, 2);
+    assert(v2i_test.x == 1 && v2i_test.y == 2, "v2i creation incorrect");
+
+    Vector3i v3i_test = v3i(1, 2, 3);
+    assert(v3i_test.x == 1 && v3i_test.y == 2 && v3i_test.z == 3, "v3i creation incorrect");
+
+    Vector4i v4i_test = v4i(1, 2, 3, 4);
+    assert(v4i_test.x == 1 && v4i_test.y == 2 && v4i_test.z == 3 && v4i_test.w == 4, "v4i creation incorrect");
+
+    // Test vector2 operations
+    Vector2i v2i_a = v2i(3, 4);
+    Vector2i v2i_b = v2i(1, 2);
+    Vector2i v2i_result = v2i_add(v2i_a, v2i_b);
+    assert(v2i_result.x == 4 && v2i_result.y == 6, "v2i_add incorrect");
+
+    v2i_result = v2i_sub(v2i_a, v2i_b);
+    assert(v2i_result.x == 2 && v2i_result.y == 2, "v2i_sub incorrect");
+
+    v2i_result = v2i_mul(v2i_a, v2i_b);
+    assert(v2i_result.x == 3 && v2i_result.y == 8, "v2i_mul incorrect");
+
+    v2i_result = v2i_div(v2i_a, v2i_b);
+    assert(v2i_result.x == 3 && v2i_result.y == 2, "v2i_div incorrect");
+
+    v2i_result = v2i_muli(v2i_a, 2);
+    assert(v2i_result.x == 6 && v2i_result.y == 8, "v2i_muli incorrect");
+
+    v2i_result = v2i_divi(v2i_a, 2);
+    assert(v2i_result.x == 1 && v2i_result.y == 2, "v2i_divi incorrect");
+
+    // Test vector2 operations
+    Vector3i v3i_a = v3i(3, 4, 6);
+    Vector3i v3i_b = v3i(1, 2, 3);
+    Vector3i v3i_result = v3i_add(v3i_a, v3i_b);
+    assert(v3i_result.x == 4 && v3i_result.y == 6 && v3i_result.z == 9, "v3i_add incorrect.");
+
+    v3i_result = v3i_sub(v3i_a, v3i_b);
+    assert(v3i_result.x == 2 && v3i_result.y == 2 && v3i_result.z == 3, "v3i_sub incorrect");
+
+    v3i_result = v3i_mul(v3i_a, v3i_b);
+    assert(v3i_result.x == 3 && v3i_result.y == 8 && v3i_result.z == 18, "v3i_mul incorrect");
+
+    v3i_result = v3i_div(v3i_a, v3i_b);
+    assert(v3i_result.x == 3 && v3i_result.y == 2 && v3i_result.z == 2, "v3i_div incorrect");
+
+    v3i_result = v3i_muli(v3i_a, 2);
+    assert(v3i_result.x == 6 && v3i_result.y == 8 && v3i_result.z == 12, "v3i_muli incorrect");
+
+    v3i_result = v3i_divi(v3i_a, 2);
+    assert(v3i_result.x == 1 && v3i_result.y == 2 && v3i_result.z == 3, "v3i_divi incorrect");
+
+    Vector4i v4i_a = v4i(3, 4, 6, 8);
+    Vector4i v4i_b = v4i(1, 2, 3, 4);
+    Vector4i v4i_result = v4i_add(v4i_a, v4i_b);
+    assert(v4i_result.x == 4 && v4i_result.y == 6 && v4i_result.z == 9 && v4i_result.w == 12, "v4i_add incorrect.");
+
+    v4i_result = v4i_sub(v4i_a, v4i_b);
+    assert(v4i_result.x == 2 && v4i_result.y == 2 && v4i_result.z == 3 && v4i_result.w == 4, "v4i_sub incorrect");
+
+    v4i_result = v4i_mul(v4i_a, v4i_b);
+    assert(v4i_result.x == 3 && v4i_result.y == 8 && v4i_result.z == 18 && v4i_result.w == 32, "v4i_mul incorrect");
+
+    v4i_result = v4i_div(v4i_a, v4i_b);
+    assert(v4i_result.x == 3 && v4i_result.y == 2 && v4i_result.z == 2 && v4i_result.w == 2, "v4i_div incorrect");
+
+    v4i_result = v4i_muli(v4i_a, 2);
+    assert(v4i_result.x == 6 && v4i_result.y == 8 && v4i_result.z == 12 && v4i_result.w == 16, "v4i_muli incorrect");
+
+    v4i_result = v4i_divi(v4i_a, 2);
+    assert(v4i_result.x == 1 && v4i_result.y == 2 && v4i_result.z == 3 && v4i_result.w == 4, "v4i_divi incorrect");
+}
+
 void test_hash_table() {
     Hash_Table table = make_hash_table(string, int, get_heap_allocator());
     
@@ -1132,7 +1208,7 @@ void test_mutex() {
 
     Allocator allocator = get_heap_allocator();
 
-	const int num_threads = 100;
+	const int num_threads = 1000;
 
 	Thread *threads = alloc(allocator, sizeof(Thread)*num_threads);
 	for (u64 i = 0; i < num_threads; i++) {
@@ -1151,6 +1227,7 @@ void test_mutex() {
     mutex_destroy(&data.mutex);
 }
 
+#ifndef OOGABOOGA_HEADLESS
 int compare_draw_quads(const void *a, const void *b) {
     return ((Draw_Quad*)a)->z-((Draw_Quad*)b)->z;
 }
@@ -1220,9 +1297,80 @@ void test_sort() {
     
     print("Merge sort took on average %llu cycles and %.2f ms\n", cycles / num_samples, (seconds * 1000.0) / (float64)num_samples);
 }
+#endif /* OOGABOOGA_HEADLESS */
+
+typedef struct Test_Thing {
+    int foo;
+    float bar;
+} Test_Thing;
+void test_growing_array() {
+    Test_Thing *things = 0;
+    
+    growing_array_init((void**)&things, sizeof(Test_Thing), get_heap_allocator());
+    
+    Test_Thing new_thing;
+    new_thing.foo = 5;
+    new_thing.bar = 420.69;
+    growing_array_add((void**)&things, &new_thing);
+    
+    assert(growing_array_get_valid_count(things) == 1, "Failed: growing_array_get_valid_count");
+    
+    new_thing.foo = 1;
+    new_thing.bar = 123.45;
+    growing_array_add((void**)&things, &new_thing);
+    
+    assert(growing_array_get_valid_count(things) == 2, "Failed: growing_array_get_valid_count");
+    
+    assert(things[0].foo == 5 && floats_roughly_match(things[0].bar, 420.69), "Failed: growing_array_add");
+    assert(things[1].foo == 1 && floats_roughly_match(things[1].bar, 123.45), "Failed: growing_array_add");
+    
+    growing_array_ordered_remove_by_index((void**)&things, 0);
+    assert(things[0].foo == 1 && floats_roughly_match(things[0].bar, 123.45), "Failed: growing_array_ordered_remove_by_index");
+    assert(growing_array_get_valid_count(things) == 1, "Failed: growing_array_get_valid_count");
+    
+    new_thing.foo = 5;
+    new_thing.bar = 420.69;
+    growing_array_add((void**)&things, &new_thing);
+    assert(things[1].foo == 5 && floats_roughly_match(things[1].bar, 420.69), "Failed: growing_array_add");
+    
+    assert(growing_array_get_valid_count(things) == 2, "Failed: growing_array_get_valid_count");
+    
+    growing_array_unordered_remove_by_index((void**)&things, 0);
+    assert(things[0].foo == 5 && floats_roughly_match(things[0].bar, 420.69), "Failed: growing_array_unordered_remove_by_index");
+    assert(growing_array_get_valid_count(things) == 1, "Failed: growing_array_get_valid_count");
+    
+    
+    for (u32 i = 0; i < 100; i += 1) {
+        new_thing.foo = i;
+        new_thing.bar = i * 4.0;
+        growing_array_add((void**)&things, &new_thing);
+    }
+    
+    assert(growing_array_get_valid_count(things) == 101, "Failed: growing_array_get_valid_count");
+    
+    // Unordered remove by pointer
+    Test_Thing *thing = &things[50];
+    Test_Thing copy = *thing;
+    bool found = growing_array_unordered_remove_by_pointer((void**)&things, thing);
+    assert(found, "Failed: growing_array_unordered_remove_by_pointer");
+    assert(!bytes_match(&copy, thing, sizeof(Test_Thing)), "Failed: growing_array_unordered_remove_by_pointer");
+    
+    // Ordered remove by pointer
+    thing = &things[50];
+    copy = *thing;
+    found = growing_array_ordered_remove_by_pointer((void**)&things, thing);
+    assert(found, "Failed: growing_array_unordered_remove_by_pointer");
+    assert(!bytes_match(&copy, thing, sizeof(Test_Thing)), "Failed: growing_array_unordered_remove_by_pointer");
+    
+    assert(growing_array_get_valid_count(things) == 99, "Failed: growing_array_get_valid_count");
+}
+
 void oogabooga_run_tests() {
 	
-	
+	print("Testing growing array... ");
+	test_growing_array();
+	print("OK!\n");
+    
 	print("Testing allocator... ");
 	test_allocator(true);
 	print("OK!\n");
@@ -1242,6 +1390,10 @@ void oogabooga_run_tests() {
 	print("Testing linmath... ");
 	test_linmath();
 	print("OK!\n");
+
+	print("Testing intmath... ");
+	test_intmath();
+	print("OK!\n");
 	
 	print("Testing simd... ");
 	test_simd();
@@ -1258,10 +1410,14 @@ void oogabooga_run_tests() {
 	print("Testing mutex... ");
 	test_mutex();
 	print("OK!\n");
-	
+
+#ifndef OOGABOOGA_HEADLESS
 	print("Testing radix sort... ");
 	test_sort();
 	print("OK!\n");
+#endif
+
+	
 	
 	print("All tests ok!\n");
 }

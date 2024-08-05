@@ -14,7 +14,6 @@
 	Draw_Quad *draw_quad_projected(Draw_Quad quad, Matrix4 world_to_clip);
 	Draw_Quad *draw_quad(Draw_Quad quad);
 	Draw_Quad *draw_quad_xform(Draw_Quad quad, Matrix4 xform);
-	bool draw_text_callback(Gfx_Glyph glyph, Gfx_Font_Atlas *atlas, float glyph_x, float glyph_y, void *ud);
 	void draw_text_xform(Gfx_Font *font, string text, u32 raster_height, Matrix4 xform, Vector2 scale, Vector4 color);
 	void draw_text(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color);
 	Gfx_Text_Metrics draw_text_and_measure(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color);
@@ -47,8 +46,7 @@ typedef struct Draw_Quad {
 } Draw_Quad;
 
 
-Draw_Quad *quad_buffer;
-u64 allocated_quads;
+
 typedef struct Draw_Frame {
 	u64 num_quads;
 	
@@ -65,9 +63,20 @@ typedef struct Draw_Frame {
 	void *cbuffer;
 	
 } Draw_Frame;
+
+// #Cleanup this should be in Draw_Frame
+// #Global
+ogb_instance Draw_Quad *quad_buffer;
+ogb_instance u64 allocated_quads;
 // This frame is passed to the platform layer and rendered in os_update.
 // Resets every frame.
+ogb_instance Draw_Frame draw_frame;
+
+#if !OOGABOOGA_LINK_EXTERNAL_INSTANCE
+Draw_Quad *quad_buffer;
+u64 allocated_quads;
 Draw_Frame draw_frame = ZERO(Draw_Frame);
+#endif // NOT OOGABOOGA_LINK_EXTERNAL_INSTANCE
 
 void reset_draw_frame(Draw_Frame *frame) {
 	*frame = (Draw_Frame){0};

@@ -27,9 +27,6 @@ typedef struct Context_Extra {
 // Ooga booga needs to be included AFTER configuration and BEFORE the program code
 #include "oogabooga/oogabooga.c"
 
-// #Volatile tutorial below
-// #Volatile tutorial below
-// #Volatile tutorial below
 
 //
 // Comment & Uncomment these to swap projects (only include one at a time)
@@ -43,6 +40,7 @@ typedef struct Context_Extra {
 // #include "oogabooga/examples/tile_game.c"
 // #include "oogabooga/examples/audio_test.c"
 // #include "oogabooga/examples/custom_shader.c"
+// #include "oogabooga/examples/growing_array_example.c"
 
 // Randy's example game that he's building out as a tutorial for using the engine
 #include "entry_randygame.c"

@@ -580,7 +580,7 @@ void do_ui_stuff() {
 
 						{
 							string text = STR("x%i");
-							text = sprint(temp, text, item->amount);
+							text = tprint(text, item->amount);
 
 							Gfx_Text_Metrics metrics = measure_text(font, text, font_height, v2(0.1, 0.1));
 							Vector2 draw_pos = v2(icon_center.x, current_y_pos);

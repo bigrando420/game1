@@ -265,6 +265,7 @@ typedef enum UXState {
 typedef struct UnlockState {
 	bool is_known; // this'll be true when we discover the recipes
 	bool is_researched; // we then research it in the table
+	u8 research_progress; // 0% -> 100%
 } UnlockState;
 
 typedef struct World {
@@ -916,6 +917,7 @@ void do_ui_stuff() {
 		float text_height_pad = 4.0;
 		Vector4 bg_col = v4(0, 0, 0, 0.7);
 		Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
+		Vector4 accent_col = hex_to_rgba(0x44c3daff);
 
 		float ui_width_thing = section_size.x * 2.0 + gap_between_panels;
 
@@ -1035,7 +1037,9 @@ void do_ui_stuff() {
 			draw_rect_xform(xform, section_size, bg_col);
 
 			if (world->selected_research_thing) {
+				UnlockState* unlock_data = &world->building_unlocks[world->selected_research_thing];
 
+				// title
 				y0 += section_size.y;
 				{
 					string title = get_archetype_pretty_name(get_building_data(world->selected_research_thing).to_build);
@@ -1052,6 +1056,22 @@ void do_ui_stuff() {
 					y0 = draw_pos.y; // TODO - workie?
 					y0 -= text_height_pad;
 					// y1 -= 20.0;
+				}
+
+				// research % bar
+				{
+					Vector2 size = v2(section_size.x * 0.8, 4.0);
+					float research_alpha = (float)unlock_data->research_progress / 100.0f;
+
+					y0 -= size.y;
+					y0 -= 4.0; // element padding
+					x0 += (section_size.x - size.x) * 0.5; // center horizontally
+
+					// bg
+					draw_rect(v2(x0, y0), size, fill_col);
+
+					// fill
+					draw_rect(v2(x0, y0), v2(size.x * research_alpha, size.y), accent_col);
 				}
 
 				y0 = y_bottom + 30.0; // @cleanup
@@ -1074,9 +1094,17 @@ void do_ui_stuff() {
 					if (range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
 						col = COLOR_RED;
 						world_frame.hover_consumed = true;
+						// :research action
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							// todo
+							unlock_data->research_progress += 10;
+							if (unlock_data->research_progress >= 100) {
+								unlock_data->research_progress = 100;
+								// todo - epic feeback
+								unlock_data->is_researched = true;
+								world->selected_research_thing = 0;
+								world->ux_state = 0;
+							}
 						}
 					}
 					// todo - disable button with has_enough_for_crafting

@@ -6,6 +6,33 @@ inline float v2_dist(Vector2 a, Vector2 b) {
 
 #define m4_identity m4_make_scale(v3(1, 1, 1))
 
+typedef enum Pivot {
+	PIVOT_bottom_left,
+	PIVOT_bottom_center,
+	PIVOT_bottom_right,
+	PIVOT_center_left,
+	PIVOT_center_center,
+	PIVOT_center_right,
+	PIVOT_top_left,
+	PIVOT_top_center,
+	PIVOT_top_right,
+} Pivot;
+
+void draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color, Pivot pivot) {
+	Gfx_Text_Metrics metrics = measure_text(font, text, raster_height, scale);
+	position = v2_sub(position, metrics.visual_pos_min);
+	Vector2 pivot_mul = {0};
+	switch (pivot) {
+		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
+		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
+		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
+		default:
+		log_error("pivot not supported yet. fill in case at draw_text_with_pivot");
+		break;
+	}
+	position = v2_sub(position, v2_mul(metrics.visual_size, pivot_mul));
+	draw_text(font, text, raster_height, position, scale, color);
+}
 
 // ^^^ engine changes
 
@@ -464,6 +491,7 @@ void do_ui_stuff() {
 	push_z_layer(layer_ui);
 
 	// "screen space"
+	Vector2 txt_scale = v2(0.1, 0.1);
 
 	// :inventory UI
 	{
@@ -1072,6 +1100,14 @@ void do_ui_stuff() {
 
 					// fill
 					draw_rect(v2(x0, y0), v2(size.x * research_alpha, size.y), accent_col);
+
+					string txt = tprint("%i%%", unlock_data->research_progress);
+
+					x0 = x_right_pane_start;
+					x0 += section_size.x * 0.5;
+					y0 -= 4.0; // arbitrary
+
+					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), txt_scale, COLOR_WHITE, PIVOT_center_center);
 				}
 
 				y0 = y_bottom + 30.0; // @cleanup

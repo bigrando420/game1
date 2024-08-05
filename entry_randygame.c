@@ -23,6 +23,7 @@ void draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector
 	position = v2_sub(position, metrics.visual_pos_min);
 	Vector2 pivot_mul = {0};
 	switch (pivot) {
+		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
 		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
 		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
 		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
@@ -47,7 +48,7 @@ void draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector
 
 // :config
 
-#define DEV_TESTING
+// #define DEV_TESTING
 
 float float_alpha(float x, float min, float max) {
 	float res = (x-min) / (max-min);
@@ -121,7 +122,8 @@ Range2f quad_to_range(Draw_Quad quad) {
 Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
 const float entity_selection_radius = 16.0f;
-const float player_pickup_radius = 20.0f;
+const float player_pickup_radius = 10.0f;
+const int exp_vein_health = 3;
 const int rock_health = 3;
 const int tree_health = 3;
 const s32 layer_ui = 20;
@@ -161,6 +163,7 @@ typedef enum SpriteID {
 	SPRITE_workbench,
 	SPRITE_research_station,
 	SPRITE_exp,
+	SPRITE_exp_vein,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -209,6 +212,7 @@ typedef enum ArchetypeID {
 	ARCH_furnace = 6,
 	ARCH_workbench = 7,
 	ARCH_research_station = 8,
+	ARCH_exp_vein = 9,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -327,7 +331,7 @@ SpriteID get_sprite_id_from_item(ItemID item) {
 		case ITEM_pine_wood: return SPRITE_item_pine_wood; break;
 		case ITEM_rock: return SPRITE_item_rock; break;
 		case ITEM_exp: return SPRITE_exp; break;
-		// :sprite
+		// :item
 		default: return 0;
 	}
 }
@@ -361,12 +365,18 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
+void setup_exp_vein(Entity* en) {
+	en->arch = ARCH_exp_vein;
+	en->sprite_id = SPRITE_exp_vein;
+	en->health = exp_vein_health;
+	en->destroyable_world_item = true;
+}
+
 void setup_furnace(Entity* en) {
 	en->arch = ARCH_furnace;
 	en->sprite_id = SPRITE_furnace;
 	en->workbench_thing = true;
 }
-
 
 void setup_workbench(Entity* en) {
 	en->arch = ARCH_workbench;
@@ -492,6 +502,9 @@ void do_ui_stuff() {
 
 	// "screen space"
 	Vector2 txt_scale = v2(0.1, 0.1);
+	Vector4 bg_col = v4(0, 0, 0, 0.90);
+	Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
+	Vector4 accent_col = hex_to_rgba(0x44c3daff);
 
 	// :inventory UI
 	{
@@ -721,8 +734,6 @@ void do_ui_stuff() {
 		Vector2 section_size = v2(50.0, 70.0);
 		float gap_between_panels = 10.0;
 		float text_height_pad = 4.0;
-		Vector4 bg_col = v4(0, 0, 0, 0.7);
-		Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
 
 		float ui_width_thing = section_size.x * 2.0 + gap_between_panels;
 
@@ -943,9 +954,6 @@ void do_ui_stuff() {
 		Vector2 section_size = v2(50.0, 70.0);
 		float gap_between_panels = 10.0;
 		float text_height_pad = 4.0;
-		Vector4 bg_col = v4(0, 0, 0, 0.7);
-		Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
-		Vector4 accent_col = hex_to_rgba(0x44c3daff);
 
 		float ui_width_thing = section_size.x * 2.0 + gap_between_panels;
 
@@ -1110,12 +1118,10 @@ void do_ui_stuff() {
 					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), txt_scale, COLOR_WHITE, PIVOT_center_center);
 				}
 
-				y0 = y_bottom + 30.0; // @cleanup
-				// todo - material cost
-				{
-				}
+				// todo - put this into a research_recipe array so we can do multiple items for research.
+				bool has_enough_for_research = world->inventory_items[ITEM_exp].amount > 0;
 
-				// craft button
+				// research button
 				{
 					Vector2 size = v2(section_size.x * 0.8, 6.0);
 
@@ -1123,17 +1129,17 @@ void do_ui_stuff() {
 					y0 = y_bottom;
 					y0 += 5.0f; // padding from bottom @cleanup
 
-					// todo - check for cost
-
 					Range2f btn_range = range2f_make_bottom_left(v2(x0, y0), size);
 					Vector4 col = fill_col;
-					if (range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
+					if (has_enough_for_research && range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
 						col = COLOR_RED;
 						world_frame.hover_consumed = true;
 						// :research action
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							unlock_data->research_progress += 10;
+							world->inventory_items[ITEM_exp].amount -= 1;
+							assert(world->inventory_items[ITEM_exp].amount >= 0, "pre-check failed.");
 							if (unlock_data->research_progress >= 100) {
 								unlock_data->research_progress = 100;
 								// todo - epic feeback
@@ -1143,7 +1149,6 @@ void do_ui_stuff() {
 							}
 						}
 					}
-					// todo - disable button with has_enough_for_crafting
 					draw_rect(v2(x0, y0), size, col);
 
 					string txt = STR("RESEARCH");
@@ -1153,7 +1158,33 @@ void do_ui_stuff() {
 					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
 
 					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
+
+					y0 += size.y;
 				}
+
+				y0 += 6.0f; // arbitrary spacing
+
+				// material icon list
+				{
+					// EXP, x1 (red if out)
+					x0 = x_right_pane_start + section_size.x * 0.5;
+
+					// icon
+					{
+						float item_icon_length = 6.0;
+						Range2f box = range2f_make_center_right(v2(x0, y0), v2(item_icon_length, item_icon_length));
+						draw_sprite_in_rect(SPRITE_exp, box, COLOR_WHITE, 0.4);
+					}
+
+					Vector4 col = COLOR_WHITE;
+					if (!has_enough_for_research) {
+						col = COLOR_RED;
+					}
+
+					string txt = tprint("x1");
+					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), txt_scale, col, PIVOT_center_left);
+				}
+
 
 			} else {
 				// select item first text
@@ -1208,6 +1239,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_workbench] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/workbench.png"), get_heap_allocator()) };
 		sprites[SPRITE_research_station] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/research_station.png"), get_heap_allocator()) };
 		sprites[SPRITE_exp] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp.png"), get_heap_allocator()) };
+		sprites[SPRITE_exp_vein] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp_vein.png"), get_heap_allocator()) };
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -1252,7 +1284,7 @@ int entry(int argc, char **argv) {
 	{
 		world->inventory_items[ITEM_pine_wood].amount = 50;
 		world->inventory_items[ITEM_rock].amount = 50;
-		world->inventory_items[ITEM_exp].amount = 50;
+		world->inventory_items[ITEM_exp].amount = 4;
 
 		Entity* en = entity_create();
 		setup_furnace(en);
@@ -1277,6 +1309,13 @@ int entry(int argc, char **argv) {
 	for (int i = 0; i < 10; i++) {
 		Entity* en = entity_create();
 		setup_tree(en);
+		en->pos = v2(get_random_float32_in_range(-200, 200), get_random_float32_in_range(-200, 200));
+		en->pos = round_v2_to_tile(en->pos);
+		// en->pos.y -= tile_width * 0.5;
+	}
+	for (int i = 0; i < 10; i++) {
+		Entity* en = entity_create();
+		setup_exp_vein(en);
 		en->pos = v2(get_random_float32_in_range(-200, 200), get_random_float32_in_range(-200, 200));
 		en->pos = round_v2_to_tile(en->pos);
 		// en->pos.y -= tile_width * 0.5;
@@ -1428,6 +1467,7 @@ int entry(int argc, char **argv) {
 					selected_en->health -= 1;
 					if (selected_en->health <= 0) {
 
+							// :drops
 							switch (selected_en->arch) {
 								case ARCH_tree: {
 									// spawn thing
@@ -1441,6 +1481,12 @@ int entry(int argc, char **argv) {
 								case ARCH_rock: {
 									Entity* en = entity_create();
 									setup_item(en, ITEM_rock);
+									en->pos = selected_en->pos;
+								} break;
+
+								case ARCH_exp_vein: {
+									Entity* en = entity_create();
+									setup_item(en, ITEM_exp);
 									en->pos = selected_en->pos;
 								} break;
 

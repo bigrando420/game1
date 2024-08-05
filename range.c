@@ -44,3 +44,15 @@ Vector2 range2f_get_center(Range2f r) {
 Range2f range2f_make_bottom_left(Vector2 pos, Vector2 size) {
   return (Range2f){pos, v2_add(pos, size)};
 }
+
+Range2f range2f_make_top_right(Vector2 pos, Vector2 size) {
+  return (Range2f){v2_sub(pos, size), pos};
+}
+
+Range2f range2f_make_bottom_right(Vector2 pos, Vector2 size) {
+  return (Range2f){v2(pos.x-size.x, pos.y), v2(pos.x, pos.y+size.y)};
+}
+
+Range2f range2f_make_center_right(Vector2 pos, Vector2 size) {
+  return (Range2f){v2(pos.x-size.x, pos.y-size.y*0.5), v2(pos.x, pos.y+size.y*0.5)};
+}

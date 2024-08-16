@@ -118,9 +118,14 @@ Range2f quad_to_range(Draw_Quad quad) {
 
 // ^^^ generic utils
 
+// some kinda colour palette thingo
+// these get inited on startup because we don't have a #run for the hex_to_rgba(0x2a2d3aff) lol
+Vector4 color_0;
+
 // :tweaks
 Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
+const float world_half_length = tile_width * 10;
 const float entity_selection_radius = 16.0f;
 const float player_pickup_radius = 10.0f;
 const int exp_vein_health = 3;
@@ -1234,10 +1239,12 @@ int entry(int argc, char **argv) {
 	window.height = 720;
 	window.x = 200;
 	window.y = 200;
-	window.clear_color = hex_to_rgba(0x2a2d3aff);
+	window.clear_color = COLOR_BLACK;
 
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
+
+	color_0 = hex_to_rgba(0x2a2d3aff);
 
 	// sprite setup
 	{
@@ -1422,12 +1429,23 @@ int entry(int argc, char **argv) {
 			int tile_radius_y = 30;
 			for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
 				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
-					if ((x + (y % 2 == 0) ) % 2 == 0) {
-						Vector4 col = v4(0.1, 0.1, 0.1, 0.1);
-						float x_pos = x * tile_width;
-						float y_pos = y * tile_width;
-						draw_rect(v2(x_pos + tile_width * -0.5, y_pos + tile_width * -0.5), v2(tile_width, tile_width), col);
+
+					// skip over if we're outside the world space
+					if (x < world_pos_to_tile_pos(-world_half_length)
+					|| x > world_pos_to_tile_pos(world_half_length)
+					|| y < world_pos_to_tile_pos(-world_half_length)
+					|| y > world_pos_to_tile_pos(world_half_length)) {
+						continue;
 					}
+
+					// checkerboard pattern
+					Vector4 col = color_0;
+					if ((x + (y % 2 == 0) ) % 2 == 0) {
+						col.a = 0.9;
+					}
+					float x_pos = x * tile_width;
+					float y_pos = y * tile_width;
+					draw_rect(v2(x_pos + tile_width * -0.5, y_pos + tile_width * -0.5), v2(tile_width, tile_width), col);
 				}
 			}
 
@@ -1603,22 +1621,36 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		Vector2 input_axis = v2(0, 0);
-		if (is_key_down('A')) {
-			input_axis.x -= 1.0;
+		{
+			Vector2 input_axis = v2(0, 0);
+			if (is_key_down('A')) {
+				input_axis.x -= 1.0;
+			}
+			if (is_key_down('D')) {
+				input_axis.x += 1.0;
+			}
+			if (is_key_down('S')) {
+				input_axis.y -= 1.0;
+			}
+			if (is_key_down('W')) {
+				input_axis.y += 1.0;
+			}
+			input_axis = v2_normalize(input_axis);
+			Entity* player = get_player();
+			player->pos = v2_add(player->pos, v2_mulf(input_axis, 100.0 * delta_t));
+			if (player->pos.x < -world_half_length) {
+				player->pos.x = -world_half_length;
+			}
+			if (player->pos.x > world_half_length) {
+				player->pos.x = world_half_length;
+			}
+			if (player->pos.y > world_half_length) {
+				player->pos.y = world_half_length;
+			}
+			if (player->pos.y < -world_half_length) {
+				player->pos.y = -world_half_length;
+			}
 		}
-		if (is_key_down('D')) {
-			input_axis.x += 1.0;
-		}
-		if (is_key_down('S')) {
-			input_axis.y -= 1.0;
-		}
-		if (is_key_down('W')) {
-			input_axis.y += 1.0;
-		}
-		input_axis = v2_normalize(input_axis);
-
-		get_player()->pos = v2_add(get_player()->pos, v2_mulf(input_axis, 100.0 * delta_t));
 
 		gfx_update();
 		seconds_counter += delta_t;

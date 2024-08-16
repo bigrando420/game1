@@ -1,4 +1,10 @@
+// The entry function is at the bottom of this file.
+// Go there if you want to read this codebase.
+// C needs declarations to be ordered, and header files are a waste of time. So reading this top to bottom isn't recommended.
+
 #include "range.c"
+
+#define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
 inline float v2_dist(Vector2 a, Vector2 b) {
   return v2_length(v2_sub(a, b));
@@ -307,7 +313,20 @@ bool is_fully_unlocked(UnlockState unlock_state) {
 	return unlock_state.research_progress >= 100;
 }
 
+typedef struct WorldResourceData {
+	ArchetypeID id;
+	float spawn_interval;
+	int max_count;
+} WorldResourceData;
+// NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
+WorldResourceData world_resources[] = {
+	{ ARCH_rock, 2.f, 4 },
+	{ ARCH_tree, 1.f, 10 },
+	// :spawn_res system
+};
+
 typedef struct World {
+	float64 time_elapsed;
 	Entity entities[MAX_ENTITY_COUNT];
 	InventoryItemData inventory_items[ITEM_MAX];
 	UXState ux_state;
@@ -320,6 +339,7 @@ typedef struct World {
 	ItemID selected_crafting_item;
 	BuildingID selected_research_thing;
 	UnlockState building_unlocks[BUILDING_MAX];
+	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	// :world :state
 } World;
 World* world = 0;
@@ -434,6 +454,8 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_furnace: setup_furnace(en); break;
 		case ARCH_workbench: setup_workbench(en); break;
 		case ARCH_research_station: setup_research_station(en); break;
+		case ARCH_rock: setup_rock(en); break;
+		case ARCH_tree: setup_tree(en); break;
 		// :arch
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -1233,6 +1255,7 @@ void do_ui_stuff() {
 	pop_z_layer();
 }
 
+// :entry
 int entry(int argc, char **argv) {
 	window.title = STR("Randy's Game");
 	window.width = 1280;
@@ -1321,29 +1344,6 @@ int entry(int argc, char **argv) {
 			en->pos.x = -20.0;
 		}
 		#endif
-
-		for (int i = 0; i < 10; i++) {
-			Entity* en = entity_create();
-			setup_rock(en);
-			en->pos = v2(get_random_float32_in_range(-200, 200), get_random_float32_in_range(-200, 200));
-			en->pos = round_v2_to_tile(en->pos);
-			// en->pos.y -= tile_width * 0.5;
-		}
-		for (int i = 0; i < 10; i++) {
-			Entity* en = entity_create();
-			setup_tree(en);
-			en->pos = v2(get_random_float32_in_range(-200, 200), get_random_float32_in_range(-200, 200));
-			en->pos = round_v2_to_tile(en->pos);
-			// en->pos.y -= tile_width * 0.5;
-		}
-		for (int i = 0; i < 10; i++) {
-			Entity* en = entity_create();
-			setup_exp_vein(en);
-			en->pos = v2(get_random_float32_in_range(-200, 200), get_random_float32_in_range(-200, 200));
-			en->pos = round_v2_to_tile(en->pos);
-			// en->pos.y -= tile_width * 0.5;
-		}
-
 	}
 
 	float64 seconds_counter = 0.0;
@@ -1390,6 +1390,46 @@ int entry(int argc, char **argv) {
 		int mouse_tile_y = world_pos_to_tile_pos(mouse_pos_world.y);
 
 		do_ui_stuff();
+
+		// :world update
+		{
+			world->time_elapsed += delta_t;
+		}
+
+		// :spawn_res in world
+		{
+			for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
+				WorldResourceData data = world_resources[i];
+
+				// grab current entity count
+				int entity_count = 0;
+				for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+					Entity* en = &world->entities[j];
+					if (en->is_valid && en->arch == data.id) {
+						entity_count += 1;
+					}
+				}
+
+				// note - this is a bit confusing to read. But it's this way to only start the timer after we drop below the max entity count. So that when the player destroys an entity, it doesn't immediately respawn.
+				if (entity_count >= data.max_count) {
+					world->resource_next_spawn_end_time[i] = 0.0;
+				}
+				if (world->resource_next_spawn_end_time[i] == 0.0
+				&& entity_count < data.max_count) {
+					world->resource_next_spawn_end_time[i] = now() + data.spawn_interval;
+				}
+
+				bool init_worldgen_hack = world->time_elapsed < 1.0;
+				if (entity_count < data.max_count
+				&& (has_reached_end_time(world->resource_next_spawn_end_time[i]) || init_worldgen_hack)) {
+					Entity* en = entity_create();
+					entity_setup(en, data.id);
+					en->pos = v2(get_random_float32_in_range(-world_half_length, world_half_length), get_random_float32_in_range(-world_half_length, world_half_length));
+					en->pos = round_v2_to_tile(en->pos);
+					world->resource_next_spawn_end_time[i] = 0.0;
+				}
+			}
+		}
 
 		// select entity
 		if (!world_frame.hover_consumed)

@@ -557,7 +557,8 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 bool is_in_player_dimension(Entity* en) {
 	Entity* player = get_player();
 	// we'll do some stuff later on where this can be in multiple dimensions, just by && this bad boy
-	return en->current_dimension == player->current_dimension;
+	bool portal_at_destination = en->teleport_to_dimension_when_near && en->teleport_to_dimension_when_near == player->current_dimension;
+	return en->current_dimension == player->current_dimension || portal_at_destination;
 }
 
 // :ui
@@ -1652,11 +1653,15 @@ int entry(int argc, char **argv) {
 				// }
 
 				// teleporter update
-				if (is_in_player_dimension(en) && en->teleport_to_dimension_when_near) {
+				if (has_reached_end_time(en->tp_cooldown_end_time) && is_in_player_dimension(en) && en->teleport_to_dimension_when_near) {
 					bool in_teleport_radius = fabsf(v2_dist(en->pos, player->pos)) < teleporter_radius;
 					if (in_teleport_radius) {
-						player->current_dimension = en->teleport_to_dimension_when_near;
-						en->tp_cooldown_end_time = now() + 5.0;
+						if (player->current_dimension == en->teleport_to_dimension_when_near) {
+							player->current_dimension = en->current_dimension;
+						} else {
+							player->current_dimension = en->teleport_to_dimension_when_near;
+						}
+						en->tp_cooldown_end_time = now() + 1.0;
 					}
 				}
 

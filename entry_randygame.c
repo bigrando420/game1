@@ -241,6 +241,7 @@ string get_archetype_pretty_name(ArchetypeID id) {
 // :item
 typedef struct ItemData {
 	string pretty_name;
+	SpriteID icon;
 	// :recipe crafting
 	ArchetypeID for_structure;
 	ItemAmount crafting_recipe[8];
@@ -250,6 +251,9 @@ typedef struct ItemData {
 ItemData item_data[ITEM_MAX] = {0};
 ItemData get_item_data(ItemID id) {
 	return item_data[id];
+}
+SpriteID get_sprite_id_from_item(ItemID id) {
+	return get_item_data(id).icon;
 }
 
 // :dimension
@@ -385,17 +389,6 @@ WorldFrame world_frame;
 
 Entity* get_player() {
 	return world_frame.player;
-}
-
-// TODO - move this into item data??
-SpriteID get_sprite_id_from_item(ItemID item) {
-	switch (item) {
-		case ITEM_pine_wood: return SPRITE_item_pine_wood; break;
-		case ITEM_rock: return SPRITE_item_rock; break;
-		case ITEM_exp: return SPRITE_exp; break;
-		// :item
-		default: return 0;
-	}
 }
 
 Entity* entity_create() {
@@ -1482,10 +1475,10 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item
-		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Essence") };
-		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} }, .crafting_recipe_count=1 };
-		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }, .crafting_recipe_count=2 };
-		item_data[ITEM_ore1] = (ItemData){ .pretty_name=STR("Ore Thingy") };
+		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Essence"), .icon=SPRITE_exp};
+		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock, .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} }, .crafting_recipe_count=1 };
+		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood, .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }, .crafting_recipe_count=2 };
+		item_data[ITEM_ore1] = (ItemData){ .pretty_name=STR("Ore Thingy"), .icon=SPRITE_ore1_item };
 	}
 
 	// :dimension data setup

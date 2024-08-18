@@ -733,6 +733,7 @@ void do_ui_stuff() {
 						y0 -= 2.f;
 
 						// description
+						if (building->description.count)
 						{
 							// todo - text wrapping
 							float wrap_width = size.x;

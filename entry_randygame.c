@@ -3,6 +3,7 @@
 // C needs declarations to be ordered, and header files are a waste of time. So reading this top to bottom isn't recommended.
 
 #include "range.c"
+#include "config.c"
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
@@ -45,17 +46,6 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 // ^^^ engine changes
 
 // the scuff zone
-
-// CONFIGURATION can be RELEASE or DEBUG, depending on build
-// TODO
-// #if CONFIGURATION == RELEASE
-// 	#define GAME_RELEASE
-// #endif
-// #if CONFIGURATION == RELEASE
-
-// :config
-
-// #define DEV_TESTING
 
 float float_alpha(float x, float min, float max) {
 	float res = (x-min) / (max-min);

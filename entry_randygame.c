@@ -693,6 +693,7 @@ void do_ui_stuff() {
 			float padding = 2.0;
 			total_box_width += padding * (building_count + 1);
 
+			BuildingID tooltip_id = 0;
 			for (BuildingID i = 1; i < BUILDING_MAX; i++) {
 				BuildingData* building = &buildings[i];
 				UnlockState unlock_state = world->building_unlocks[i];
@@ -715,75 +716,15 @@ void do_ui_stuff() {
 
 				if (is_unlocked && range2f_contains(box, get_mouse_pos_in_ndc())) {
 					world_frame.hover_consumed = true;
+					tooltip_id = i;
 
-					// tooltip
 					bool has_all_ingredients = true;
-					{
-						Vector2 size = v2(40, 50);
-						Vector2 pos = get_mouse_pos_in_world_space();
-
-						draw_rect(pos, size, COLOR_BLACK);
-
-						float x0, y0;
-						x0 = pos.x + size.x * 0.5;
-						y0 = pos.y + size.y;
-						y0 -= 2.f; // arbitrary padding
-
-						Gfx_Text_Metrics met = draw_text_with_pivot(font, get_archetype_pretty_name(building->to_build), font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-						y0 -= met.visual_size.y;
-						y0 -= 2.f;
-
-						// description
-						if (building->description.count)
-						{
-							// todo - text wrapping
-							float wrap_width = size.x;
-							string text = building->description;
-							draw_text_with_pivot(font, text, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-						}
-						// todo - advance by whatever the wrapped text box turns out to be...
-						y0 -= 30.f;
-
-						// ingredients list
-						for (int j = 0; j < building->ingredients_count; j++) {
-							ItemAmount ing_amount = building->ingredients[j];
-							// ItemData ing_data = get_item_data(ing_amount.id);
-
-							Vector2 element_size = v2(size.x * 0.8, 6.0);
-
-							x0 = pos.x + (size.x - element_size.x) * 0.5;
-
-							// bg box thing
-							draw_rect(v2(x0, y0), element_size, fill_col);
-
-							// icon
-							{
-								float item_icon_length = element_size.y * 0.8;
-
-								float x1 = pos.x + size.x * 0.5 - element_size.y;
-								float y1 = y0 + (item_icon_length - element_size.y) * -0.5;
-
-								draw_image(get_sprite(get_sprite_id_from_item(ing_amount.id))->image, v2(x1, y1), v2(item_icon_length, item_icon_length), COLOR_WHITE);
-							}
-
-							InventoryItemData inv_item = world->inventory_items[ing_amount.id];
-							Vector4 txt_col = COLOR_WHITE;
-							if (inv_item.amount < ing_amount.amount) {
-								txt_col = COLOR_RED;
-								has_all_ingredients = false;
-							}
-
-							string txt = tprint("%i/%i", inv_item.amount, ing_amount.amount);
-							Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
-							float center_pos = pos.x + size.x * 0.5;
-							Vector2 draw_pos = v2(center_pos, y0 + element_size.y * 0.5);
-							draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-							draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0, 0.5)));
-							draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), txt_col);
-							// y0 += metrics.visual_size.y;
-
-							y0 -= element_size.y;
-							y0 -= 2.0f; // padding @cleanup
+					for (int j = 0; j < building->ingredients_count; j++) {
+						ItemAmount ing_amount = building->ingredients[j];
+						InventoryItemData inv_item = world->inventory_items[ing_amount.id];
+						if (inv_item.amount < ing_amount.amount) {
+							has_all_ingredients = false;
+							break;
 						}
 					}
 
@@ -803,6 +744,78 @@ void do_ui_stuff() {
 				}
 
 				// draw_rect_xform(xform, v2(icon_size, icon_size), COLOR_WHITE);
+			}
+
+			// building tooltip
+			if (tooltip_id)
+			{
+				BuildingData* building = &buildings[tooltip_id];
+
+				Vector2 size = v2(40, 50);
+				Vector2 pos = get_mouse_pos_in_world_space();
+
+				draw_rect(pos, size, COLOR_BLACK);
+
+				float x0, y0;
+				x0 = pos.x + size.x * 0.5;
+				y0 = pos.y + size.y;
+				y0 -= 2.f; // arbitrary padding
+
+				Gfx_Text_Metrics met = draw_text_with_pivot(font, get_archetype_pretty_name(building->to_build), font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+				y0 -= met.visual_size.y;
+				y0 -= 2.f;
+
+				// description
+				if (building->description.count)
+				{
+					// todo - text wrapping
+					float wrap_width = size.x;
+					string text = building->description;
+					draw_text_with_pivot(font, text, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+				}
+				// todo - advance by whatever the wrapped text box turns out to be...
+				y0 -= 30.f;
+
+				// ingredients list
+				for (int j = 0; j < building->ingredients_count; j++) {
+					ItemAmount ing_amount = building->ingredients[j];
+					// ItemData ing_data = get_item_data(ing_amount.id);
+
+					Vector2 element_size = v2(size.x * 0.8, 6.0);
+
+					x0 = pos.x + (size.x - element_size.x) * 0.5;
+
+					// bg box thing
+					draw_rect(v2(x0, y0), element_size, fill_col);
+
+					// icon
+					{
+						float item_icon_length = element_size.y * 0.8;
+
+						float x1 = pos.x + size.x * 0.5 - element_size.y;
+						float y1 = y0 + (item_icon_length - element_size.y) * -0.5;
+
+						draw_image(get_sprite(get_sprite_id_from_item(ing_amount.id))->image, v2(x1, y1), v2(item_icon_length, item_icon_length), COLOR_WHITE);
+					}
+
+					InventoryItemData inv_item = world->inventory_items[ing_amount.id];
+					Vector4 txt_col = COLOR_WHITE;
+					if (inv_item.amount < ing_amount.amount) {
+						txt_col = COLOR_RED;
+					}
+
+					string txt = tprint("%i/%i", inv_item.amount, ing_amount.amount);
+					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
+					float center_pos = pos.x + size.x * 0.5;
+					Vector2 draw_pos = v2(center_pos, y0 + element_size.y * 0.5);
+					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0, 0.5)));
+					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), txt_col);
+					// y0 += metrics.visual_size.y;
+
+					y0 -= element_size.y;
+					y0 -= 2.0f; // padding @cleanup
+				}
 			}
 		}
 	}

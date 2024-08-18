@@ -550,18 +550,39 @@ void set_world_space() {
 // pad_pct just shrinks the rect by a % of itself ... 0.2 is a nice default
 Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, float pad_pct) {
 	Sprite* sprite = get_sprite(sprite_id);
+	Vector2 sprite_size = get_sprite_size(sprite);
 
-	// make it smoller
-	Vector2 size = range2f_size(rect);
-	Vector2 offset = rect.min;
-	rect = range2f_shift(rect, v2_mulf(rect.min, -1));
-	rect.min.x += size.x * pad_pct * 0.5;
-	rect.min.y += size.y * pad_pct * 0.5;
-	rect.max.x -= size.x * pad_pct * 0.5;
-	rect.max.y -= size.y * pad_pct * 0.5;
-	rect = range2f_shift(rect, offset);
+	// make it smoller (padding)
+	{
+		Vector2 size = range2f_size(rect);
+		Vector2 offset = rect.min;
+		rect = range2f_shift(rect, v2_mulf(rect.min, -1));
+		rect.min.x += size.x * pad_pct * 0.5;
+		rect.min.y += size.y * pad_pct * 0.5;
+		rect.max.x -= size.x * pad_pct * 0.5;
+		rect.max.y -= size.y * pad_pct * 0.5;
+		rect = range2f_shift(rect, offset);
+	}
 
-	// todo - ratio render lock
+	// ratio render lock
+	if (sprite_size.x > sprite_size.y) { // long boi
+
+		// height is a ratio of width
+		Vector2 range_size = range2f_size(rect);
+		rect.max.y = rect.min.y + (range_size.x * (sprite_size.y/sprite_size.x));
+		// center along the Y
+		float new_height = rect.max.y - rect.min.y;
+		rect = range2f_shift(rect, v2(0, (range_size.y - new_height) * 0.5));
+
+	} else if (sprite_size.y > sprite_size.x) { // tall boi
+		
+		// width is a ratio of height
+		Vector2 range_size = range2f_size(rect);
+		rect.max.x = rect.min.x + (range_size.y * (sprite_size.x/sprite_size.y));
+		// center along the X
+		float new_width = rect.max.x - rect.min.x;
+		rect = range2f_shift(rect, v2((range_size.x - new_width) * 0.5, 0));
+	}
 
 	return draw_image(sprite->image, rect.min, range2f_size(rect), col);
 }
@@ -755,15 +776,18 @@ void do_ui_stuff() {
 				x0 += padding * i;
 				xform = m4_translate(xform, v3(x0, 10, 0));
 
+				draw_rect_xform(xform, v2(icon_size, icon_size), v4(0, 0, 0, 0.2));
+
 				Sprite* icon = get_sprite(building->icon);
 				Vector4 col = COLOR_WHITE;
 				if (!is_unlocked) {
 					col = v4(0.0, 0.0, 0.0, 1.0);
 				}
-				Draw_Quad* quad = draw_image_xform(icon->image, xform, v2(icon_size, icon_size), col);
-				Range2f box = quad_to_range(*quad);
 
-				if (is_unlocked && range2f_contains(box, get_mouse_pos_in_ndc())) {
+				Range2f box = range2f_make_bottom_left(v2(x0, 10), v2(icon_size, icon_size));
+				draw_sprite_in_rect(building->icon, box, col, 0.1);
+
+				if (is_unlocked && range2f_contains(box, get_mouse_pos_in_world_space())) {
 					world_frame.hover_consumed = true;
 					tooltip_id = i;
 
@@ -791,8 +815,6 @@ void do_ui_stuff() {
 						}
 					}
 				}
-
-				// draw_rect_xform(xform, v2(icon_size, icon_size), COLOR_WHITE);
 			}
 
 			// building tooltip

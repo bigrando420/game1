@@ -1439,7 +1439,7 @@ int entry(int argc, char **argv) {
 		{
 			world->inventory_items[ITEM_pine_wood].amount = 50;
 			world->inventory_items[ITEM_rock].amount = 50;
-			world->inventory_items[ITEM_exp].amount = 4;
+			world->inventory_items[ITEM_exp].amount = 100;
 
 			Entity* en = entity_create();
 			setup_furnace(en);
@@ -1714,6 +1714,8 @@ int entry(int argc, char **argv) {
 
 				switch (en->arch) {
 
+					case ARCH_player: break;
+
 					default:
 					{
 						Sprite* sprite = get_sprite(en->sprite_id);
@@ -1765,6 +1767,19 @@ int entry(int argc, char **argv) {
 					}
 				}
 			}
+		}
+
+		// render player
+		{
+			Entity* en = get_player();
+			Sprite* sprite = get_sprite(en->sprite_id);
+			Matrix4 xform = m4_scalar(1.0);
+			xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));
+			xform         = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
+			xform         = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, 0.0, 0));
+
+			Vector4 col = COLOR_WHITE;
+			draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
 		}
 
 		{

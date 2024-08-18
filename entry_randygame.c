@@ -231,6 +231,16 @@ typedef enum ArchetypeID {
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
+typedef struct ArchetypeData {
+	string pretty_name;
+} ArchetypeData;
+ArchetypeData archetype_data[ARCH_MAX] = {0};
+ArchetypeData get_archetype_data(ArchetypeID id) {
+	return archetype_data[id];
+}
+string get_archetype_pretty_name(ArchetypeID id) {
+	return get_archetype_data(id).pretty_name;
+}
 
 // :item
 typedef struct ItemData {
@@ -364,16 +374,6 @@ SpriteID get_sprite_id_from_item(ItemID item) {
 		case ITEM_exp: return SPRITE_exp; break;
 		// :item
 		default: return 0;
-	}
-}
-
-// TODO - probs move this into an ArchetypeData thing ??
-string get_archetype_pretty_name(ArchetypeID arch) {
-	switch (arch) {
-		case ARCH_furnace: return STR("Furnace");
-		case ARCH_workbench: return STR("Workbench");
-		case ARCH_research_station: return STR("Research Station");
-		default: return STR("nil");
 	}
 }
 
@@ -1381,6 +1381,14 @@ int entry(int argc, char **argv) {
 
 	font = load_font_from_disk(STR("C:/windows/fonts/arial.ttf"), get_heap_allocator());
 	assert(font, "Failed loading arial.ttf, %d", GetLastError());
+
+	// :arch data setup
+	{
+		archetype_data[ARCH_workbench].pretty_name = STR("Workbench");
+		archetype_data[ARCH_furnace].pretty_name = STR("Furnace");
+		archetype_data[ARCH_research_station].pretty_name = STR("Research Station");
+		archetype_data[ARCH_teleporter1].pretty_name = STR("Teleporter");
+	}
 
 	// :building resource setup
 	{

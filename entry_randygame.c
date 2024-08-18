@@ -341,6 +341,10 @@ WorldResourceData world_resources[] = {
 	// :spawn_res system
 };
 
+typedef struct WorldDimension {
+	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
+} WorldDimension;
+
 typedef struct World {
 	float64 time_elapsed;
 	Entity entities[MAX_ENTITY_COUNT];
@@ -355,7 +359,7 @@ typedef struct World {
 	ItemID selected_crafting_item;
 	BuildingID selected_research_thing;
 	UnlockState building_unlocks[BUILDING_MAX];
-	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
+	WorldDimension dimensions[DIM_MAX];
 	// :world :state
 } World;
 World* world = 0;
@@ -1552,32 +1556,37 @@ int entry(int argc, char **argv) {
 			for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 				WorldResourceData data = world_resources[i];
 
-				// grab current entity count
-				int entity_count = 0;
-				for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
-					Entity* en = &world->entities[j];
-					if (en->is_valid && en->arch == data.id) {
-						entity_count += 1;
+				for (DimensionID dim_id = 1; dim_id < ARRAY_COUNT(world->dimensions); dim_id++) {
+					WorldDimension* dim = &world->dimensions[dim_id];
+
+					// grab current entity count
+					int entity_count = 0;
+					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+						Entity* en = &world->entities[j];
+						if (en->is_valid && en->current_dimension == dim_id && en->arch == data.id) {
+							entity_count += 1;
+						}
 					}
-				}
 
-				// note - this is a bit confusing to read. But it's this way to only start the timer after we drop below the max entity count. So that when the player destroys an entity, it doesn't immediately respawn.
-				if (entity_count >= data.max_count) {
-					world->resource_next_spawn_end_time[i] = 0.0;
-				}
-				if (world->resource_next_spawn_end_time[i] == 0.0
-				&& entity_count < data.max_count) {
-					world->resource_next_spawn_end_time[i] = now() + data.spawn_interval;
-				}
+					// note - this is a bit confusing to read. But it's this way to only start the timer after we drop below the max entity count. So that when the player destroys an entity, it doesn't immediately respawn.
+					if (entity_count >= data.max_count) {
+						dim->resource_next_spawn_end_time[i] = 0.0;
+					}
+					if (dim->resource_next_spawn_end_time[i] == 0.0
+					&& entity_count < data.max_count) {
+						dim->resource_next_spawn_end_time[i] = now() + data.spawn_interval;
+					}
 
-				bool init_worldgen_hack = world->time_elapsed < 1.0;
-				if (entity_count < data.max_count
-				&& (has_reached_end_time(world->resource_next_spawn_end_time[i]) || init_worldgen_hack)) {
-					Entity* en = entity_create();
-					entity_setup(en, data.id);
-					en->pos = v2(get_random_float32_in_range(-world_half_length, world_half_length), get_random_float32_in_range(-world_half_length, world_half_length));
-					en->pos = round_v2_to_tile(en->pos);
-					world->resource_next_spawn_end_time[i] = 0.0;
+					bool init_worldgen_hack = world->time_elapsed < 1.0;
+					if (entity_count < data.max_count
+					&& (has_reached_end_time(dim->resource_next_spawn_end_time[i]) || init_worldgen_hack)) {
+						Entity* en = entity_create();
+						en->current_dimension = dim_id;
+						entity_setup(en, data.id);
+						en->pos = v2(get_random_float32_in_range(-world_half_length, world_half_length), get_random_float32_in_range(-world_half_length, world_half_length));
+						en->pos = round_v2_to_tile(en->pos);
+						dim->resource_next_spawn_end_time[i] = 0.0;
+					}
 				}
 			}
 		}

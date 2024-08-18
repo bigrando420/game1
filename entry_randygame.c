@@ -329,15 +329,18 @@ bool is_fully_unlocked(UnlockState unlock_state) {
 }
 
 typedef struct WorldResourceData {
-	ArchetypeID id;
+	DimensionID dim_id;
+	ArchetypeID arch_id;
 	float spawn_interval;
 	int max_count;
 } WorldResourceData;
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
-	{ ARCH_rock, 2.f, 4 },
-	{ ARCH_tree, 1.f, 10 },
-	{ ARCH_exp_vein, 3.f, 2 },
+	{ DIM_first, ARCH_rock, 2.f, 4 },
+	{ DIM_first, ARCH_tree, 1.f, 10 },
+	{ DIM_first, ARCH_exp_vein, 3.f, 2 },
+
+	{ DIM_second, ARCH_exp_vein, 0.5f, 15 },
 	// :spawn_res system
 };
 
@@ -1448,7 +1451,7 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_teleporter1,
 			.icon=SPRITE_teleporter1,
 			.description=STR("A gateway to the next world."),
-			.pct_per_research_exp=10,
+			.pct_per_research_exp=50,
 			.ingredients_count=2,
 			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
 		};
@@ -1558,12 +1561,16 @@ int entry(int argc, char **argv) {
 
 				for (DimensionID dim_id = 1; dim_id < ARRAY_COUNT(world->dimensions); dim_id++) {
 					WorldDimension* dim = &world->dimensions[dim_id];
+					if (data.dim_id != dim_id) {
+						// skip, the resource isn't for this dimension
+						continue;
+					}
 
 					// grab current entity count
 					int entity_count = 0;
 					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
 						Entity* en = &world->entities[j];
-						if (en->is_valid && en->current_dimension == dim_id && en->arch == data.id) {
+						if (en->is_valid && en->current_dimension == dim_id && en->arch == data.arch_id) {
 							entity_count += 1;
 						}
 					}
@@ -1582,7 +1589,7 @@ int entry(int argc, char **argv) {
 					&& (has_reached_end_time(dim->resource_next_spawn_end_time[i]) || init_worldgen_hack)) {
 						Entity* en = entity_create();
 						en->current_dimension = dim_id;
-						entity_setup(en, data.id);
+						entity_setup(en, data.arch_id);
 						en->pos = v2(get_random_float32_in_range(-world_half_length, world_half_length), get_random_float32_in_range(-world_half_length, world_half_length));
 						en->pos = round_v2_to_tile(en->pos);
 						dim->resource_next_spawn_end_time[i] = 0.0;

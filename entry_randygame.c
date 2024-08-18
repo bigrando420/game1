@@ -120,6 +120,7 @@ Range2f quad_to_range(Draw_Quad quad) {
 Vector4 color_0;
 
 // :tweaks
+float teleporter_radius = 4.0f;
 Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
 const float world_half_length = tile_width * 10;
@@ -241,10 +242,24 @@ typedef struct ItemData {
 	int crafting_recipe_count;
 	float craft_length;
 } ItemData;
-ItemData item_data[ITEM_MAX];
+ItemData item_data[ITEM_MAX] = {0};
 ItemData get_item_data(ItemID id) {
 	return item_data[id];
 }
+
+// :dimension
+typedef enum DimensionID {
+	DIM_nil,
+	DIM_first, // very inventive names!
+	DIM_second,
+	DIM_third,
+	DIM_fourth,
+	DIM_MAX,
+} DimensionID;
+typedef struct DimensionData {
+	string pretty_name;
+} DimensionData;
+DimensionData dimension_data[DIM_MAX] = {0};
 
 typedef struct Entity {
 	bool is_valid;
@@ -260,6 +275,9 @@ typedef struct Entity {
 	ItemID current_crafting_item;
 	int current_crafting_amount;
 	float64 crafting_end_time;
+	DimensionID current_dimension;
+	DimensionID teleport_to_dimension_when_near;
+	float64 tp_cooldown_end_time;
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
@@ -378,6 +396,15 @@ Entity* entity_create() {
 	}
 	assert(entity_found, "No more free entities!");
 	entity_found->is_valid = true;
+
+	// put in player's dimension
+	Entity* player = get_player();
+	if (player) {
+		entity_found->current_dimension = player->current_dimension;
+	} else {
+		entity_found->current_dimension = DIM_first;
+	}
+
 	return entity_found;
 }
 
@@ -390,6 +417,7 @@ void entity_destroy(Entity* entity) {
 void setup_teleporter1(Entity* en) {
 	en->arch = ARCH_teleporter1;
 	en->sprite_id = SPRITE_teleporter1;
+	en->teleport_to_dimension_when_near = DIM_second;
 }
 
 void setup_exp_vein(Entity* en) {
@@ -525,6 +553,12 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 }
 
 // :func dump
+
+bool is_in_player_dimension(Entity* en) {
+	Entity* player = get_player();
+	// we'll do some stuff later on where this can be in multiple dimensions, just by && this bad boy
+	return en->current_dimension == player->current_dimension;
+}
 
 // :ui
 void do_ui_stuff() {
@@ -1429,11 +1463,18 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }, .crafting_recipe_count=2 };
 	}
 
+	// :dimension data setup
+	{
+		dimension_data[DIM_first].pretty_name = STR("First");
+		dimension_data[DIM_second].pretty_name = STR("Second");
+	}
+
 	// :init
 	// note, this'll eventually be moved into a world_setup func after we do serialisation
 	{
 		Entity* player_en = entity_create();
 		setup_player(player_en);
+		player_en->current_dimension = DIM_first;
 
 		world->building_unlocks[BUILDING_research_station].research_progress = 100;
 
@@ -1478,7 +1519,7 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// :frame :update
+		// :frame update
 		draw_frame.enable_z_sorting = true;
 
 		world_frame.world_proj = m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
@@ -1602,12 +1643,22 @@ int entry(int argc, char **argv) {
 		}
 		
 		// :update entities
+		Entity* player = get_player();
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
 				// switch (en->arch) {
 					// ...
 				// }
+
+				// teleporter update
+				if (is_in_player_dimension(en) && en->teleport_to_dimension_when_near) {
+					bool in_teleport_radius = fabsf(v2_dist(en->pos, player->pos)) < teleporter_radius;
+					if (in_teleport_radius) {
+						player->current_dimension = en->teleport_to_dimension_when_near;
+						en->tp_cooldown_end_time = now() + 5.0;
+					}
+				}
 
 				// :workbench update
 				if (en->workbench_thing) {
@@ -1638,7 +1689,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// pickup item
-				if (en->is_item) {
+				if (is_in_player_dimension(en) && en->is_item) {
 					// TODO - epic physics pickup like arcana
 					if (fabsf(v2_dist(en->pos, get_player()->pos)) < player_pickup_radius) {
 						world->inventory_items[en->item_id].amount += 1;
@@ -1713,7 +1764,7 @@ int entry(int argc, char **argv) {
 		// :render entities
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
-			if (en->is_valid) {
+			if (en->is_valid && is_in_player_dimension(en)) {
 
 				switch (en->arch) {
 

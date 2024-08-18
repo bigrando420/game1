@@ -120,7 +120,7 @@ Range2f quad_to_range(Draw_Quad quad) {
 Vector4 color_0;
 
 // :tweaks
-float teleporter_radius = 4.0f;
+float teleporter_radius = 8.0f;
 Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
 const float world_half_length = tile_width * 10;
@@ -1611,7 +1611,7 @@ int entry(int argc, char **argv) {
 					|| en->workbench_thing
 					|| en->arch == ARCH_research_station;
 				// add extra :interact cases here ^^
-				if (en->is_valid && has_interaction) {
+				if (en->is_valid && is_in_player_dimension(en) && has_interaction) {
 					Sprite* sprite = get_sprite(en->sprite_id);
 
 					int entity_tile_x = world_pos_to_tile_pos(en->pos.x);

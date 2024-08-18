@@ -314,6 +314,7 @@ typedef struct WorldResourceData {
 WorldResourceData world_resources[] = {
 	{ ARCH_rock, 2.f, 4 },
 	{ ARCH_tree, 1.f, 10 },
+	{ ARCH_exp_vein, 3.f, 2 },
 	// :spawn_res system
 };
 
@@ -449,6 +450,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_research_station: setup_research_station(en); break;
 		case ARCH_rock: setup_rock(en); break;
 		case ARCH_tree: setup_tree(en); break;
+		case ARCH_exp_vein: setup_exp_vein(en); break;
 		// :arch
 		default: log_error("missing entity_setup case entry"); break;
 	}

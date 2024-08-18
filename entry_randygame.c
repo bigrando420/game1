@@ -177,6 +177,7 @@ typedef enum SpriteID {
 	SPRITE_research_station,
 	SPRITE_exp,
 	SPRITE_exp_vein,
+	SPRITE_teleporter1,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -226,6 +227,7 @@ typedef enum ArchetypeID {
 	ARCH_workbench = 7,
 	ARCH_research_station = 8,
 	ARCH_exp_vein = 9,
+	ARCH_teleporter1 = 10,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -264,11 +266,14 @@ typedef struct Entity {
 
 // building resource
 // NOTE, a "resource" is a thing that we set up during startup, and is constant.
+//
+// randy: I tried removing this enum ID and just have the system be nameless like the world resource spawning system. But it's too much of a mental backflip when thinking about things. Much easier to just type out the enum name again so we can sitll use it as a handle for everything.
 typedef enum BuildingID {
 	BUILDING_nil,
 	BUILDING_furnace,
 	BUILDING_workbench,
 	BUILDING_research_station,
+	BUILDING_teleporter1,
 	// :building resource
 	BUILDING_MAX,
 } BuildingID;
@@ -392,6 +397,11 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
+void setup_teleporter1(Entity* en) {
+	en->arch = ARCH_teleporter1;
+	en->sprite_id = SPRITE_teleporter1;
+}
+
 void setup_exp_vein(Entity* en) {
 	en->arch = ARCH_exp_vein;
 	en->sprite_id = SPRITE_exp_vein;
@@ -451,6 +461,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_rock: setup_rock(en); break;
 		case ARCH_tree: setup_tree(en); break;
 		case ARCH_exp_vein: setup_exp_vein(en); break;
+		case ARCH_teleporter1: setup_teleporter1(en); break;
 		// :arch
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -1355,6 +1366,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_research_station] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/research_station.png"), get_heap_allocator()) };
 		sprites[SPRITE_exp] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp.png"), get_heap_allocator()) };
 		sprites[SPRITE_exp_vein] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp_vein.png"), get_heap_allocator()) };
+		sprites[SPRITE_teleporter1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/teleporter1.png"), get_heap_allocator()) };
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -1379,6 +1391,14 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_research_station,
 			.icon=SPRITE_research_station,
 			.description=STR("Researches recipes to unlock more buildings. This should wrap nicely at some point in the future lol..."),
+			.ingredients_count=2,
+			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
+		};
+		buildings[BUILDING_teleporter1] = (BuildingData){
+			.to_build=ARCH_teleporter1,
+			.icon=SPRITE_teleporter1,
+			.description=STR("A gateway to the next world."),
+			.pct_per_research_exp=10,
 			.ingredients_count=2,
 			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
 		};

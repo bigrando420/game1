@@ -24,7 +24,7 @@ typedef enum Pivot {
 	PIVOT_top_right,
 } Pivot;
 
-void draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color, Pivot pivot) {
+Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color, Pivot pivot) {
 	Gfx_Text_Metrics metrics = measure_text(font, text, raster_height, scale);
 	position = v2_sub(position, metrics.visual_pos_min);
 	Vector2 pivot_mul = {0};
@@ -39,6 +39,7 @@ void draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector
 	}
 	position = v2_sub(position, v2_mul(metrics.visual_size, pivot_mul));
 	draw_text(font, text, raster_height, position, scale, color);
+	return metrics;
 }
 
 // ^^^ engine changes
@@ -144,6 +145,7 @@ const s32 layer_world = 10;
 float64 delta_t;
 Gfx_Font* font;
 u32 font_height = 48;
+u32 font_height_body = 36;
 
 int world_pos_to_tile_pos(float world_pos) {
 	return roundf(world_pos / (float)tile_width);
@@ -228,28 +230,18 @@ typedef enum ArchetypeID {
 	ARCH_MAX,
 } ArchetypeID;
 
-#define MAX_RECIPE_INGREDIENTS 8
 // :item
 typedef struct ItemData {
 	string pretty_name;
 	// :recipe crafting
 	ArchetypeID for_structure;
-	ItemAmount crafting_recipe[MAX_RECIPE_INGREDIENTS];
+	ItemAmount crafting_recipe[8];
+	int crafting_recipe_count;
 	float craft_length;
 } ItemData;
 ItemData item_data[ITEM_MAX];
 ItemData get_item_data(ItemID id) {
 	return item_data[id];
-}
-int get_crafting_recipe_count(ItemData item_data) {
-	int count = 0;
-	for (int i = 0; i < MAX_RECIPE_INGREDIENTS; i++) {
-		if (item_data.crafting_recipe[i].id == 0) {
-			break;
-		}
-		count += 1;
-	}
-	return count;
 }
 
 typedef struct Entity {
@@ -284,9 +276,9 @@ typedef struct BuildingData {
 	ArchetypeID to_build;
 	SpriteID icon;
 	int pct_per_research_exp; // this jank will get replaced with a recipe one day
-	// display name
-	// cost
-	// etc
+	string description;
+	ItemAmount ingredients[8];
+	int ingredients_count;
 } BuildingData;
 BuildingData buildings[BUILDING_MAX];
 BuildingData get_building_data(BuildingID id) {
@@ -374,6 +366,7 @@ string get_archetype_pretty_name(ArchetypeID arch) {
 	switch (arch) {
 		case ARCH_furnace: return STR("Furnace");
 		case ARCH_workbench: return STR("Workbench");
+		case ARCH_research_station: return STR("Research Station");
 		default: return STR("nil");
 	}
 }
@@ -536,7 +529,7 @@ void do_ui_stuff() {
 	push_z_layer(layer_ui);
 
 	// "screen space"
-	Vector2 txt_scale = v2(0.1, 0.1);
+	Vector2 text_scale = v2(0.1, 0.1);
 	Vector4 bg_col = v4(0, 0, 0, 0.90);
 	Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
 	Vector4 accent_col = hex_to_rgba(0x44c3daff);
@@ -718,14 +711,90 @@ void do_ui_stuff() {
 				Range2f box = quad_to_range(*quad);
 
 				if (is_unlocked && range2f_contains(box, get_mouse_pos_in_ndc())) {
-					// if hover, do tooltip, that follows the mouse around
 					world_frame.hover_consumed = true;
 
+					// tooltip
+					bool has_all_ingredients = true;
+					{
+						Vector2 size = v2(40, 50);
+						Vector2 pos = get_mouse_pos_in_world_space();
+
+						draw_rect(pos, size, COLOR_BLACK);
+
+						float x0, y0;
+						x0 = pos.x + size.x * 0.5;
+						y0 = pos.y + size.y;
+						y0 -= 2.f; // arbitrary padding
+
+						Gfx_Text_Metrics met = draw_text_with_pivot(font, get_archetype_pretty_name(building->to_build), font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+						y0 -= met.visual_size.y;
+						y0 -= 2.f;
+
+						// description
+						{
+							// todo - text wrapping
+							float wrap_width = size.x;
+							string text = building->description;
+							draw_text_with_pivot(font, text, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+						}
+						// todo - advance by whatever the wrapped text box turns out to be...
+						y0 -= 30.f;
+
+						// ingredients list
+						for (int j = 0; j < building->ingredients_count; j++) {
+							ItemAmount ing_amount = building->ingredients[j];
+							// ItemData ing_data = get_item_data(ing_amount.id);
+
+							Vector2 element_size = v2(size.x * 0.8, 6.0);
+
+							x0 = pos.x + (size.x - element_size.x) * 0.5;
+
+							// bg box thing
+							draw_rect(v2(x0, y0), element_size, fill_col);
+
+							// icon
+							{
+								float item_icon_length = element_size.y * 0.8;
+
+								float x1 = pos.x + size.x * 0.5 - element_size.y;
+								float y1 = y0 + (item_icon_length - element_size.y) * -0.5;
+
+								draw_image(get_sprite(get_sprite_id_from_item(ing_amount.id))->image, v2(x1, y1), v2(item_icon_length, item_icon_length), COLOR_WHITE);
+							}
+
+							InventoryItemData inv_item = world->inventory_items[ing_amount.id];
+							Vector4 txt_col = COLOR_WHITE;
+							if (inv_item.amount < ing_amount.amount) {
+								txt_col = COLOR_RED;
+								has_all_ingredients = false;
+							}
+
+							string txt = tprint("%i/%i", inv_item.amount, ing_amount.amount);
+							Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
+							float center_pos = pos.x + size.x * 0.5;
+							Vector2 draw_pos = v2(center_pos, y0 + element_size.y * 0.5);
+							draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
+							draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0, 0.5)));
+							draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), txt_col);
+							// y0 += metrics.visual_size.y;
+
+							y0 -= element_size.y;
+							y0 -= 2.0f; // padding @cleanup
+						}
+					}
+
 					// if click, go into place mode
-					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					if (has_all_ingredients && is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 						world->placing_building = i;
 						world->ux_state = UX_place_mode;
+
+						// consume ingredients
+						for (int j = 0; j < building->ingredients_count; j++) {
+							ItemAmount ing_amount = building->ingredients[j];
+							world->inventory_items[ing_amount.id].amount -= ing_amount.amount;
+							assert(world->inventory_items[ing_amount.id].amount >= 0, "removed too many items. the check above must have failed!");
+						}
 					}
 				}
 
@@ -812,7 +881,7 @@ void do_ui_stuff() {
 			// draw all item recipes
 			for (int i = 1; i < ITEM_MAX; i++) {
 				ItemData data = get_item_data(i);
-				if (data.for_structure == workbench_en->arch && get_crafting_recipe_count(data)) {
+				if (data.for_structure == workbench_en->arch && data.crafting_recipe_count) {
 					Matrix4 xform = m4_identity;
 					xform = m4_translate(xform, v3(x1, y1, 0));
 
@@ -871,7 +940,7 @@ void do_ui_stuff() {
 				y0 = bottom_left_right_pane.y + 30.0; // @cleanup
 
 				// list out the ingredients
-				for (int i = 0; i < get_crafting_recipe_count(selected_item_data); i++) {
+				for (int i = 0; i < selected_item_data.crafting_recipe_count; i++) {
 					ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
 					ItemData ingredient_item_data = get_item_data(ingredient_amount.id);
 
@@ -927,7 +996,7 @@ void do_ui_stuff() {
 
 					// check for all ingredients met
 					bool has_enough_for_crafting = true;
-					for (int i = 0; i < get_crafting_recipe_count(selected_item_data); i++) {
+					for (int i = 0; i < selected_item_data.crafting_recipe_count; i++) {
 						ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
 						if (ingredient_amount.amount > world->inventory_items[ingredient_amount.id].amount) {
 							has_enough_for_crafting = false;
@@ -948,7 +1017,7 @@ void do_ui_stuff() {
 							workbench_en->current_crafting_item = world->selected_crafting_item;
 							workbench_en->current_crafting_amount += 1;
 							// remove ingredients from inventory
-							for (int i = 0; i < get_crafting_recipe_count(selected_item_data); i++) {
+							for (int i = 0; i < selected_item_data.crafting_recipe_count; i++) {
 								ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
 								world->inventory_items[ingredient_amount.id].amount -= ingredient_amount.amount;
 								assert(world->inventory_items[ingredient_amount.id].amount >= 0, "removed too many items. the check above must have failed!");
@@ -1156,7 +1225,7 @@ void do_ui_stuff() {
 					x0 += section_size.x * 0.5;
 					y0 -= 4.0; // arbitrary
 
-					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), txt_scale, COLOR_WHITE, PIVOT_center_center);
+					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_center_center);
 				}
 
 				// todo - put this into a research_recipe array so we can do multiple items for research.
@@ -1222,7 +1291,7 @@ void do_ui_stuff() {
 					}
 
 					string txt = tprint("x1");
-					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), txt_scale, col, PIVOT_center_left);
+					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, col, PIVOT_center_left);
 				}
 
 
@@ -1303,7 +1372,13 @@ int entry(int argc, char **argv) {
 		// buildings[0] = 
 		buildings[BUILDING_furnace] = (BuildingData){ .to_build=ARCH_furnace, .icon=SPRITE_furnace, .pct_per_research_exp=25};
 		buildings[BUILDING_workbench] = (BuildingData){ .to_build=ARCH_workbench, .icon=SPRITE_workbench, .pct_per_research_exp=50};
-		buildings[BUILDING_research_station] = (BuildingData){ .to_build=ARCH_research_station, .icon=SPRITE_research_station };
+		buildings[BUILDING_research_station] = (BuildingData){
+			.to_build=ARCH_research_station,
+			.icon=SPRITE_research_station,
+			.description=STR("Researches recipes to unlock more buildings. This should wrap nicely at some point in the future lol..."),
+			.ingredients_count=2,
+			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
+		};
 	}
 
 	// item data resource setup
@@ -1316,8 +1391,8 @@ int entry(int argc, char **argv) {
 
 		// :item
 		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Essence") };
-		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} } };
-		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} } };
+		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} }, .crafting_recipe_count=1 };
+		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }, .crafting_recipe_count=2 };
 	}
 
 	// :init

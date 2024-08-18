@@ -127,6 +127,7 @@ const float world_half_length = tile_width * 10;
 const float entity_selection_radius = 16.0f;
 const float player_pickup_radius = 10.0f;
 const int exp_vein_health = 3;
+const int ore1_health = 3;
 const int rock_health = 3;
 const int tree_health = 3;
 const s32 layer_ui = 20;
@@ -169,6 +170,8 @@ typedef enum SpriteID {
 	SPRITE_exp,
 	SPRITE_exp_vein,
 	SPRITE_teleporter1,
+	SPRITE_ore1,
+	SPRITE_ore1_item,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -194,6 +197,7 @@ typedef enum ItemID {
 	ITEM_rock,
 	ITEM_pine_wood,
 	ITEM_exp,
+	ITEM_ore1,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -219,6 +223,7 @@ typedef enum ArchetypeID {
 	ARCH_research_station = 8,
 	ARCH_exp_vein = 9,
 	ARCH_teleporter1 = 10,
+	ARCH_ore1 = 11,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -340,7 +345,8 @@ WorldResourceData world_resources[] = {
 	{ DIM_first, ARCH_tree, 1.f, 10 },
 	{ DIM_first, ARCH_exp_vein, 3.f, 2 },
 
-	{ DIM_second, ARCH_exp_vein, 0.5f, 15 },
+	{ DIM_second, ARCH_exp_vein, 2.5f, 10 },
+	{ DIM_second, ARCH_ore1, 2.5f, 10 },
 	// :spawn_res system
 };
 
@@ -421,6 +427,13 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
+void setup_ore1(Entity* en) {
+	en->arch = ARCH_ore1;
+	en->sprite_id = SPRITE_ore1;
+	en->health = ore1_health;
+	en->destroyable_world_item = true;
+}
+
 void setup_teleporter1(Entity* en) {
 	en->arch = ARCH_teleporter1;
 	en->sprite_id = SPRITE_teleporter1;
@@ -487,7 +500,8 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_tree: setup_tree(en); break;
 		case ARCH_exp_vein: setup_exp_vein(en); break;
 		case ARCH_teleporter1: setup_teleporter1(en); break;
-		// :arch
+		case ARCH_ore1: setup_ore1(en); break;
+		// :arch :setup
 		default: log_error("missing entity_setup case entry"); break;
 	}
 }
@@ -1412,6 +1426,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_exp] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp.png"), get_heap_allocator()) };
 		sprites[SPRITE_exp_vein] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp_vein.png"), get_heap_allocator()) };
 		sprites[SPRITE_teleporter1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/teleporter1.png"), get_heap_allocator()) };
+		sprites[SPRITE_ore1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/ore1.png"), get_heap_allocator()) };
+		sprites[SPRITE_ore1_item] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/ore1_item.png"), get_heap_allocator()) };
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -1469,6 +1485,7 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Essence") };
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} }, .crafting_recipe_count=1 };
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }, .crafting_recipe_count=2 };
+		item_data[ITEM_ore1] = (ItemData){ .pretty_name=STR("Ore Thingy") };
 	}
 
 	// :dimension data setup
@@ -1752,6 +1769,12 @@ int entry(int argc, char **argv) {
 								case ARCH_exp_vein: {
 									Entity* en = entity_create();
 									setup_item(en, ITEM_exp);
+									en->pos = selected_en->pos;
+								} break;
+
+								case ARCH_ore1: {
+									Entity* en = entity_create();
+									setup_item(en, ITEM_ore1);
 									en->pos = selected_en->pos;
 								} break;
 

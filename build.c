@@ -32,7 +32,7 @@ typedef struct Context_Extra {
 // Comment & Uncomment these to swap projects (only include one at a time)
 //
 
-// this is a minimal starting point for new projects. Copy & rename to get started
+// This is a minimal starting point for new projects. Copy & rename to get started
 // #include "oogabooga/examples/minimal_game_loop.c"
 
 // #include "oogabooga/examples/text_rendering.c"
@@ -41,6 +41,7 @@ typedef struct Context_Extra {
 // #include "oogabooga/examples/audio_test.c"
 // #include "oogabooga/examples/custom_shader.c"
 // #include "oogabooga/examples/growing_array_example.c"
+#include "oogabooga/examples/input_example.c"
 
 // Randy's example game that he's building out as a tutorial for using the engine
 #include "entry_randygame.c"

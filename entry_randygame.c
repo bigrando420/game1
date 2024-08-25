@@ -126,6 +126,8 @@ const int tile_width = 8;
 const float world_half_length = tile_width * 10;
 const float entity_selection_radius = 16.0f;
 const float player_pickup_radius = 10.0f;
+const int grass_health = 3;
+const int flint_depo_health = 3;
 const int exp_vein_health = 3;
 const int ore1_health = 3;
 const int rock_health = 3;
@@ -172,6 +174,13 @@ typedef enum SpriteID {
 	SPRITE_teleporter1,
 	SPRITE_ore1,
 	SPRITE_ore1_item,
+	SPRITE_fiber,
+	SPRITE_flint,
+	SPRITE_flint_axe,
+	SPRITE_flint_depo,
+	SPRITE_flint_pickaxe,
+	SPRITE_flint_scythe,
+	SPRITE_grass,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -198,6 +207,11 @@ typedef enum ItemID {
 	ITEM_pine_wood,
 	ITEM_exp,
 	ITEM_ore1,
+	ITEM_fiber,
+	ITEM_flint,
+	ITEM_flint_axe,
+	ITEM_flint_pickaxe,
+	ITEM_flint_scythe,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -224,6 +238,8 @@ typedef enum ArchetypeID {
 	ARCH_exp_vein = 9,
 	ARCH_teleporter1 = 10,
 	ARCH_ore1 = 11,
+	ARCH_flint_depo = 12,
+	ARCH_grass = 13,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -348,6 +364,8 @@ WorldResourceData world_resources[] = {
 	{ DIM_first, ARCH_rock, 2.f, 4 },
 	{ DIM_first, ARCH_tree, 1.f, 10 },
 	{ DIM_first, ARCH_exp_vein, 3.f, 2 },
+	{ DIM_first, ARCH_flint_depo, 3.f, 2 },
+	{ DIM_first, ARCH_grass, 3.f, 10 },
 
 	{ DIM_second, ARCH_exp_vein, 2.5f, 10 },
 	{ DIM_second, ARCH_ore1, 2.5f, 10 },
@@ -419,6 +437,20 @@ void entity_destroy(Entity* entity) {
 }
 
 // :setup things
+
+void setup_grass(Entity* en) {
+	en->arch = ARCH_grass;
+	en->sprite_id = SPRITE_grass;
+	en->health = grass_health;
+	en->destroyable_world_item = true;
+}
+
+void setup_flint_depo(Entity* en) {
+	en->arch = ARCH_flint_depo;
+	en->sprite_id = SPRITE_flint_depo;
+	en->health = flint_depo_health;
+	en->destroyable_world_item = true;
+}
 
 void setup_ore1(Entity* en) {
 	en->arch = ARCH_ore1;
@@ -494,6 +526,8 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_exp_vein: setup_exp_vein(en); break;
 		case ARCH_teleporter1: setup_teleporter1(en); break;
 		case ARCH_ore1: setup_ore1(en); break;
+		case ARCH_flint_depo: setup_flint_depo(en); break;
+		case ARCH_grass: setup_grass(en); break;
 		// :arch :setup
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -1443,6 +1477,13 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_teleporter1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/teleporter1.png"), get_heap_allocator()) };
 		sprites[SPRITE_ore1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/ore1.png"), get_heap_allocator()) };
 		sprites[SPRITE_ore1_item] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/ore1_item.png"), get_heap_allocator()) };
+		sprites[SPRITE_fiber] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/fiber.png"), get_heap_allocator())};
+		sprites[SPRITE_flint] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint.png"), get_heap_allocator())};
+		sprites[SPRITE_flint_axe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_axe.png"), get_heap_allocator())};
+		sprites[SPRITE_flint_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_depo.png"), get_heap_allocator())};
+		sprites[SPRITE_flint_pickaxe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_pickaxe.png"), get_heap_allocator())};
+		sprites[SPRITE_flint_scythe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_scythe.png"), get_heap_allocator())};
+		sprites[SPRITE_grass] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/grass.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -1501,6 +1542,11 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock, .for_structure=ARCH_furnace, .crafting_recipe={ {ITEM_pine_wood, 2} }, .crafting_recipe_count=1 };
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood, .for_structure=ARCH_workbench, .crafting_recipe={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }, .crafting_recipe_count=2 };
 		item_data[ITEM_ore1] = (ItemData){ .pretty_name=STR("Ore Thingy"), .icon=SPRITE_ore1_item };
+		item_data[ITEM_fiber] = (ItemData){ .pretty_name=STR("Fiber"), .icon=SPRITE_fiber };
+		item_data[ITEM_flint] = (ItemData){ .pretty_name=STR("Flint"), .icon=SPRITE_flint };
+		item_data[ITEM_flint_axe] = (ItemData){ .pretty_name=STR("Flint Axe"), .icon=SPRITE_flint_axe };
+		item_data[ITEM_flint_pickaxe] = (ItemData){ .pretty_name=STR("Flint Pickaxe"), .icon=SPRITE_flint_pickaxe };
+		item_data[ITEM_flint_scythe] = (ItemData){ .pretty_name=STR("Flint Scythe"), .icon=SPRITE_flint_scythe };
 	}
 
 	// :dimension data setup
@@ -1524,6 +1570,9 @@ int entry(int argc, char **argv) {
 			world->inventory_items[ITEM_pine_wood].amount = 50;
 			world->inventory_items[ITEM_rock].amount = 50;
 			world->inventory_items[ITEM_exp].amount = 100;
+			world->inventory_items[ITEM_flint_axe].amount = 1;
+			world->inventory_items[ITEM_flint].amount = 100;
+			world->inventory_items[ITEM_fiber].amount = 100;
 
 			Entity* en = entity_create();
 			setup_furnace(en);

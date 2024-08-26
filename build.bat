@@ -7,10 +7,9 @@ for /F "tokens=1-4 delims=:.," %%a in ("%time%") do (
 )
 
 
-if exist build (
-  rmdir /s /q build
+if not exist build (
+   mkdir build
 )
-mkdir build
 
 pushd build
 

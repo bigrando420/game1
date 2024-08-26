@@ -678,6 +678,64 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 
 // :func dump
 
+void world_setup()
+{
+	Entity* player_en = entity_create();
+	setup_player(player_en);
+	player_en->current_dimension = DIM_first;
+
+	world->building_unlocks[BUILDING_research_station].research_progress = 100;
+	world->building_unlocks[BUILDING_workbench].research_progress = 100;
+
+	// :test stuff
+	#if defined(DEV_TESTING)
+	{
+		world->inventory_items[ITEM_pine_wood].amount = 50;
+		world->inventory_items[ITEM_rock].amount = 50;
+		world->inventory_items[ITEM_exp].amount = 100;
+		world->inventory_items[ITEM_flint_axe].amount = 1;
+		world->inventory_items[ITEM_flint].amount = 100;
+		world->inventory_items[ITEM_fiber].amount = 100;
+
+		Entity* en = entity_create();
+		setup_furnace(en);
+		en->pos.y = 20.0;
+
+		en = entity_create();
+		setup_research_station(en);
+		en->pos.x = -20.0;
+	}
+	#endif
+}
+
+// caveman serialisation™️
+bool world_save_to_disk() {
+	return os_write_entire_file_s(STR("world"), (string){sizeof(World), (u8*)world});
+}
+bool world_attempt_load_from_disk() {
+	string result = {0};
+	bool succ = os_read_entire_file_s(STR("world"), &result, temp_allocator);
+	if (!succ) {
+		log_error("Failed to load world.");
+		return false;
+	}
+
+	// NOTE, for errors I used to do stuff like this assert:
+	// assert(result.count == sizeof(World), "world size has changed!");
+	//
+	// But since shipping to users, I've noticed that it's always better to gracefully fail somehow.
+	// That's why this function returns a bool. We handle that at the callsite.
+	// Maybe we want to just start up a new world, throw a user friendly error, or whatever as a fallback. Not just crash the game lol.
+
+	if (result.count != sizeof(World)) {
+		log_error("world size different to one on disk.");
+		return false;
+	}
+
+	memcpy(world, result.data, result.count);
+	return true;
+}
+
 bool is_in_player_dimension(Entity* en) {
 	Entity* player = get_player();
 	// we'll do some stuff later on where this can be in multiple dimensions, just by && this bad boy
@@ -1667,36 +1725,19 @@ int entry(int argc, char **argv) {
 		dimension_data[DIM_second].pretty_name = STR("Second");
 	}
 
-	// :init
-	// note, this'll eventually be moved into a world_setup func after we do serialisation
-	{
-		Entity* player_en = entity_create();
-		setup_player(player_en);
-		player_en->current_dimension = DIM_first;
+	// the :init zone
 
-		world->building_unlocks[BUILDING_research_station].research_progress = 100;
-		world->building_unlocks[BUILDING_workbench].research_progress = 100;
-
-		// :test stuff
-		#if defined(DEV_TESTING)
-		{
-			world->inventory_items[ITEM_pine_wood].amount = 50;
-			world->inventory_items[ITEM_rock].amount = 50;
-			world->inventory_items[ITEM_exp].amount = 100;
-			world->inventory_items[ITEM_flint_axe].amount = 1;
-			world->inventory_items[ITEM_flint].amount = 100;
-			world->inventory_items[ITEM_fiber].amount = 100;
-
-			Entity* en = entity_create();
-			setup_furnace(en);
-			en->pos.y = 20.0;
-
-			en = entity_create();
-			setup_research_station(en);
-			en->pos.x = -20.0;
+	// world load / setup
+	if (os_is_file_s(STR("world"))) {
+		bool succ = world_attempt_load_from_disk();
+		if (!succ) {
+			// just setup a new world if it fails
+			world_setup();
 		}
-		#endif
+	} else {
+		world_setup();
 	}
+	world_save_to_disk();
 
 	float64 seconds_counter = 0.0;
 	s32 frame_count = 0;
@@ -2094,7 +2135,24 @@ int entry(int argc, char **argv) {
 			seconds_counter = 0.0;
 			frame_count = 0;
 		}
+
+		// load/save commands
+		// these are at the bottom, because we'll want to have a clean spot to do this to avoid any mid-way operation bugs.
+		#if defined(DEBUG)
+		{
+			if (is_key_just_pressed('F')) {
+				world_save_to_disk();
+				log("saved");
+			}
+			if (is_key_just_pressed('R')) {
+				world_attempt_load_from_disk();
+				log("loaded ");
+			}
+		}
+		#endif
 	}
+
+	world_save_to_disk();
 
 	return 0;
 }

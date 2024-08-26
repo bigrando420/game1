@@ -259,6 +259,9 @@ typedef struct ItemData {
 	string pretty_name;
 	string description;
 	SpriteID icon;
+	int extra_axe_dmg; // #extend_dmg_type_here
+	int extra_pickaxe_dmg;
+	int extra_sickle_dmg;
 	// :recipe crafting
 	ArchetypeID for_structure;
 	ItemAmount crafting_recipe[8];
@@ -287,6 +290,15 @@ typedef struct DimensionData {
 } DimensionData;
 DimensionData dimension_data[DIM_MAX] = {0};
 
+typedef enum DamageType {
+	DMG_nil,
+	DMG_axe,
+	DMG_pickaxe,
+	DMG_sickle,
+	// #extend_dmg_type_here
+	DMG_MAX,
+} DamageType;
+
 typedef struct Entity {
 	bool is_valid;
 	ArchetypeID arch;
@@ -306,6 +318,7 @@ typedef struct Entity {
 	float64 tp_cooldown_end_time;
 	ItemAmount drops[4];
 	int drops_count;
+	DamageType dmg_type;
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
@@ -548,6 +561,7 @@ void setup_tree(Entity* en) {
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_pine_wood, .amount=get_random_int_in_range(2, 3)};
+	en->dmg_type = DMG_axe;
 }
 
 void setup_item(Entity* en, ItemID item_id) {
@@ -1608,6 +1622,7 @@ int entry(int argc, char **argv) {
 			.pretty_name=STR("Flint Axe"),
 			.description=STR("+1 damage to trees\nThis is also something that should wrap really nicely. Yay look at that sexy text box wrap. Isn't that just beautiful."),
 			.icon=SPRITE_flint_axe,
+			.extra_axe_dmg=1,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
 			.crafting_recipe={
@@ -1619,8 +1634,9 @@ int entry(int argc, char **argv) {
 
 		item_data[ITEM_flint_pickaxe] = (ItemData){
 			.pretty_name=STR("Flint Pickaxe"),
-			.description=STR("+1 damage to rocks"),
+			.description=STR("+1 damage to rocks"), // todo - make this functional from the extra dmg state
 			.icon=SPRITE_flint_pickaxe,
+			.extra_pickaxe_dmg=1,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
 			.crafting_recipe={
@@ -1634,6 +1650,7 @@ int entry(int argc, char **argv) {
 			.pretty_name=STR("Flint Scythe"),
 			.description=STR("+1 damage to grass"),
 			.icon=SPRITE_flint_scythe,
+			.extra_sickle_dmg=1,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
 			.crafting_recipe={
@@ -1906,7 +1923,28 @@ int entry(int argc, char **argv) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-					selected_en->health -= 1;
+					int damage_amount = 1;
+					if (selected_en->dmg_type == DMG_axe) {
+						for (int i = 0; i < ITEM_MAX; i++) {
+							if (world->inventory_items[i].amount) {
+								damage_amount += get_item_data(i).extra_axe_dmg;
+							}
+						}
+					} else if (selected_en->dmg_type == DMG_pickaxe) {
+						for (int i = 0; i < ITEM_MAX; i++) {
+							if (world->inventory_items[i].amount) {
+								damage_amount += get_item_data(i).extra_pickaxe_dmg;
+							}
+						}
+					} else if (selected_en->dmg_type == DMG_sickle) {
+						for (int i = 0; i < ITEM_MAX; i++) {
+							if (world->inventory_items[i].amount) {
+								damage_amount += get_item_data(i).extra_sickle_dmg;
+							}
+						}
+					} // #extend_dmg_type_here
+
+					selected_en->health -= damage_amount;
 					if (selected_en->health <= 0) {
 						// :drops
 						assert(selected_en->drops_count >= 0 && selected_en->drops_count <= ARRAY_COUNT(selected_en->drops), "out of bounds.");

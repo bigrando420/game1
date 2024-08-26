@@ -54,7 +54,7 @@ float float_alpha(float x, float min, float max) {
 }
 
 inline float64 now() {
-	return os_get_current_time_in_seconds();
+	return os_get_elapsed_seconds();
 }
 
 float alpha_from_end_time(float64 end_time, float length) {
@@ -69,7 +69,7 @@ Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
 
 	// NOTE: we're assuming these are the screen space matricies.
 	Matrix4 proj = draw_frame.projection;
-	Matrix4 view = draw_frame.view;
+	Matrix4 view = draw_frame.camera_xform;
 
 	Matrix4 ndc_to_screen_space = m4_identity;
 	ndc_to_screen_space = m4_mul(ndc_to_screen_space, m4_inverse(proj));
@@ -577,7 +577,7 @@ Vector2 get_mouse_pos_in_ndc() {
 	float mouse_x = input_frame.mouse_x;
 	float mouse_y = input_frame.mouse_y;
 	Matrix4 proj = draw_frame.projection;
-	Matrix4 view = draw_frame.view;
+	Matrix4 view = draw_frame.camera_xform;
 	float window_w = window.width;
 	float window_h = window.height;
 
@@ -592,7 +592,7 @@ Vector2 get_mouse_pos_in_world_space() {
 	float mouse_x = input_frame.mouse_x;
 	float mouse_y = input_frame.mouse_y;
 	Matrix4 proj = draw_frame.projection;
-	Matrix4 view = draw_frame.view;
+	Matrix4 view = draw_frame.camera_xform;
 	float window_w = window.width;
 	float window_h = window.height;
 
@@ -613,12 +613,12 @@ Vector2 get_mouse_pos_in_world_space() {
 float screen_width = 240.0;
 float screen_height = 135.0;
 void set_screen_space() {
-	draw_frame.view = m4_scalar(1.0);
+	draw_frame.camera_xform = m4_scalar(1.0);
 	draw_frame.projection = m4_make_orthographic_projection(0.0, screen_width, 0.0, screen_height, -1, 10);
 }
 void set_world_space() {
 	draw_frame.projection = world_frame.world_proj;
-	draw_frame.view = world_frame.world_view;
+	draw_frame.camera_xform = world_frame.world_view;
 }
 
 // pad_pct just shrinks the rect by a % of itself ... 0.2 is a nice default
@@ -745,12 +745,12 @@ void do_ui_stuff() {
 
 					if (is_selected_alpha == 1.0)
 					{
-						float scale_adjust = 0.3; //0.1 * sin_breathe(os_get_current_time_in_seconds(), 20.0);
+						float scale_adjust = 0.3; //0.1 * sin_breathe(os_get_elapsed_seconds(), 20.0);
 						xform = m4_scale(xform, v3(1 + scale_adjust, 1 + scale_adjust, 1));
 					}
 					{
 						// could also rotate ...
-						// float adjust = PI32 * 2.0 * sin_breathe(os_get_current_time_in_seconds(), 1.0);
+						// float adjust = PI32 * 2.0 * sin_breathe(os_get_elapsed_seconds(), 1.0);
 						// xform = m4_rotate_z(xform, adjust);
 					}
 					xform = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, get_sprite_size(sprite).y * -0.5, 0));
@@ -1668,11 +1668,11 @@ int entry(int argc, char **argv) {
 	float zoom = 5.3;
 	Vector2 camera_pos = v2(0, 0);
 
-	float64 last_time = os_get_current_time_in_seconds();
+	float64 last_time = os_get_elapsed_seconds();
 	while (!window.should_close) {
 		reset_temporary_storage();
 		world_frame = (WorldFrame){0};
-		float64 current_time = os_get_current_time_in_seconds();
+		float64 current_time = os_get_elapsed_seconds();
 		delta_t = current_time - last_time;
 		last_time = current_time;
 		os_update();
@@ -1937,7 +1937,7 @@ int entry(int argc, char **argv) {
 						Sprite* sprite = get_sprite(en->sprite_id);
 						Matrix4 xform = m4_scalar(1.0);
 						if (en->is_item) {
-							xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_current_time_in_seconds(), 5.0), 0));
+							xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
 						}
 						// @volatile with entity placement
 						xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));

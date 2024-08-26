@@ -43,7 +43,7 @@ typedef struct Context_Extra {
 // #include "oogabooga/examples/custom_shader.c"
 // #include "oogabooga/examples/growing_array_example.c"
 // #include "oogabooga/examples/input_example.c"
-#include "oogabooga/examples/sprite_animation.c"
+// #include "oogabooga/examples/sprite_animation.c"
 
 // Randy's example game that he's building out as a tutorial for using the engine
 #include "entry_randygame.c"

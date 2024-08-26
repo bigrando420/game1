@@ -257,6 +257,7 @@ string get_archetype_pretty_name(ArchetypeID id) {
 // :item
 typedef struct ItemData {
 	string pretty_name;
+	string description;
 	SpriteID icon;
 	// :recipe crafting
 	ArchetypeID for_structure;
@@ -1052,9 +1053,9 @@ void do_ui_stuff() {
 						col = COLOR_RED;
 					}
 
-					Draw_Quad* quad = draw_image_xform(get_sprite(get_sprite_id_from_item(i))->image, xform, item_icon_size, col);
-					Range2f icon_box = quad_to_range(*quad);
-					if (range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
+					Range2f rect = range2f_make_bottom_left(v2(x1, y1), item_icon_size);
+					draw_sprite_in_rect(get_sprite_id_from_item(i), rect, col, 0.1);
+					if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
 						// ...
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
@@ -1097,6 +1098,21 @@ void do_ui_stuff() {
 					y0 = draw_pos.y; // TODO - workie?
 					y0 -= text_height_pad;
 					// y1 -= 20.0;
+				}
+
+				// description
+				{
+					x0 += section_size.x * 0.5;
+
+					float wrap_width = section_size.x;
+					string text = selected_item_data.description;
+
+					string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
+					for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
+						string line = lines[i];
+						Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+						y0 -= metrics.visual_size.y;
+					}
 				}
 
 				y0 = bottom_left_right_pane.y + 30.0; // @cleanup
@@ -1590,6 +1606,7 @@ int entry(int argc, char **argv) {
 		//
 		item_data[ITEM_flint_axe] = (ItemData){
 			.pretty_name=STR("Flint Axe"),
+			.description=STR("+1 damage to trees\nThis is also something that should wrap really nicely. Yay look at that sexy text box wrap. Isn't that just beautiful."),
 			.icon=SPRITE_flint_axe,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
@@ -1602,6 +1619,7 @@ int entry(int argc, char **argv) {
 
 		item_data[ITEM_flint_pickaxe] = (ItemData){
 			.pretty_name=STR("Flint Pickaxe"),
+			.description=STR("+1 damage to rocks"),
 			.icon=SPRITE_flint_pickaxe,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
@@ -1614,6 +1632,7 @@ int entry(int argc, char **argv) {
 
 		item_data[ITEM_flint_scythe] = (ItemData){
 			.pretty_name=STR("Flint Scythe"),
+			.description=STR("+1 damage to grass"),
 			.icon=SPRITE_flint_scythe,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,

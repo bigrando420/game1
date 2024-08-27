@@ -181,6 +181,7 @@ typedef enum SpriteID {
 	SPRITE_grass,
 	SPRITE_coal,
 	SPRITE_core_tether,
+	SPRITE_tether,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -242,6 +243,7 @@ typedef enum ArchetypeID {
 	ARCH_flint_depo = 12,
 	ARCH_grass = 13,
 	ARCH_core_tether = 14,
+	ARCH_tether = 15,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -340,6 +342,7 @@ typedef enum BuildingID {
 	BUILDING_workbench,
 	BUILDING_research_station,
 	BUILDING_teleporter1,
+	BUILDING_tether,
 	// :building resource
 	BUILDING_MAX,
 } BuildingID;
@@ -471,6 +474,11 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
+void setup_tether(Entity* en) {
+	en->arch = ARCH_tether;
+	en->sprite_id = SPRITE_tether;
+}
+
 void setup_core_tether(Entity* en) {
 	en->arch = ARCH_core_tether;
 	en->sprite_id = SPRITE_core_tether;
@@ -583,6 +591,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_flint_depo: setup_flint_depo(en); break;
 		case ARCH_grass: setup_grass(en); break;
 		case ARCH_core_tether: setup_core_tether(en); break;
+		case ARCH_tether: setup_tether(en); break;
 		// :arch :setup
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -1654,6 +1663,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_grass] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/grass.png"), get_heap_allocator())};
 		sprites[SPRITE_coal] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/coal.png"), get_heap_allocator())};
 		sprites[SPRITE_core_tether] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/core_tether.png"), get_heap_allocator())};
+		sprites[SPRITE_tether] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/tether.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -1679,6 +1689,15 @@ int entry(int argc, char **argv) {
 
 	// :building resource setup
 	{
+		buildings[BUILDING_tether] = (BuildingData){
+			.to_build=ARCH_tether,
+			.icon=SPRITE_tether,
+			.description=STR("Extends oxygen range"),
+			.pct_per_research_exp=10,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_rock, 20} }
+		};
+
 		buildings[BUILDING_furnace] = (BuildingData){
 			.to_build=ARCH_furnace,
 			.icon=SPRITE_furnace,

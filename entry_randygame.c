@@ -31,6 +31,7 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 	Vector2 pivot_mul = {0};
 	switch (pivot) {
 		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
+		case PIVOT_bottom_center: pivot_mul = v2(0.5, 0.0); break;
 		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
 		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
 		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
@@ -114,6 +115,7 @@ Vector4 color_0;
 Vector4 col_oxygen;
 
 // :tweaks
+float core_tether_radius = 40.0;
 float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 0.02;
 float teleporter_radius = 8.0f;
@@ -362,6 +364,7 @@ typedef enum UXState {
 	UX_place_mode,
 	UX_workbench,
 	UX_research,
+	UX_respawn,
 	// :ux
 	UX_MAX,
 } UXState;
@@ -767,6 +770,28 @@ void do_ui_stuff() {
 	Vector4 bg_col = v4(0, 0, 0, 0.90);
 	Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
 	Vector4 accent_col = hex_to_rgba(0x44c3daff);
+
+	// :respawn ui
+	if (world->ux_state == UX_respawn) {
+		u32 title_font_height = 128;
+		u32 subtitle_font_height = 64;
+
+		float x0 = screen_width * 0.5;
+		float y0 = screen_height * 0.6666;
+		draw_text_with_pivot(font, STR("DED"), title_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_bottom_center);
+
+		y0 -= 5.0;
+		draw_text_with_pivot(font, STR("press 'R' to respawn"), subtitle_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+
+		if (is_key_just_pressed('R')) {
+			consume_key_just_pressed('R');
+			world->ux_state = UX_nil;
+			Entity* player = get_player();
+			player->health = 1;
+			player->oxygen = get_max_oxygen();
+			player->pos = v2(10, 0);
+		}
+	}
 
 	// :inventory UI
 	{
@@ -2004,7 +2029,7 @@ int entry(int argc, char **argv) {
 		// :player specific caveman update
 		{
 			float dist_from_tether = v2_dist(player->pos, world->core_tether->pos);
-			if (dist_from_tether < 20.0) {
+			if (dist_from_tether < core_tether_radius) {
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
 				}
@@ -2037,6 +2062,8 @@ int entry(int argc, char **argv) {
 						drop->item_amount = inv_item_data.amount;
 					}
 				}
+
+				world->ux_state = UX_respawn;
 			}
 		}
 

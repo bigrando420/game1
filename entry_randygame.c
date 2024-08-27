@@ -1650,7 +1650,7 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_furnace,
 			.description=STR("Can burn stuff into something more useful."),
 			.pct_per_research_exp=10,
-			.ingredients_count=2,
+			.ingredients_count=1,
 			.ingredients={ {ITEM_rock, 20} }
 		};
 
@@ -1673,9 +1673,9 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_teleporter1,
 			.icon=SPRITE_teleporter1,
 			.description=STR("A gateway to the next world."),
-			.pct_per_research_exp=50,
+			.pct_per_research_exp=2,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
+			.ingredients={ {ITEM_pine_wood, 100}, {ITEM_rock, 100} }
 		};
 	}
 

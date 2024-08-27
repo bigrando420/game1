@@ -181,6 +181,7 @@ typedef enum SpriteID {
 	SPRITE_flint_pickaxe,
 	SPRITE_flint_scythe,
 	SPRITE_grass,
+	SPRITE_coal,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -212,6 +213,7 @@ typedef enum ItemID {
 	ITEM_flint_axe,
 	ITEM_flint_pickaxe,
 	ITEM_flint_scythe,
+	ITEM_coal,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -1612,6 +1614,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_flint_pickaxe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_pickaxe.png"), get_heap_allocator())};
 		sprites[SPRITE_flint_scythe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_scythe.png"), get_heap_allocator())};
 		sprites[SPRITE_grass] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/grass.png"), get_heap_allocator())};
+		sprites[SPRITE_coal] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/coal.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -1673,12 +1676,24 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item
-		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Essence"), .icon=SPRITE_exp};
+		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Knowledge Fragment"), .icon=SPRITE_exp};
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock };
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood };
 		item_data[ITEM_ore1] = (ItemData){ .pretty_name=STR("Ore Thingy"), .icon=SPRITE_ore1_item };
 		item_data[ITEM_fiber] = (ItemData){ .pretty_name=STR("Fiber"), .icon=SPRITE_fiber };
 		item_data[ITEM_flint] = (ItemData){ .pretty_name=STR("Flint"), .icon=SPRITE_flint };
+
+		item_data[ITEM_coal] = (ItemData){
+			.pretty_name=STR("Coal"),
+			.description=STR("FUEEEEEEL"),
+			.icon=SPRITE_coal,
+			.craft_length=0.5,
+			.for_structure=ARCH_furnace,
+			.crafting_recipe_count=1,
+			.crafting_recipe={
+				{ITEM_pine_wood, 1},
+			},
+		};
 
 		// NOTE
 		// maybe we move some of these guys into the first round of item researching??

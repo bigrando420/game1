@@ -321,6 +321,7 @@ typedef struct Entity {
 	ItemAmount drops[4];
 	int drops_count;
 	DamageType dmg_type;
+	ItemID selected_crafting_item;
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
@@ -405,7 +406,6 @@ typedef struct World {
 	float building_alpha_target;
 	BuildingID placing_building;
 	Entity* interacting_with_entity;
-	ItemID selected_crafting_item;
 	BuildingID selected_research_thing;
 	UnlockState building_unlocks[BUILDING_MAX];
 	WorldDimension dimensions[DIM_MAX];
@@ -1123,7 +1123,7 @@ void do_ui_stuff() {
 					xform = m4_translate(xform, v3(x1, y1, 0));
 
 					Vector4 col = COLOR_WHITE;
-					if (world->selected_crafting_item == i) {
+					if (workbench_en->selected_crafting_item == i) {
 						col = COLOR_RED;
 					}
 
@@ -1133,7 +1133,7 @@ void do_ui_stuff() {
 						// ...
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							world->selected_crafting_item = i;
+							workbench_en->selected_crafting_item = i;
 						}
 					}
 					x1 += item_icon_size.x;
@@ -1152,8 +1152,8 @@ void do_ui_stuff() {
 			xform = m4_translate(xform, v3(x0, y0, 0));
 			draw_rect_xform(xform, section_size, bg_col);
 
-			if (world->selected_crafting_item) {
-				ItemData selected_item_data = get_item_data(world->selected_crafting_item);
+			if (workbench_en->selected_crafting_item) {
+				ItemData selected_item_data = get_item_data(workbench_en->selected_crafting_item);
 
 				// title of item
 				y0 += section_size.y;
@@ -1266,7 +1266,7 @@ void do_ui_stuff() {
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							// :craft!
-							workbench_en->current_crafting_item = world->selected_crafting_item;
+							workbench_en->current_crafting_item = workbench_en->selected_crafting_item;
 							workbench_en->current_crafting_amount += 1;
 							// remove ingredients from inventory
 							for (int i = 0; i < selected_item_data.crafting_recipe_count; i++) {

@@ -1645,8 +1645,15 @@ int entry(int argc, char **argv) {
 
 	// :building resource setup
 	{
-		// buildings[0] = 
-		buildings[BUILDING_furnace] = (BuildingData){ .to_build=ARCH_furnace, .icon=SPRITE_furnace, .pct_per_research_exp=25};
+		buildings[BUILDING_furnace] = (BuildingData){
+			.to_build=ARCH_furnace,
+			.icon=SPRITE_furnace,
+			.description=STR("Can burn stuff into something more useful."),
+			.pct_per_research_exp=10,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_rock, 20} }
+		};
+
 		buildings[BUILDING_workbench] = (BuildingData){
 			.to_build=ARCH_workbench,
 			.icon=SPRITE_workbench,

@@ -1702,6 +1702,7 @@ int entry(int argc, char **argv) {
 			.pretty_name=STR("Flint Axe"),
 			.description=STR("+1 damage to trees\nThis is also something that should wrap really nicely. Yay look at that sexy text box wrap. Isn't that just beautiful."),
 			.icon=SPRITE_flint_axe,
+			.craft_length=10,
 			.extra_axe_dmg=1,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
@@ -1716,6 +1717,7 @@ int entry(int argc, char **argv) {
 			.pretty_name=STR("Flint Pickaxe"),
 			.description=STR("+1 damage to rocks"), // todo - make this functional from the extra dmg state
 			.icon=SPRITE_flint_pickaxe,
+			.craft_length=10,
 			.extra_pickaxe_dmg=1,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
@@ -1730,6 +1732,7 @@ int entry(int argc, char **argv) {
 			.pretty_name=STR("Flint Scythe"),
 			.description=STR("+1 damage to grass"),
 			.icon=SPRITE_flint_scythe,
+			.craft_length=10,
 			.extra_sickle_dmg=1,
 			.for_structure=ARCH_workbench,
 			.crafting_recipe_count=3,
@@ -1941,7 +1944,7 @@ int entry(int argc, char **argv) {
 				// :workbench update
 				if (en->workbench_thing) {
 					if (en->current_crafting_item) {
-						float length = en->current_crafting_item;
+						float length = get_item_data(en->current_crafting_item).craft_length;
 						if (en->crafting_end_time == 0) {
 							en->crafting_end_time = now() + length;
 						}
@@ -2108,7 +2111,7 @@ int entry(int argc, char **argv) {
 
 					ItemData craft_item_data = get_item_data(en->current_crafting_item);
 
-					float alpha = alpha_from_end_time(en->crafting_end_time, en->current_crafting_item);
+					float alpha = alpha_from_end_time(en->crafting_end_time, craft_item_data.craft_length);
 
 					{
 						Matrix4 xform = m4_identity;

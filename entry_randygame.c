@@ -187,6 +187,7 @@ typedef enum SpriteID {
 	SPRITE_flint_scythe,
 	SPRITE_grass,
 	SPRITE_coal,
+	SPRITE_core_tether,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -247,6 +248,7 @@ typedef enum ArchetypeID {
 	ARCH_ore1 = 11,
 	ARCH_flint_depo = 12,
 	ARCH_grass = 13,
+	ARCH_core_tether = 14,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -461,6 +463,10 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
+void setup_core_tether(Entity* en) {
+	en->arch = ARCH_core_tether;
+	en->sprite_id = SPRITE_core_tether;
+}
 
 void setup_grass(Entity* en) {
 	en->arch = ARCH_grass;
@@ -565,6 +571,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_ore1: setup_ore1(en); break;
 		case ARCH_flint_depo: setup_flint_depo(en); break;
 		case ARCH_grass: setup_grass(en); break;
+		case ARCH_core_tether: setup_core_tether(en); break;
 		// :arch :setup
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -666,6 +673,9 @@ void world_setup()
 	setup_player(player_en);
 	player_en->current_dimension = DIM_first;
 
+	Entity* en = entity_create();
+	setup_core_tether(en);
+
 	world->building_unlocks[BUILDING_research_station].research_progress = 100;
 	world->building_unlocks[BUILDING_workbench].research_progress = 100;
 
@@ -679,7 +689,7 @@ void world_setup()
 		world->inventory_items[ITEM_flint].amount = 100;
 		world->inventory_items[ITEM_fiber].amount = 100;
 
-		Entity* en = entity_create();
+		en = entity_create();
 		setup_furnace(en);
 		en->pos.y = 20.0;
 
@@ -1595,6 +1605,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_flint_scythe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_scythe.png"), get_heap_allocator())};
 		sprites[SPRITE_grass] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/grass.png"), get_heap_allocator())};
 		sprites[SPRITE_coal] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/coal.png"), get_heap_allocator())};
+		sprites[SPRITE_core_tether] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/core_tether.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG

@@ -117,7 +117,7 @@ Vector4 col_oxygen;
 // :tweaks
 float core_tether_radius = 40.0;
 float oxygen_regen_tick_length = 0.01;
-float oxygen_deplete_tick_length = 0.02;
+float oxygen_deplete_tick_length = 0.1;
 float teleporter_radius = 8.0f;
 Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
@@ -2041,17 +2041,19 @@ int entry(int argc, char **argv) {
 			player->oxygen = clamp(player->oxygen, 0, get_max_oxygen());
 
 			// TODO, some special LUT desaturation effect as we get closer to oxygen 0
+			// :death
 			if (is_player_alive() && player->oxygen == 0) {
 				player->health = 0;
 				// drop inv items
 				for (ItemID item_id = 1; item_id < ARRAY_COUNT(world->inventory_items); item_id++) {
-					InventoryItemData inv_item_data = world->inventory_items[item_id];
-					if (inv_item_data.amount > 0) {
+					InventoryItemData* inv_item_data = &world->inventory_items[item_id];
+					if (inv_item_data->amount > 0) {
 						Entity* drop = entity_create();
 						setup_item(drop, item_id);
 						drop->pos = player->pos;
-						drop->item_amount = inv_item_data.amount;
+						drop->item_amount = inv_item_data->amount;
 					}
+					inv_item_data->amount = 0;
 				}
 
 				world->ux_state = UX_respawn;

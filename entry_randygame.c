@@ -1639,7 +1639,14 @@ int entry(int argc, char **argv) {
 	{
 		// buildings[0] = 
 		buildings[BUILDING_furnace] = (BuildingData){ .to_build=ARCH_furnace, .icon=SPRITE_furnace, .pct_per_research_exp=25};
-		buildings[BUILDING_workbench] = (BuildingData){ .to_build=ARCH_workbench, .icon=SPRITE_workbench, .pct_per_research_exp=50};
+		buildings[BUILDING_workbench] = (BuildingData){
+			.to_build=ARCH_workbench,
+			.icon=SPRITE_workbench,
+			.description=STR("Crafts things."),
+			.ingredients_count=2,
+			.ingredients={ {ITEM_pine_wood, 10}, {ITEM_fiber, 5} }
+		};
+
 		buildings[BUILDING_research_station] = (BuildingData){
 			.to_build=ARCH_research_station,
 			.icon=SPRITE_research_station,

@@ -1942,15 +1942,6 @@ int entry(int argc, char **argv) {
 			int tile_radius_y = 30;
 			for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
 				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
-
-					// skip over if we're outside the world space
-					if (x < world_pos_to_tile_pos(-world_half_length)
-					|| x > world_pos_to_tile_pos(world_half_length)
-					|| y < world_pos_to_tile_pos(-world_half_length)
-					|| y > world_pos_to_tile_pos(world_half_length)) {
-						continue;
-					}
-
 					// checkerboard pattern
 					Vector4 col = color_0;
 					if ((x + (y % 2 == 0) ) % 2 == 0) {
@@ -2247,18 +2238,6 @@ int entry(int argc, char **argv) {
 			input_axis = v2_normalize(input_axis);
 			Entity* player = get_player();
 			player->pos = v2_add(player->pos, v2_mulf(input_axis, 100.0 * delta_t));
-			if (player->pos.x < -world_half_length) {
-				player->pos.x = -world_half_length;
-			}
-			if (player->pos.x > world_half_length) {
-				player->pos.x = world_half_length;
-			}
-			if (player->pos.y > world_half_length) {
-				player->pos.y = world_half_length;
-			}
-			if (player->pos.y < -world_half_length) {
-				player->pos.y = -world_half_length;
-			}
 		}
 
 		// player :hud

@@ -47,6 +47,11 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 
 // the scuff zone
 
+// 0.2 means it has a 20% chance of returning true
+bool pct_chance(float pct) {
+	return get_random_float32_in_range(0, 1) < pct;
+}
+
 float float_alpha(float x, float min, float max) {
 	float res = (x-min) / (max-min);
 	res = clamp(res, 0.0, 1.0);
@@ -382,7 +387,7 @@ typedef struct WorldResourceData {
 WorldResourceData world_resources[] = {
 	{ DIM_first, ARCH_rock, 2.f, 4 },
 	{ DIM_first, ARCH_tree, 1.f, 10 },
-	{ DIM_first, ARCH_exp_vein, 3.f, 2 },
+	// { DIM_first, ARCH_exp_vein, 3.f, 2 },
 	{ DIM_first, ARCH_flint_depo, 3.f, 2 },
 	{ DIM_first, ARCH_grass, 3.f, 10 },
 
@@ -2019,7 +2024,9 @@ int entry(int argc, char **argv) {
 						growing_array_init_reserve((void**)&drops, sizeof(ItemID), 2, get_temporary_allocator());
 
 						// add in exp
-						growing_array_add((void**)&drops, &(ItemID){ITEM_exp});
+						if (pct_chance(0.5)) {
+							growing_array_add((void**)&drops, &(ItemID){ITEM_exp});
+						}
 						
 						// drops from entity data
 						for (int i = 0; i < selected_en->drops_count; i++) {

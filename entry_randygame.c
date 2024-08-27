@@ -58,18 +58,6 @@ float float_alpha(float x, float min, float max) {
 	return res;
 }
 
-inline float64 now() {
-	return os_get_elapsed_seconds();
-}
-
-float alpha_from_end_time(float64 end_time, float length) {
-	return float_alpha(now(), end_time-length, end_time);
-}
-
-bool has_reached_end_time(float64 end_time) {
-	return now() > end_time;
-}
-
 Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
 
 	// NOTE: we're assuming these are the screen space matricies.
@@ -687,6 +675,19 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 
 // :func dump
 
+inline float64 now() {
+	return world->time_elapsed;
+}
+
+float alpha_from_end_time(float64 end_time, float length) {
+	return float_alpha(now(), end_time-length, end_time);
+}
+
+bool has_reached_end_time(float64 end_time) {
+	return now() > end_time;
+}
+
+// :map init
 void world_setup()
 {
 	Entity* player_en = entity_create();

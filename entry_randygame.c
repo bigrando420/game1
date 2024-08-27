@@ -1995,15 +1995,31 @@ int entry(int argc, char **argv) {
 					selected_en->health -= damage_amount;
 					if (selected_en->health <= 0) {
 						// :drops
-						assert(selected_en->drops_count >= 0 && selected_en->drops_count <= ARRAY_COUNT(selected_en->drops), "out of bounds.");
+
+						ItemID *drops;
+						// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
+						growing_array_init_reserve((void**)&drops, sizeof(ItemID), 2, get_temporary_allocator());
+
+						// add in exp
+						growing_array_add((void**)&drops, &(ItemID){ITEM_exp});
+						
+						// drops from entity data
 						for (int i = 0; i < selected_en->drops_count; i++) {
 							ItemAmount drop = selected_en->drops[i];
 							for (int j = 0; j < drop.amount; j++) {
-								Entity* en = entity_create();
-								setup_item(en, drop.id);
-								en->pos = selected_en->pos;
+								growing_array_add((void**)&drops, &drop.id);
 							}
 						}
+
+						// create all the item drops
+						for (int i = 0; i < growing_array_get_valid_count(drops); i++) {
+							ItemID drop_id = drops[i];
+							Entity* drop = entity_create();
+							setup_item(drop, drop_id);
+							drop->pos = selected_en->pos;
+							drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
+						}
+
 						entity_destroy(selected_en);
 					}
 				}

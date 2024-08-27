@@ -315,6 +315,7 @@ typedef struct Entity {
 	bool is_valid;
 	ArchetypeID arch;
 	ItemID item_id;
+	int item_amount;
 	Vector2 pos;
 	bool render_sprite;
 	SpriteID sprite_id;
@@ -575,6 +576,7 @@ void setup_item(Entity* en, ItemID item_id) {
 	en->sprite_id = get_sprite_id_from_item(item_id);
 	en->is_item = true;
 	en->item_id = item_id;
+	en->item_amount = 1;
 }
 
 void entity_setup(Entity* en, ArchetypeID id) {
@@ -1991,7 +1993,7 @@ int entry(int argc, char **argv) {
 				if (is_player_alive() && is_in_player_dimension(en) && en->is_item) {
 					// TODO - epic physics pickup like arcana
 					if (fabsf(v2_dist(en->pos, get_player()->pos)) < player_pickup_radius) {
-						world->inventory_items[en->item_id].amount += 1;
+						world->inventory_items[en->item_id].amount += en->item_amount;
 						entity_destroy(en);
 					}
 				}
@@ -2031,6 +2033,7 @@ int entry(int argc, char **argv) {
 						Entity* drop = entity_create();
 						setup_item(drop, item_id);
 						drop->pos = player->pos;
+						drop->item_amount = inv_item_data.amount;
 					}
 				}
 			}

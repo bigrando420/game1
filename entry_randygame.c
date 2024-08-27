@@ -461,31 +461,6 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
-// Q: where to store something like entity drops data?
-// randy: 
-//
-// 1. here during setup_entity() phase
-// - makes serialisation a PITA, because we now have data inside the entity we don't really want serialised out to disk
-// - could solve this problem by just... not serialising it. And maybe that's the way to go? Since now we've got our data nicely localised
-//
-// 2. inside the entity archetype data (constant cold storage)
-// - this is constant, so we'd need to encode randomness for the drops into it...
-// - PITA because it's in a different spot
-//
-// 3. at the callsite / functional
-// - most "efficient" option
-// - has a bit of a congnitive load, because the setup for the entity isn't centralised, we have to remember to search for it...
-// ^ could solve that problem with a well documented :/jumppoint ??
-//
-// From a "scalability" stand point. Option #1 feels the best to me right now (25/08/2024) (I have tried all 3).
-//
-// Functionalising everything (option #3) isn't "scalable". Because you end up having like 10 different spots in the codebase you need to go to in order to create new content for an entity.
-// One spot is easily forgotten, until you run into the lacking data in-game.
-// This problem could be solved though with documentation... maybe 
-//
-// Option 2 is mehhhh since it means we need to be constant (too annoying of a constraint).
-//
-// Ultimately, I think #1 is the best, because we already are storing data that "shouldn't really be serialised" since it can be reconstructed from the Archetype ID (sprite id for example). So all we need to do is find a way to define "no serialise" for each member, and we get a huge productivity win on this pattern.
 
 void setup_grass(Entity* en) {
 	en->arch = ARCH_grass;

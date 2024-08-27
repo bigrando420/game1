@@ -8,7 +8,7 @@
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
 inline float v2_dist(Vector2 a, Vector2 b) {
-  return v2_length(v2_sub(a, b));
+  return fabsf(v2_length(v2_sub(a, b)));
 }
 
 #define m4_identity m4_make_scale(v3(1, 1, 1))
@@ -115,6 +115,7 @@ Vector4 color_0;
 Vector4 col_oxygen;
 
 // :tweaks
+float tether_connection_radius = 40.0;
 float core_tether_radius = 40.0;
 float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 0.1;
@@ -303,6 +304,12 @@ typedef enum DamageType {
 	DMG_MAX,
 } DamageType;
 
+typedef struct Entity Entity; // needs forward declare
+typedef struct EntityFrame {
+	Entity** connected_to_tethers;
+	bool is_powered;
+} EntityFrame;
+
 typedef struct Entity {
 	bool is_valid;
 	ArchetypeID arch;
@@ -328,6 +335,10 @@ typedef struct Entity {
 	int oxygen;
 	float64 oxygen_deplete_end_time;
 	float64 oxygen_regen_end_time;
+	bool is_oxygen_tether;
+
+	EntityFrame frame;
+	EntityFrame last_frame;
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
@@ -477,11 +488,13 @@ void entity_destroy(Entity* entity) {
 void setup_tether(Entity* en) {
 	en->arch = ARCH_tether;
 	en->sprite_id = SPRITE_tether;
+	en->is_oxygen_tether = true;
 }
 
 void setup_core_tether(Entity* en) {
 	en->arch = ARCH_core_tether;
 	en->sprite_id = SPRITE_core_tether;
+	en->is_oxygen_tether = true;
 }
 
 void setup_grass(Entity* en) {
@@ -716,8 +729,10 @@ void world_setup()
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
+		world->building_unlocks[BUILDING_tether].research_progress = 100;
+
 		world->inventory_items[ITEM_pine_wood].amount = 50;
-		world->inventory_items[ITEM_rock].amount = 50;
+		world->inventory_items[ITEM_rock].amount = 1000;
 		world->inventory_items[ITEM_exp].amount = 100;
 		world->inventory_items[ITEM_flint_axe].amount = 1;
 		world->inventory_items[ITEM_flint].amount = 100;
@@ -1685,6 +1700,7 @@ int entry(int argc, char **argv) {
 		archetype_data[ARCH_furnace].pretty_name = STR("Furnace");
 		archetype_data[ARCH_research_station].pretty_name = STR("Research Station");
 		archetype_data[ARCH_teleporter1].pretty_name = STR("Teleporter");
+		archetype_data[ARCH_tether].pretty_name = STR("Tether");
 	}
 
 	// :building resource setup
@@ -1843,6 +1859,16 @@ int entry(int argc, char **argv) {
 		delta_t = current_time - last_time;
 		last_time = current_time;
 		os_update();
+
+		// zero entity frame state
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++)
+		{
+			Entity* en = &world->entities[i];
+			if (en->is_valid) {
+				en->last_frame = en->frame;
+				en->frame = (EntityFrame){0};
+			}
+		}
 
 		// find player lol
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -2036,10 +2062,68 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		// :tether stuff
+		{
+			// for each tether, find all nearby tethers
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* self_tether = &world->entities[i];
+				if (self_tether->is_valid && self_tether->is_oxygen_tether) {
+
+					Entity** nearby_tethers;
+					growing_array_init_reserve((void**)&nearby_tethers, sizeof(Entity*), 1, get_temporary_allocator());
+					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+						Entity* nearby_tether = &world->entities[j];
+						if (nearby_tether != self_tether && nearby_tether->is_valid && nearby_tether->is_oxygen_tether) {
+							if (v2_dist(nearby_tether->pos, self_tether->pos) < tether_connection_radius) {
+								growing_array_add((void**)&nearby_tethers, &nearby_tether);
+							}
+						}
+					}
+
+					self_tether->frame.connected_to_tethers = nearby_tethers;
+				}
+			}
+
+			// run through connections recursively, starting at the core tether
+			{
+				Entity** connection_stack;
+				growing_array_init_reserve((void**)&connection_stack, sizeof(Entity*), 1, get_temporary_allocator());
+				growing_array_add((void**)&connection_stack, &world->core_tether);
+
+				while (growing_array_get_valid_count(connection_stack)) {
+					Entity* current = connection_stack[growing_array_get_valid_count(connection_stack)-1];
+					growing_array_pop((void**)&connection_stack);
+
+					for (int i = 0; i < growing_array_get_valid_count(current->frame.connected_to_tethers); i ++) {
+						Entity* connected_tether = current->frame.connected_to_tethers[i];
+						if (!connected_tether->frame.is_powered) {
+							growing_array_add((void**)&connection_stack, &connected_tether);
+							connected_tether->frame.is_powered = true;
+							draw_line(connected_tether->pos, current->pos, 1.0f, COLOR_WHITE);
+						}
+					}
+				}
+			}
+		}
+
 		// :player specific caveman update
 		{
-			float dist_from_tether = v2_dist(player->pos, world->core_tether->pos);
-			if (dist_from_tether < core_tether_radius) {
+			Entity* closest_tether = 0;
+			float closest_dist = INFINITY;
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* tether = &world->entities[i];
+				if (tether->is_valid && tether->is_oxygen_tether) {
+					float dist = v2_dist(tether->pos, player->pos);
+					if (dist < tether_connection_radius) {
+						if (!closest_tether || dist < closest_dist) {
+							closest_tether = tether;
+							closest_dist = dist;
+						}
+					}
+				}
+			}
+
+			if (closest_tether) {
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
 				}
@@ -2197,6 +2281,11 @@ int entry(int argc, char **argv) {
 
 						break;
 					}
+				}
+
+				// :tether draw blue thingy
+				if (en->is_oxygen_tether && en->frame.is_powered) {
+					draw_rect(v2_add(en->pos, v2(-1, 3)), v2(2, 2), col_oxygen);
 				}
 
 				// :workbench render

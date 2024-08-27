@@ -123,8 +123,11 @@ Range2f quad_to_range(Draw_Quad quad) {
 // some kinda colour palette thingo
 // these get inited on startup because we don't have a #run for the hex_to_rgba(0x2a2d3aff) lol
 Vector4 color_0;
+Vector4 col_oxygen;
 
 // :tweaks
+float oxygen_regen_tick_length = 0.01;
+float oxygen_deplete_tick_length = 0.02;
 float teleporter_radius = 8.0f;
 Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
@@ -329,6 +332,9 @@ typedef struct Entity {
 	int drops_count;
 	DamageType dmg_type;
 	ItemID selected_crafting_item;
+	int oxygen;
+	float64 oxygen_deplete_end_time;
+	float64 oxygen_regen_end_time;
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
@@ -416,6 +422,8 @@ typedef struct World {
 	BuildingID selected_research_thing;
 	UnlockState building_unlocks[BUILDING_MAX];
 	WorldDimension dimensions[DIM_MAX];
+	// todo - figure out if we can legit just keep this as a pointer or not lol
+	Entity* core_tether;
 	// :world :state
 } World;
 World* world = 0;
@@ -432,6 +440,14 @@ WorldFrame world_frame;
 
 Entity* get_player() {
 	return world_frame.player;
+}
+
+bool is_player_alive() {
+	return get_player()->health > 0;
+}
+
+int get_max_oxygen() {
+	return 100;
 }
 
 Entity* entity_create() {
@@ -530,6 +546,8 @@ void setup_research_station(Entity* en) {
 void setup_player(Entity* en) {
 	en->arch = ARCH_player;
 	en->sprite_id = SPRITE_player;
+	en->health = 1;
+	en->oxygen = get_max_oxygen();
 }
 
 void setup_rock(Entity* en) {
@@ -675,6 +693,7 @@ void world_setup()
 
 	Entity* en = entity_create();
 	setup_core_tether(en);
+	world->core_tether = en;
 
 	world->building_unlocks[BUILDING_research_station].research_progress = 100;
 	world->building_unlocks[BUILDING_workbench].research_progress = 100;
@@ -700,7 +719,7 @@ void world_setup()
 	#endif
 }
 
-// caveman serialisation™️
+// caveman :serialisation™️
 bool world_save_to_disk() {
 	return os_write_entire_file_s(STR("world"), (string){sizeof(World), (u8*)world});
 }
@@ -1579,6 +1598,7 @@ int entry(int argc, char **argv) {
 	memset(world, 0, sizeof(World));
 
 	color_0 = hex_to_rgba(0x2a2d3aff);
+	col_oxygen = hex_to_rgba(0xaad9e6ff);
 
 	// sprite setup
 	{
@@ -1968,7 +1988,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// pickup item
-				if (is_in_player_dimension(en) && en->is_item) {
+				if (is_player_alive() && is_in_player_dimension(en) && en->is_item) {
 					// TODO - epic physics pickup like arcana
 					if (fabsf(v2_dist(en->pos, get_player()->pos)) < player_pickup_radius) {
 						world->inventory_items[en->item_id].amount += 1;
@@ -1978,7 +1998,46 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		// :player specific caveman update
+		{
+			float dist_from_tether = v2_dist(player->pos, world->core_tether->pos);
+			if (dist_from_tether < 20.0) {
+				if (player->oxygen_regen_end_time == 0) {
+					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
+				}
+				if (has_reached_end_time(player->oxygen_regen_end_time)) {
+					player->oxygen_regen_end_time = 0;
+					player->oxygen += 1;
+				}
+			} else {
+				if (player->oxygen_deplete_end_time == 0) {
+					player->oxygen_deplete_end_time = now() + oxygen_deplete_tick_length;
+				}
+				if (has_reached_end_time(player->oxygen_deplete_end_time)) {
+					player->oxygen_deplete_end_time = 0;
+					player->oxygen -= 1;
+				}
+			}
+
+			player->oxygen = clamp(player->oxygen, 0, get_max_oxygen());
+
+			// TODO, some special LUT desaturation effect as we get closer to oxygen 0
+			if (is_player_alive() && player->oxygen == 0) {
+				player->health = 0;
+				// drop inv items
+				for (ItemID item_id = 1; item_id < ARRAY_COUNT(world->inventory_items); item_id++) {
+					InventoryItemData inv_item_data = world->inventory_items[item_id];
+					if (inv_item_data.amount > 0) {
+						Entity* drop = entity_create();
+						setup_item(drop, item_id);
+						drop->pos = player->pos;
+					}
+				}
+			}
+		}
+
 		// :selection stuff
+		if (is_player_alive())
 		{
 			Entity* selected_en = world_frame.selected_entity;
 
@@ -2125,6 +2184,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// render player
+		if (is_player_alive())
 		{
 			Entity* en = get_player();
 			Sprite* sprite = get_sprite(en->sprite_id);
@@ -2137,6 +2197,8 @@ int entry(int argc, char **argv) {
 			draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
 		}
 
+		// player movement
+		if (is_player_alive())
 		{
 			Vector2 input_axis = v2(0, 0);
 			if (is_key_down('A')) {
@@ -2166,6 +2228,23 @@ int entry(int argc, char **argv) {
 			if (player->pos.y < -world_half_length) {
 				player->pos.y = -world_half_length;
 			}
+		}
+
+		// player :hud
+		if (is_player_alive())
+		{
+			Entity* player = get_player();
+
+			Vector2 size = {6, 1};
+			Vector2 draw_pos = player->pos;
+			draw_pos.x -= size.x * 0.5;
+			draw_pos.y -= 6.0;
+
+			draw_rect(draw_pos, size, COLOR_BLACK);
+
+			float alpha = (float)player->oxygen / (float)get_max_oxygen();
+
+			draw_rect(draw_pos, v2(size.x * alpha, size.y), col_oxygen);
 		}
 
 		gfx_update();

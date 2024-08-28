@@ -419,9 +419,9 @@ typedef struct WorldResourceData {
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
 	{ BIOME_barren, ARCH_rock, 10 },
-	{ BIOME_forest, ARCH_tree, 5 },
-	{ BIOME_forest, ARCH_flint_depo, 10 },
-	{ BIOME_forest, ARCH_grass, 4 },
+	{ BIOME_forest, ARCH_tree, 10 },
+	{ BIOME_forest, ARCH_flint_depo, 15 },
+	{ BIOME_forest, ARCH_grass, 10 },
 	// :spawn_res system
 };
 
@@ -483,10 +483,10 @@ Vector2i world_tile_to_local_map(Tile world) {
 	return (Vector2i){x_index, y_index};
 }
 
-BiomeID biome_at_tile(int x, int y) {
+BiomeID biome_at_tile(Tile tile) {
 	BiomeID biome = 0;
-	int x_index = x + floor((float)map.width * 0.5);
-	int y_index = y + floor((float)map.height * 0.5);
+	int x_index = tile.x + floor((float)map.width * 0.5);
+	int y_index = tile.y + floor((float)map.height * 0.5);
 	if (x_index < map.width && x_index >= 0 && y_index < map.height && y_index >= 0) {
 		biome = map.tiles[y_index * map.width + x_index];
 	}
@@ -2039,7 +2039,9 @@ int entry(int argc, char **argv) {
 					}
 				}
 
-				if (has_reached_end_time(world->resource_next_spawn_end_time[i])) {
+				bool should_respawn = biome_at_tile(v2_world_pos_to_tile_pos(get_player()->pos)) == BIOME_core;
+
+				if (should_respawn && has_reached_end_time(world->resource_next_spawn_end_time[i])) {
 					// pick from a random spot
 					int count = growing_array_get_valid_count(potential_spawn_tiles);
 					Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
@@ -2063,7 +2065,7 @@ int entry(int argc, char **argv) {
 						entity_setup(en, data.arch_id);
 						en->pos = spawn_pos;
 
-						float respawn_length = 2.0;
+						float respawn_length = 10.0;
 						if (world->time_elapsed < 1.0) {
 							respawn_length = 0.0;
 						}
@@ -2071,12 +2073,14 @@ int entry(int argc, char **argv) {
 					}
 				}
 
+				/*
 				if (data.biome_id == BIOME_forest)
 				for (int j = 0; j < growing_array_get_valid_count(potential_spawn_tiles); j++) {
 					Tile tile = potential_spawn_tiles[j];
 					Draw_Quad* quad = draw_circle(v2_tile_pos_to_world_pos(tile), v2(1, 1), COLOR_GREEN);
 					quad->z = 30;
 				}
+				*/
 			}
 		}
 
@@ -2119,7 +2123,7 @@ int entry(int argc, char **argv) {
 			for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
 				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
 
-					BiomeID biome = biome_at_tile(x, y);
+					BiomeID biome = biome_at_tile(v2i(x, y));
 					if (biome == 0) {
 						continue;
 					}

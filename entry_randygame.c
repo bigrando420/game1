@@ -2112,7 +2112,7 @@ int entry(int argc, char **argv) {
 			float closest_dist = INFINITY;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* tether = &world->entities[i];
-				if (tether->is_valid && tether->is_oxygen_tether) {
+				if (tether->is_valid && tether->is_oxygen_tether && (tether->frame.is_powered || tether->arch == ARCH_core_tether)) {
 					float dist = v2_dist(tether->pos, player->pos);
 					if (dist < tether_connection_radius) {
 						if (!closest_tether || dist < closest_dist) {
@@ -2124,6 +2124,7 @@ int entry(int argc, char **argv) {
 			}
 
 			if (closest_tether) {
+				draw_line(closest_tether->pos, player->pos, 1.0f, COLOR_WHITE);
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
 				}

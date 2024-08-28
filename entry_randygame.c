@@ -84,6 +84,10 @@ float sin_breathe(float time, float rate) {
 	return (sin(time * rate) + 1.0) / 2.0;
 }
 
+bool v4_equals(Vector4 a, Vector4 b) {
+ return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+}
+
 bool almost_equals(float a, float b, float epsilon) {
  return fabs(a - b) <= epsilon;
 }
@@ -409,6 +413,69 @@ WorldResourceData world_resources[] = {
 	{ DIM_second, ARCH_ore1, 2.5f, 10 },
 	// :spawn_res system
 };
+
+// :biome system
+typedef enum BiomeID {
+	BIOME_nil,
+	BIOME_void,
+	BIOME_test,
+	BIOME_yeet,
+	BIOME_MAX,
+} BiomeID;
+
+typedef struct Map {
+	int width;
+	int height;
+	BiomeID* tiles;
+} Map;
+
+Map world_maps[DIM_MAX] = {0};
+void init_biome_maps() {
+
+	Map* map = &world_maps[DIM_first];
+
+	string png;
+	bool ok = os_read_entire_file("res/sprites/biome0_map.png", &png, get_heap_allocator());
+	assert(ok);
+
+	int width, height, channels;
+	stbi_set_flip_vertically_on_load(1);
+	third_party_allocator = get_heap_allocator();
+	u8* stb_data = stbi_load_from_memory(png.data, png.count, &width, &height, &channels, STBI_rgb_alpha);
+	assert(stb_data);
+	assert(channels == 4);
+	third_party_allocator = ZERO(Allocator);
+
+	map->width = width;
+	map->height = height;
+	map->tiles = alloc(get_heap_allocator(), width * height * sizeof(BiomeID));
+
+	for (int y = 0; y < height; y++)
+	for (int x = 0; x < width; x++)
+	{
+		int index = y * width + x;
+		u8* pixel = stb_data + index * channels;
+
+		u8 r = pixel[0];
+		u8 g = pixel[1];
+		u8 b = pixel[2];
+		Vector4 col = {(float)r/255.0f, (float)g/255.0f, (float)b/255.0f, 1.0};
+		if (v4_equals(col, COLOR_WHITE)) {
+			map->tiles[index] = BIOME_test;
+		}
+	}
+}
+
+BiomeID biome_at_tile(DimensionID dim, int x, int y) {
+	Map map = world_maps[dim];
+	BiomeID biome = 0;
+	int x_index = x + floor((float)map.width * 0.5);
+	int y_index = y + floor((float)map.height * 0.5);
+	if (x_index < map.width && x_index >= 0 && y_index < map.height && y_index >= 0) {
+		biome = map.tiles[y_index * map.width + x_index];
+	}
+	return biome;
+}
 
 typedef struct WorldDimension {
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
@@ -1834,6 +1901,8 @@ int entry(int argc, char **argv) {
 		dimension_data[DIM_second].pretty_name = STR("Second");
 	}
 
+	init_biome_maps();
+
 	// the :init zone
 
 	// world load / setup
@@ -1990,10 +2059,16 @@ int entry(int argc, char **argv) {
 			int tile_radius_y = 30;
 			for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
 				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
+
+					BiomeID biome = biome_at_tile(get_player()->current_dimension, x, y);
+
 					// checkerboard pattern
 					Vector4 col = color_0;
 					if ((x + (y % 2 == 0) ) % 2 == 0) {
 						col.a = 0.9;
+					}
+					if (biome == BIOME_test) {
+						col = v4_mul(col, COLOR_RED);
 					}
 					float x_pos = x * tile_width;
 					float y_pos = y * tile_width;

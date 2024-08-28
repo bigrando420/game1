@@ -77,7 +77,11 @@ Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
 	return ndc_quad;
 }
 
-//
+// :utils
+
+Vector4 v4_lerp(Vector4 from, Vector4 to, float x) {
+	return v4(lerpf(from.x, to.x, x), lerpf(from.y, to.y, x), lerpf(from.z, to.z, x), lerpf(from.w, to.w, x));
+}
 
 // 0 -> 1
 float sin_breathe(float time, float rate) {
@@ -416,10 +420,10 @@ WorldResourceData world_resources[] = {
 
 // :biome system
 typedef enum BiomeID {
-	BIOME_nil,
 	BIOME_void,
-	BIOME_test,
-	BIOME_yeet,
+	BIOME_core,
+	BIOME_barren,
+	BIOME_forest,
 	BIOME_MAX,
 } BiomeID;
 
@@ -461,7 +465,11 @@ void init_biome_maps() {
 		u8 b = pixel[2];
 		Vector4 col = {(float)r/255.0f, (float)g/255.0f, (float)b/255.0f, 1.0};
 		if (v4_equals(col, COLOR_WHITE)) {
-			map->tiles[index] = BIOME_test;
+			map->tiles[index] = BIOME_core;
+		} else if (v4_equals(col, hex_to_rgba(0x3553b9ff))) {
+			map->tiles[index] = BIOME_forest;
+		} else if (!v4_equals(col, COLOR_BLACK)) {
+			map->tiles[index] = BIOME_barren;
 		}
 	}
 }
@@ -2061,14 +2069,17 @@ int entry(int argc, char **argv) {
 				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
 
 					BiomeID biome = biome_at_tile(get_player()->current_dimension, x, y);
+					if (biome == 0) {
+						continue;
+					}
 
 					// checkerboard pattern
 					Vector4 col = color_0;
 					if ((x + (y % 2 == 0) ) % 2 == 0) {
 						col.a = 0.9;
 					}
-					if (biome == BIOME_test) {
-						col = v4_mul(col, COLOR_RED);
+					if (biome == BIOME_forest) {
+						col = v4_lerp(col, COLOR_BLUE, 0.1);
 					}
 					float x_pos = x * tile_width;
 					float y_pos = y * tile_width;

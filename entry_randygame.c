@@ -92,6 +92,10 @@ bool v4_equals(Vector4 a, Vector4 b) {
  return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
 }
 
+bool v2i_equals(Vector2i a, Vector2i b) {
+ return a.x == b.x && a.y == b.y;
+}
+
 bool almost_equals(float a, float b, float epsilon) {
  return fabs(a - b) <= epsilon;
 }
@@ -154,6 +158,14 @@ int world_pos_to_tile_pos(float world_pos) {
 
 float tile_pos_to_world_pos(int tile_pos) {
 	return ((float)tile_pos * (float)tile_width);
+}
+
+Vector2i v2_world_pos_to_tile_pos(Vector2 world_pos) {
+	return (Vector2i) { world_pos_to_tile_pos(world_pos.x), world_pos_to_tile_pos(world_pos.y) };
+}
+
+Vector2 v2_tile_pos_to_world_pos(Vector2i tile_pos) {
+	return (Vector2) { tile_pos_to_world_pos(tile_pos.x), tile_pos_to_world_pos(tile_pos.y) };
 }
 
 Vector2 round_v2_to_tile(Vector2 world_pos) {
@@ -465,6 +477,12 @@ Tile local_map_to_world_tile(Vector2i local) {
 	};
 }
 
+Vector2i world_tile_to_local_map(Tile world) {
+	int x_index = world.x + floor((float)map.width * 0.5);
+	int y_index = world.y + floor((float)map.height * 0.5);
+	return (Vector2i){x_index, y_index};
+}
+
 BiomeID biome_at_tile(int x, int y) {
 	BiomeID biome = 0;
 	int x_index = x + floor((float)map.width * 0.5);
@@ -751,6 +769,41 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 }
 
 // :func dump
+
+typedef struct TileCache {
+	Entity* entity;
+	// BiomeID biome;
+} TileCache;
+typedef struct TileEntityCache {
+	TileCache* tiles;
+	int tile_count;
+} TileEntityCache;
+TileEntityCache* create_tile_entity_pair_cache() {
+	TileEntityCache* cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
+
+	cache->tile_count = map.height * map.width;
+	cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
+
+	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+		Entity* en = &world->entities[i];
+		Vector2i local_tile_pos = world_tile_to_local_map(v2_world_pos_to_tile_pos(en->pos));
+		int index = local_tile_pos.y * map.width + local_tile_pos.x;
+		assert(index >= 0 && index < cache->tile_count);
+		cache->tiles[index].entity = en;
+	}
+
+	return cache;
+}
+
+Entity* entity_at_tile(TileEntityCache* cache, Tile tile) {
+	Vector2i local_tile = world_tile_to_local_map(tile);
+	int index = local_tile.y * map.width + local_tile.x;
+	if (index < 0 || index > cache->tile_count) {
+		return 0;
+	} else {
+		return cache->tiles[index].entity;
+	}
+}
 
 inline float64 now() {
 	return world->time_elapsed;
@@ -1948,6 +2001,8 @@ int entry(int argc, char **argv) {
 			world->time_elapsed += delta_t;
 		}
 
+		TileEntityCache* cache = create_tile_entity_pair_cache();
+
 		TileData* tiles_for_biome[BIOME_MAX] = {0};
 		for (BiomeID biome = 1; biome < BIOME_MAX; biome++)
 		{
@@ -1959,10 +2014,9 @@ int entry(int argc, char **argv) {
 			{
 				BiomeID biome_at_tile = map.tiles[y * map.width + x];
 				if (biome_at_tile == biome) {
-					// todo - check for entity_at_tile
-
 					TileData tdata = {0};
 					tdata.tile = local_map_to_world_tile(v2i(x, y));
+					tdata.entity_at_tile = entity_at_tile(cache, tdata.tile);
 					growing_array_add((void**)&tiles, &tdata);
 				}
 			}
@@ -1979,7 +2033,7 @@ int entry(int argc, char **argv) {
 				growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
 				for (int j = 0; j < growing_array_get_valid_count(tiles_for_biome[data.biome_id]); j++) {
 					TileData tile_data = tiles_for_biome[data.biome_id][j];
-					if (true) { // todo - check for existing
+					if (!tile_data.entity_at_tile) {
 						growing_array_add((void**)&potential_spawn_tiles, &tile_data.tile);
 					}
 				}
@@ -1994,8 +2048,13 @@ int entry(int argc, char **argv) {
 					entity_setup(en, data.arch_id);
 					en->pos.x = tile_pos_to_world_pos(spawn_tile.x);
 					en->pos.y = tile_pos_to_world_pos(spawn_tile.y);
+				}
 
-					log("spawned at %f, %f", en->pos.x, en->pos.y);
+				if (data.biome_id == BIOME_forest)
+				for (int j = 0; j < growing_array_get_valid_count(potential_spawn_tiles); j++) {
+					Tile tile = potential_spawn_tiles[j];
+					Draw_Quad* quad = draw_circle(v2_tile_pos_to_world_pos(tile), v2(1, 1), COLOR_GREEN);
+					quad->z = 30;
 				}
 			}
 		}

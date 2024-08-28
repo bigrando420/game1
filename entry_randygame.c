@@ -109,14 +109,14 @@ Range2f quad_to_range(Draw_Quad quad) {
 
 // ^^^ generic utils
 
-// some kinda colour palette thingo
+// :col
 // these get inited on startup because we don't have a #run for the hex_to_rgba(0x2a2d3aff) lol
 Vector4 color_0;
 Vector4 col_oxygen;
+Vector4 col_tether;
 
 // :tweaks
-float tether_connection_radius = 40.0;
-float core_tether_radius = 40.0;
+float tether_connection_radius = 50.0;
 float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 0.1;
 float teleporter_radius = 8.0f;
@@ -1649,8 +1649,11 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
+	// :col
 	color_0 = hex_to_rgba(0x2a2d3aff);
 	col_oxygen = hex_to_rgba(0xaad9e6ff);
+	col_tether = col_oxygen;
+	col_tether.a = 0.5;
 
 	// sprite setup
 	{
@@ -2099,7 +2102,7 @@ int entry(int argc, char **argv) {
 						if (!connected_tether->frame.is_powered) {
 							growing_array_add((void**)&connection_stack, &connected_tether);
 							connected_tether->frame.is_powered = true;
-							draw_line(connected_tether->pos, current->pos, 1.0f, COLOR_WHITE);
+							draw_line(connected_tether->pos, current->pos, 1.0f, col_tether);
 						}
 					}
 				}
@@ -2124,7 +2127,7 @@ int entry(int argc, char **argv) {
 			}
 
 			if (closest_tether) {
-				draw_line(closest_tether->pos, player->pos, 1.0f, COLOR_WHITE);
+				draw_line(closest_tether->pos, player->pos, 1.0f, col_tether);
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
 				}

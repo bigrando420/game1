@@ -289,20 +289,6 @@ SpriteID get_sprite_id_from_item(ItemID id) {
 	return get_item_data(id).icon;
 }
 
-// :dimension
-typedef enum DimensionID {
-	DIM_nil,
-	DIM_first, // very inventive names!
-	DIM_second,
-	DIM_third,
-	DIM_fourth,
-	DIM_MAX,
-} DimensionID;
-typedef struct DimensionData {
-	string pretty_name;
-} DimensionData;
-DimensionData dimension_data[DIM_MAX] = {0};
-
 typedef enum DamageType {
 	DMG_nil,
 	DMG_axe,
@@ -333,9 +319,6 @@ typedef struct Entity {
 	ItemID current_crafting_item;
 	int current_crafting_amount;
 	float64 crafting_end_time;
-	DimensionID current_dimension;
-	DimensionID teleport_to_dimension_when_near;
-	float64 tp_cooldown_end_time;
 	ItemAmount drops[4];
 	int drops_count;
 	DamageType dmg_type;
@@ -399,44 +382,40 @@ bool is_fully_unlocked(UnlockState unlock_state) {
 	return unlock_state.research_progress >= 100;
 }
 
+typedef Vector2i Tile;
+
+typedef enum BiomeID {
+	BIOME_void,
+	BIOME_core,
+	BIOME_barren,
+	BIOME_forest,
+	// :biome
+	BIOME_MAX,
+} BiomeID;
+
 typedef struct WorldResourceData {
-	DimensionID dim_id;
+	BiomeID biome_id;
 	ArchetypeID arch_id;
 	float spawn_interval;
 	int max_count;
 } WorldResourceData;
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
-	{ DIM_first, ARCH_rock, 2.f, 4 },
-	{ DIM_first, ARCH_tree, 1.f, 10 },
-	// { DIM_first, ARCH_exp_vein, 3.f, 2 },
-	{ DIM_first, ARCH_flint_depo, 3.f, 2 },
-	{ DIM_first, ARCH_grass, 3.f, 10 },
-
-	{ DIM_second, ARCH_exp_vein, 2.5f, 10 },
-	{ DIM_second, ARCH_ore1, 2.5f, 10 },
+	{ BIOME_barren, ARCH_rock, 2.f, 4 },
+	{ BIOME_forest, ARCH_tree, 1.f, 10 },
+	{ BIOME_forest, ARCH_flint_depo, 3.f, 2 },
+	{ BIOME_forest, ARCH_grass, 3.f, 10 },
 	// :spawn_res system
 };
-
-// :biome system
-typedef enum BiomeID {
-	BIOME_void,
-	BIOME_core,
-	BIOME_barren,
-	BIOME_forest,
-	BIOME_MAX,
-} BiomeID;
 
 typedef struct Map {
 	int width;
 	int height;
 	BiomeID* tiles;
 } Map;
+Map map = {0};
 
-Map world_maps[DIM_MAX] = {0};
 void init_biome_maps() {
-
-	Map* map = &world_maps[DIM_first];
 
 	string png;
 	bool ok = os_read_entire_file("res/sprites/biome0_map.png", &png, get_heap_allocator());
@@ -450,9 +429,9 @@ void init_biome_maps() {
 	assert(channels == 4);
 	third_party_allocator = ZERO(Allocator);
 
-	map->width = width;
-	map->height = height;
-	map->tiles = alloc(get_heap_allocator(), width * height * sizeof(BiomeID));
+	map.width = width;
+	map.height = height;
+	map.tiles = alloc(get_heap_allocator(), width * height * sizeof(BiomeID));
 
 	for (int y = 0; y < height; y++)
 	for (int x = 0; x < width; x++)
@@ -465,17 +444,16 @@ void init_biome_maps() {
 		u8 b = pixel[2];
 		Vector4 col = {(float)r/255.0f, (float)g/255.0f, (float)b/255.0f, 1.0};
 		if (v4_equals(col, COLOR_WHITE)) {
-			map->tiles[index] = BIOME_core;
+			map.tiles[index] = BIOME_core;
 		} else if (v4_equals(col, hex_to_rgba(0x3553b9ff))) {
-			map->tiles[index] = BIOME_forest;
+			map.tiles[index] = BIOME_forest;
 		} else if (!v4_equals(col, COLOR_BLACK)) {
-			map->tiles[index] = BIOME_barren;
+			map.tiles[index] = BIOME_barren;
 		}
 	}
 }
 
-BiomeID biome_at_tile(DimensionID dim, int x, int y) {
-	Map map = world_maps[dim];
+BiomeID biome_at_tile(int x, int y) {
 	BiomeID biome = 0;
 	int x_index = x + floor((float)map.width * 0.5);
 	int y_index = y + floor((float)map.height * 0.5);
@@ -484,10 +462,6 @@ BiomeID biome_at_tile(DimensionID dim, int x, int y) {
 	}
 	return biome;
 }
-
-typedef struct WorldDimension {
-	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
-} WorldDimension;
 
 typedef struct World {
 	float64 time_elapsed;
@@ -502,7 +476,6 @@ typedef struct World {
 	Entity* interacting_with_entity;
 	BuildingID selected_research_thing;
 	UnlockState building_unlocks[BUILDING_MAX];
-	WorldDimension dimensions[DIM_MAX];
 	// todo - figure out if we can legit just keep this as a pointer or not lol
 	Entity* core_tether;
 	// :world :state
@@ -542,14 +515,6 @@ Entity* entity_create() {
 	}
 	assert(entity_found, "No more free entities!");
 	entity_found->is_valid = true;
-
-	// put in player's dimension
-	Entity* player = get_player();
-	if (player) {
-		entity_found->current_dimension = player->current_dimension;
-	} else {
-		entity_found->current_dimension = DIM_first;
-	}
 
 	return entity_found;
 }
@@ -602,7 +567,6 @@ void setup_ore1(Entity* en) {
 void setup_teleporter1(Entity* en) {
 	en->arch = ARCH_teleporter1;
 	en->sprite_id = SPRITE_teleporter1;
-	en->teleport_to_dimension_when_near = DIM_second;
 }
 
 void setup_exp_vein(Entity* en) {
@@ -792,7 +756,6 @@ void world_setup()
 {
 	Entity* player_en = entity_create();
 	setup_player(player_en);
-	player_en->current_dimension = DIM_first;
 
 	Entity* en = entity_create();
 	setup_core_tether(en);
@@ -850,13 +813,6 @@ bool world_attempt_load_from_disk() {
 
 	memcpy(world, result.data, result.count);
 	return true;
-}
-
-bool is_in_player_dimension(Entity* en) {
-	Entity* player = get_player();
-	// we'll do some stuff later on where this can be in multiple dimensions, just by && this bad boy
-	bool portal_at_destination = en->teleport_to_dimension_when_near && en->teleport_to_dimension_when_near == player->current_dimension;
-	return en->current_dimension == player->current_dimension || portal_at_destination;
 }
 
 // :ui
@@ -1903,12 +1859,6 @@ int entry(int argc, char **argv) {
 		};
 	}
 
-	// :dimension data setup
-	{
-		dimension_data[DIM_first].pretty_name = STR("First");
-		dimension_data[DIM_second].pretty_name = STR("Second");
-	}
-
 	init_biome_maps();
 
 	// the :init zone
@@ -1986,6 +1936,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// :spawn_res in world
+		/*
 		{
 			for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 				WorldResourceData data = world_resources[i];
@@ -2028,6 +1979,7 @@ int entry(int argc, char **argv) {
 				}
 			}
 		}
+		*/
 
 		// select entity
 		if (!world_frame.hover_consumed)
@@ -2042,7 +1994,7 @@ int entry(int argc, char **argv) {
 					|| en->workbench_thing
 					|| en->arch == ARCH_research_station;
 				// add extra :interact cases here ^^
-				if (en->is_valid && is_in_player_dimension(en) && has_interaction) {
+				if (en->is_valid && has_interaction) {
 					Sprite* sprite = get_sprite(en->sprite_id);
 
 					int entity_tile_x = world_pos_to_tile_pos(en->pos.x);
@@ -2068,7 +2020,7 @@ int entry(int argc, char **argv) {
 			for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
 				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
 
-					BiomeID biome = biome_at_tile(get_player()->current_dimension, x, y);
+					BiomeID biome = biome_at_tile(x, y);
 					if (biome == 0) {
 						continue;
 					}
@@ -2099,19 +2051,6 @@ int entry(int argc, char **argv) {
 					// ...
 				// }
 
-				// teleporter update
-				if (has_reached_end_time(en->tp_cooldown_end_time) && is_in_player_dimension(en) && en->teleport_to_dimension_when_near) {
-					bool in_teleport_radius = fabsf(v2_dist(en->pos, player->pos)) < teleporter_radius;
-					if (in_teleport_radius) {
-						if (player->current_dimension == en->teleport_to_dimension_when_near) {
-							player->current_dimension = en->current_dimension;
-						} else {
-							player->current_dimension = en->teleport_to_dimension_when_near;
-						}
-						en->tp_cooldown_end_time = now() + 1.0;
-					}
-				}
-
 				// :workbench update
 				if (en->workbench_thing) {
 					if (en->current_crafting_item) {
@@ -2141,7 +2080,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// pickup item
-				if (is_player_alive() && is_in_player_dimension(en) && en->is_item) {
+				if (is_player_alive() && en->is_item) {
 					// TODO - epic physics pickup like arcana
 					if (fabsf(v2_dist(en->pos, get_player()->pos)) < player_pickup_radius) {
 						world->inventory_items[en->item_id].amount += en->item_amount;
@@ -2341,7 +2280,7 @@ int entry(int argc, char **argv) {
 		// :render entities
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
-			if (en->is_valid && is_in_player_dimension(en)) {
+			if (en->is_valid) {
 
 				switch (en->arch) {
 

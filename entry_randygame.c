@@ -384,6 +384,11 @@ bool is_fully_unlocked(UnlockState unlock_state) {
 
 typedef Vector2i Tile;
 
+typedef struct TileData {
+	Tile tile;
+	Entity* entity_at_tile;
+} TileData;
+
 typedef enum BiomeID {
 	BIOME_void,
 	BIOME_core,
@@ -453,6 +458,13 @@ void init_biome_maps() {
 	}
 }
 
+Tile local_map_to_world_tile(Vector2i local) {
+	return (Tile) {
+		local.x - floor((float)map.width * 0.5),
+		(local.y-map.height) + floor((float)(map.height) * 0.5) + 1,
+	};
+}
+
 BiomeID biome_at_tile(int x, int y) {
 	BiomeID biome = 0;
 	int x_index = x + floor((float)map.width * 0.5);
@@ -476,6 +488,7 @@ typedef struct World {
 	Entity* interacting_with_entity;
 	BuildingID selected_research_thing;
 	UnlockState building_unlocks[BUILDING_MAX];
+	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	// todo - figure out if we can legit just keep this as a pointer or not lol
 	Entity* core_tether;
 	// :world :state
@@ -1935,51 +1948,57 @@ int entry(int argc, char **argv) {
 			world->time_elapsed += delta_t;
 		}
 
+		TileData* tiles_for_biome[BIOME_MAX] = {0};
+		for (BiomeID biome = 1; biome < BIOME_MAX; biome++)
+		{
+			TileData* tiles;
+			growing_array_init((void**)&tiles, sizeof(TileData), get_temporary_allocator());
+
+			for (int y = 0; y < map.height; y++)
+			for (int x = 0; x < map.width; x++)
+			{
+				BiomeID biome_at_tile = map.tiles[y * map.width + x];
+				if (biome_at_tile == biome) {
+					// todo - check for entity_at_tile
+
+					TileData tdata = {0};
+					tdata.tile = local_map_to_world_tile(v2i(x, y));
+					growing_array_add((void**)&tiles, &tdata);
+				}
+			}
+
+			tiles_for_biome[biome] = tiles;
+		}
+
 		// :spawn_res in world
-		/*
 		{
 			for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 				WorldResourceData data = world_resources[i];
 
-				for (DimensionID dim_id = 1; dim_id < ARRAY_COUNT(world->dimensions); dim_id++) {
-					WorldDimension* dim = &world->dimensions[dim_id];
-					if (data.dim_id != dim_id) {
-						// skip, the resource isn't for this dimension
-						continue;
+				Tile* potential_spawn_tiles;
+				growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
+				for (int j = 0; j < growing_array_get_valid_count(tiles_for_biome[data.biome_id]); j++) {
+					TileData tile_data = tiles_for_biome[data.biome_id][j];
+					if (true) { // todo - check for existing
+						growing_array_add((void**)&potential_spawn_tiles, &tile_data.tile);
 					}
+				}
 
-					// grab current entity count
-					int entity_count = 0;
-					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
-						Entity* en = &world->entities[j];
-						if (en->is_valid && en->current_dimension == dim_id && en->arch == data.arch_id) {
-							entity_count += 1;
-						}
-					}
+				if (has_reached_end_time(world->resource_next_spawn_end_time[i])) {
+					world->resource_next_spawn_end_time[i] = now() + 1.0;
 
-					// note - this is a bit confusing to read. But it's this way to only start the timer after we drop below the max entity count. So that when the player destroys an entity, it doesn't immediately respawn.
-					if (entity_count >= data.max_count) {
-						dim->resource_next_spawn_end_time[i] = 0.0;
-					}
-					if (dim->resource_next_spawn_end_time[i] == 0.0
-					&& entity_count < data.max_count) {
-						dim->resource_next_spawn_end_time[i] = now() + data.spawn_interval;
-					}
+					// pick from a random spot
+					int count = growing_array_get_valid_count(potential_spawn_tiles);
+					Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
+					Entity* en = entity_create();
+					entity_setup(en, data.arch_id);
+					en->pos.x = tile_pos_to_world_pos(spawn_tile.x);
+					en->pos.y = tile_pos_to_world_pos(spawn_tile.y);
 
-					bool init_worldgen_hack = world->time_elapsed < 1.0;
-					if (entity_count < data.max_count
-					&& (has_reached_end_time(dim->resource_next_spawn_end_time[i]) || init_worldgen_hack)) {
-						Entity* en = entity_create();
-						en->current_dimension = dim_id;
-						entity_setup(en, data.arch_id);
-						en->pos = v2(get_random_float32_in_range(-world_half_length, world_half_length), get_random_float32_in_range(-world_half_length, world_half_length));
-						en->pos = round_v2_to_tile(en->pos);
-						dim->resource_next_spawn_end_time[i] = 0.0;
-					}
+					log("spawned at %f, %f", en->pos.x, en->pos.y);
 				}
 			}
 		}
-		*/
 
 		// select entity
 		if (!world_frame.hover_consumed)

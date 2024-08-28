@@ -140,7 +140,7 @@ const float player_pickup_radius = 10.0f;
 const int grass_health = 3;
 const int flint_depo_health = 3;
 const int exp_vein_health = 3;
-const int ore1_health = 3;
+const int copper_health = 3;
 const int rock_health = 3;
 const int tree_health = 3;
 const s32 layer_ui = 20;
@@ -191,8 +191,9 @@ typedef enum SpriteID {
 	SPRITE_exp,
 	SPRITE_exp_vein,
 	SPRITE_teleporter1,
-	SPRITE_ore1,
-	SPRITE_ore1_item,
+	SPRITE_copper_depo,
+	SPRITE_raw_copper,
+	SPRITE_copper_ingot,
 	SPRITE_fiber,
 	SPRITE_flint,
 	SPRITE_flint_axe,
@@ -228,7 +229,8 @@ typedef enum ItemID {
 	ITEM_rock,
 	ITEM_pine_wood,
 	ITEM_exp,
-	ITEM_ore1,
+	ITEM_raw_copper,
+	ITEM_copper_ingot,
 	ITEM_fiber,
 	ITEM_flint,
 	ITEM_flint_axe,
@@ -260,7 +262,7 @@ typedef enum ArchetypeID {
 	ARCH_research_station = 8,
 	ARCH_exp_vein = 9,
 	ARCH_teleporter1 = 10,
-	ARCH_ore1 = 11,
+	ARCH_copper_depo = 11,
 	ARCH_flint_depo = 12,
 	ARCH_grass = 13,
 	ARCH_core_tether = 14,
@@ -418,10 +420,12 @@ typedef struct WorldResourceData {
 } WorldResourceData;
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
-	{ BIOME_barren, ARCH_rock, 10 },
 	{ BIOME_forest, ARCH_tree, 10 },
 	{ BIOME_forest, ARCH_flint_depo, 15 },
 	{ BIOME_forest, ARCH_grass, 10 },
+
+	{ BIOME_barren, ARCH_rock, 10 },
+	{ BIOME_barren, ARCH_copper_depo, 10 },
 	// :spawn_res system
 };
 
@@ -586,13 +590,13 @@ void setup_flint_depo(Entity* en) {
 	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(2, 3)};
 }
 
-void setup_ore1(Entity* en) {
-	en->arch = ARCH_ore1;
-	en->sprite_id = SPRITE_ore1;
-	en->health = ore1_health;
+void setup_copper_depo(Entity* en) {
+	en->arch = ARCH_copper_depo;
+	en->sprite_id = SPRITE_copper_depo;
+	en->health = copper_health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_ore1, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=get_random_int_in_range(2, 3)};
 }
 
 void setup_teleporter1(Entity* en) {
@@ -671,7 +675,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_tree: setup_tree(en); break;
 		case ARCH_exp_vein: setup_exp_vein(en); break;
 		case ARCH_teleporter1: setup_teleporter1(en); break;
-		case ARCH_ore1: setup_ore1(en); break;
+		case ARCH_copper_depo: setup_copper_depo(en); break;
 		case ARCH_flint_depo: setup_flint_depo(en); break;
 		case ARCH_grass: setup_grass(en); break;
 		case ARCH_core_tether: setup_core_tether(en); break;
@@ -1768,8 +1772,9 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_exp] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp.png"), get_heap_allocator()) };
 		sprites[SPRITE_exp_vein] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp_vein.png"), get_heap_allocator()) };
 		sprites[SPRITE_teleporter1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/teleporter1.png"), get_heap_allocator()) };
-		sprites[SPRITE_ore1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/ore1.png"), get_heap_allocator()) };
-		sprites[SPRITE_ore1_item] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/ore1_item.png"), get_heap_allocator()) };
+		sprites[SPRITE_copper_depo] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/copper_depo.png"), get_heap_allocator()) };
+		sprites[SPRITE_raw_copper] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/raw_copper.png"), get_heap_allocator()) };
+		sprites[SPRITE_copper_ingot] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/copper_ingot.png"), get_heap_allocator()) };
 		sprites[SPRITE_fiber] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/fiber.png"), get_heap_allocator())};
 		sprites[SPRITE_flint] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint.png"), get_heap_allocator())};
 		sprites[SPRITE_flint_axe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_axe.png"), get_heap_allocator())};
@@ -1861,15 +1866,28 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Knowledge Fragment"), .icon=SPRITE_exp};
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock };
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood };
-		item_data[ITEM_ore1] = (ItemData){ .pretty_name=STR("Ore Thingy"), .icon=SPRITE_ore1_item };
+		item_data[ITEM_raw_copper] = (ItemData){ .pretty_name=STR("Raw Copper"), .icon=SPRITE_raw_copper };
 		item_data[ITEM_fiber] = (ItemData){ .pretty_name=STR("Fiber"), .icon=SPRITE_fiber };
 		item_data[ITEM_flint] = (ItemData){ .pretty_name=STR("Flint"), .icon=SPRITE_flint };
+
+		item_data[ITEM_copper_ingot] = (ItemData){
+			.pretty_name=STR("Copper Ingot"),
+			.description=STR("Shiny"),
+			.icon=SPRITE_copper_ingot,
+			.craft_length=20,
+			.for_structure=ARCH_furnace,
+			.crafting_recipe_count=2,
+			.crafting_recipe={
+				{ITEM_raw_copper, 3},
+				{ITEM_coal, 3},
+			},
+		};
 
 		item_data[ITEM_coal] = (ItemData){
 			.pretty_name=STR("Coal"),
 			.description=STR("FUEEEEEEL"),
 			.icon=SPRITE_coal,
-			.craft_length=0.5,
+			.craft_length=5,
 			.for_structure=ARCH_furnace,
 			.crafting_recipe_count=1,
 			.crafting_recipe={
@@ -2479,7 +2497,7 @@ int entry(int argc, char **argv) {
 			}
 			input_axis = v2_normalize(input_axis);
 			Entity* player = get_player();
-			player->pos = v2_add(player->pos, v2_mulf(input_axis, 100.0 * delta_t));
+			player->pos = v2_add(player->pos, v2_mulf(input_axis, 70.0 * delta_t));
 		}
 
 		// player :hud

@@ -339,6 +339,7 @@ typedef struct Entity {
 	float64 oxygen_deplete_end_time;
 	float64 oxygen_regen_end_time;
 	bool is_oxygen_tether;
+	bool isnt_a_tile;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -413,15 +414,14 @@ typedef enum BiomeID {
 typedef struct WorldResourceData {
 	BiomeID biome_id;
 	ArchetypeID arch_id;
-	float spawn_interval;
-	int max_count;
+	int dist_from_self;
 } WorldResourceData;
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
-	{ BIOME_barren, ARCH_rock, 2.f, 4 },
-	{ BIOME_forest, ARCH_tree, 1.f, 10 },
-	{ BIOME_forest, ARCH_flint_depo, 3.f, 2 },
-	{ BIOME_forest, ARCH_grass, 3.f, 10 },
+	{ BIOME_barren, ARCH_rock, 10 },
+	{ BIOME_forest, ARCH_tree, 5 },
+	{ BIOME_forest, ARCH_flint_depo, 10 },
+	{ BIOME_forest, ARCH_grass, 4 },
 	// :spawn_res system
 };
 
@@ -659,6 +659,7 @@ void setup_item(Entity* en, ItemID item_id) {
 	en->is_item = true;
 	en->item_id = item_id;
 	en->item_amount = 1;
+	en->isnt_a_tile = true;
 }
 
 void entity_setup(Entity* en, ArchetypeID id) {
@@ -2039,15 +2040,35 @@ int entry(int argc, char **argv) {
 				}
 
 				if (has_reached_end_time(world->resource_next_spawn_end_time[i])) {
-					world->resource_next_spawn_end_time[i] = now() + 1.0;
-
 					// pick from a random spot
 					int count = growing_array_get_valid_count(potential_spawn_tiles);
 					Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
-					Entity* en = entity_create();
-					entity_setup(en, data.arch_id);
-					en->pos.x = tile_pos_to_world_pos(spawn_tile.x);
-					en->pos.y = tile_pos_to_world_pos(spawn_tile.y);
+					Vector2 spawn_pos = v2_tile_pos_to_world_pos(spawn_tile);
+
+					// is it close to any entities?
+					bool too_close = false;
+					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+						Entity* en = &world->entities[j];
+						if (en->is_valid && en->arch == data.arch_id && !en->isnt_a_tile) {
+							int tile_radius = data.dist_from_self;
+							if (v2_dist(spawn_pos, en->pos) < tile_width * tile_radius) {
+								too_close = true;
+								break;
+							}
+						}
+					}
+
+					if (!too_close) {
+						Entity* en = entity_create();
+						entity_setup(en, data.arch_id);
+						en->pos = spawn_pos;
+
+						float respawn_length = 2.0;
+						if (world->time_elapsed < 1.0) {
+							respawn_length = 0.0;
+						}
+						world->resource_next_spawn_end_time[i] = now() + respawn_length;
+					}
 				}
 
 				if (data.biome_id == BIOME_forest)

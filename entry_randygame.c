@@ -1228,6 +1228,19 @@ void do_ui_stuff() {
 
 			draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
 
+			// :tether connection preview
+			{
+				for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+					Entity* tether = &world->entities[i];
+					if (tether->is_valid && tether->is_oxygen_tether && tether->last_frame.is_powered) {
+						if (v2_dist(tether->pos, pos) < tether_connection_radius) {
+							draw_line(tether->pos, pos, 1.0f, col_tether);
+							break;
+						}
+					}
+				}
+			}
+
 			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 				Entity* en = entity_create();
@@ -2216,6 +2229,8 @@ int entry(int argc, char **argv) {
 
 		// :tether stuff
 		{
+			world->core_tether->frame.is_powered = true;
+
 			// for each tether, find all nearby tethers
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* self_tether = &world->entities[i];

@@ -581,6 +581,7 @@ void setup_grass(Entity* en) {
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_fiber, .amount=get_random_int_in_range(1, 2)};
+	en->dmg_type = DMG_sickle;
 }
 
 void setup_flint_depo(Entity* en) {
@@ -590,6 +591,7 @@ void setup_flint_depo(Entity* en) {
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(2, 3)};
+	en->dmg_type = DMG_pickaxe;
 }
 
 void setup_copper_depo(Entity* en) {
@@ -599,6 +601,7 @@ void setup_copper_depo(Entity* en) {
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=get_random_int_in_range(2, 3)};
+	en->dmg_type = DMG_pickaxe;
 }
 
 void setup_teleporter1(Entity* en) {
@@ -613,6 +616,7 @@ void setup_exp_vein(Entity* en) {
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_exp, .amount=get_random_int_in_range(2, 3)};
+	en->dmg_type = DMG_pickaxe;
 }
 
 void setup_furnace(Entity* en) {
@@ -649,6 +653,7 @@ void setup_rock(Entity* en) {
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=get_random_int_in_range(2, 3)};
+	en->dmg_type = DMG_pickaxe;
 }
 
 void setup_tree(Entity* en) {
@@ -913,7 +918,7 @@ void do_ui_stuff() {
 		draw_text_with_pivot(font, STR("DED"), title_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_bottom_center);
 
 		y0 -= 5.0;
-		draw_text_with_pivot(font, STR("All Knowledge Fragments were lost"), subtitle_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+		draw_text_with_pivot(font, STR("All Oxygen Shards were lost"), subtitle_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 
 		y0 -= 10.0;
 		draw_text_with_pivot(font, STR("press 'R' to respawn"), subtitle_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
@@ -1886,7 +1891,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item
-		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Knowledge Fragment"), .icon=SPRITE_exp};
+		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_exp};
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock };
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood };
 		item_data[ITEM_raw_copper] = (ItemData){ .pretty_name=STR("Raw Copper"), .icon=SPRITE_raw_copper };

@@ -342,6 +342,7 @@ typedef struct Entity {
 	float64 oxygen_regen_end_time;
 	bool is_oxygen_tether;
 	bool isnt_a_tile;
+	bool right_click_remove;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -564,6 +565,7 @@ void setup_tether(Entity* en) {
 	en->arch = ARCH_tether;
 	en->sprite_id = SPRITE_tether;
 	en->is_oxygen_tether = true;
+	en->right_click_remove = true;
 }
 
 void setup_core_tether(Entity* en) {
@@ -617,17 +619,20 @@ void setup_furnace(Entity* en) {
 	en->arch = ARCH_furnace;
 	en->sprite_id = SPRITE_furnace;
 	en->workbench_thing = true;
+	en->right_click_remove = true;
 }
 
 void setup_workbench(Entity* en) {
 	en->arch = ARCH_workbench;
 	en->sprite_id = SPRITE_workbench;
 	en->workbench_thing = true;
+	en->right_click_remove = true;
 }
 
 void setup_research_station(Entity* en) {
 	en->arch = ARCH_research_station;
 	en->sprite_id = SPRITE_research_station;
+	en->right_click_remove = true;
 }
 
 void setup_player(Entity* en) {
@@ -846,6 +851,7 @@ void world_setup()
 		world->inventory_items[ITEM_flint_axe].amount = 1;
 		world->inventory_items[ITEM_flint].amount = 100;
 		world->inventory_items[ITEM_fiber].amount = 100;
+		world->inventory_items[ITEM_copper_ingot].amount = 100;
 
 		en = entity_create();
 		setup_furnace(en);
@@ -1229,6 +1235,7 @@ void do_ui_stuff() {
 			draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
 
 			// :tether connection preview
+			if (building.to_build == ARCH_tether)
 			{
 				for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 					Entity* tether = &world->entities[i];
@@ -1833,7 +1840,7 @@ int entry(int argc, char **argv) {
 			.description=STR("Extends oxygen range"),
 			.pct_per_research_exp=10,
 			.ingredients_count=1,
-			.ingredients={ {ITEM_rock, 20} }
+			.ingredients={ {ITEM_copper_ingot, 2} }
 		};
 
 		buildings[BUILDING_furnace] = (BuildingData){
@@ -2129,7 +2136,8 @@ int entry(int argc, char **argv) {
 				Entity* en = &world->entities[i];
 				bool has_interaction = en->destroyable_world_item
 					|| en->workbench_thing
-					|| en->arch == ARCH_research_station;
+					|| en->arch == ARCH_research_station
+					|| en->right_click_remove;
 				// add extra :interact cases here ^^
 				if (en->is_valid && has_interaction) {
 					Sprite* sprite = get_sprite(en->sprite_id);
@@ -2416,6 +2424,27 @@ int entry(int argc, char **argv) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 					world->ux_state = UX_research;
 					world->interacting_with_entity = selected_en;
+				}
+			}
+
+			// right click remove
+			if (selected_en && selected_en->right_click_remove) {
+				if (is_key_just_pressed(MOUSE_BUTTON_RIGHT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_RIGHT);
+					for (int i = 1; i < BUILDING_MAX; i++) {
+						BuildingData data = buildings[i];
+						if (data.to_build == selected_en->arch) {
+							for (int j = 0; j < data.ingredients_count; j++) {
+								ItemAmount amt = data.ingredients[j];
+								Entity* drop = entity_create();
+								setup_item(drop, amt.id);
+								drop->item_amount = amt.amount;
+								drop->pos = selected_en->pos;
+							}
+							break;
+						}
+					}
+					entity_destroy(selected_en);
 				}
 			}
 		}

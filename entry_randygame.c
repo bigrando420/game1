@@ -341,7 +341,6 @@ typedef struct Entity {
 	int health;
 	int max_health;
 	bool destroyable_world_item;
-	bool is_item;
 	bool workbench_thing;
 	ItemID current_crafting_item;
 	int current_crafting_amount;
@@ -691,7 +690,6 @@ void setup_tree(Entity* en) {
 void setup_item(Entity* en, ItemID item_id) {
 	en->arch = ARCH_item;
 	en->sprite_id = get_sprite_id_from_item(item_id);
-	en->is_item = true;
 	en->item_id = item_id;
 	en->item_amount = 1;
 	en->isnt_a_tile = true;
@@ -2274,7 +2272,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// pickup item
-				if (is_player_alive() && en->is_item) {
+				if (is_player_alive() && en->arch == ARCH_item) {
 					// TODO - epic physics pickup like arcana
 					if (fabsf(v2_dist(en->pos, get_player()->pos)) < player_pickup_radius) {
 						world->inventory_items[en->item_id].amount += en->item_amount;
@@ -2515,7 +2513,7 @@ int entry(int argc, char **argv) {
 					{
 						Sprite* sprite = get_sprite(en->sprite_id);
 						Matrix4 xform = m4_scalar(1.0);
-						if (en->is_item) {
+						if (en->arch == ARCH_item) {
 							xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
 						}
 						// @volatile with entity placement

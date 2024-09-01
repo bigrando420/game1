@@ -2358,6 +2358,8 @@ int entry(int argc, char **argv) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
+					play_one_audio_clip(STR("res/sound/hit_0.wav"));
+
 					int damage_amount = 1;
 					if (selected_en->dmg_type == DMG_axe) {
 						for (int i = 0; i < ITEM_MAX; i++) {

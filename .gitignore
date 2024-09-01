@@ -1,3 +1,7 @@
+
+# this path cannot be comitted because of licensing. Raw files from sample packs are used.
+asset_workbench/game1_sound/**
+
 world
 *.raddbgi
 **/worlds

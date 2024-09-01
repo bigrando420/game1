@@ -328,6 +328,7 @@ typedef struct Entity {
 	bool render_sprite;
 	SpriteID sprite_id;
 	int health;
+	int max_health;
 	bool destroyable_world_item;
 	bool is_item;
 	bool workbench_thing;
@@ -344,6 +345,7 @@ typedef struct Entity {
 	bool is_oxygen_tether;
 	bool isnt_a_tile;
 	bool right_click_remove;
+	float health_bar_current_alpha; // note how caveman it feels to store this here lol. OOGA BOOGA
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -579,6 +581,7 @@ void setup_grass(Entity* en) {
 	en->arch = ARCH_grass;
 	en->sprite_id = SPRITE_grass;
 	en->health = grass_health;
+	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_fiber, .amount=get_random_int_in_range(1, 2)};
@@ -589,6 +592,7 @@ void setup_flint_depo(Entity* en) {
 	en->arch = ARCH_flint_depo;
 	en->sprite_id = SPRITE_flint_depo;
 	en->health = flint_depo_health;
+	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(2, 3)};
@@ -599,6 +603,7 @@ void setup_copper_depo(Entity* en) {
 	en->arch = ARCH_copper_depo;
 	en->sprite_id = SPRITE_copper_depo;
 	en->health = copper_health;
+	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=get_random_int_in_range(2, 3)};
@@ -614,6 +619,7 @@ void setup_exp_vein(Entity* en) {
 	en->arch = ARCH_exp_vein;
 	en->sprite_id = SPRITE_exp_vein;
 	en->health = exp_vein_health;
+	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_exp, .amount=get_random_int_in_range(2, 3)};
@@ -644,6 +650,7 @@ void setup_player(Entity* en) {
 	en->arch = ARCH_player;
 	en->sprite_id = SPRITE_player;
 	en->health = 1;
+	en->max_health = en->health;
 	en->oxygen = get_max_oxygen();
 }
 
@@ -651,6 +658,7 @@ void setup_rock(Entity* en) {
 	en->arch = ARCH_rock;
 	en->sprite_id = SPRITE_rock0;
 	en->health = rock_health;
+	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=get_random_int_in_range(2, 3)};
@@ -662,6 +670,7 @@ void setup_tree(Entity* en) {
 	en->sprite_id = SPRITE_tree1;
 	// en->sprite_id = SPRITE_tree1;
 	en->health = tree_health;
+	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_pine_wood, .amount=get_random_int_in_range(2, 3)};
@@ -2492,6 +2501,25 @@ int entry(int argc, char **argv) {
 
 						break;
 					}
+				}
+
+				// health bar
+				if (en->health && en->health < en->max_health) {
+					Vector2 size = {6, 1};
+					Vector2 draw_pos = en->pos;
+					draw_pos.x -= size.x * 0.5;
+					draw_pos.y -= 6.0;
+
+					draw_rect(draw_pos, size, COLOR_BLACK);
+
+					float target_alpha = (float)en->health / (float)en->max_health;
+
+					if (en->health_bar_current_alpha == 0.0) {
+						en->health_bar_current_alpha = 1.0;
+					}
+					animate_f32_to_target(&en->health_bar_current_alpha, target_alpha, delta_t, 30.0f);
+
+					draw_rect(draw_pos, v2(size.x * en->health_bar_current_alpha, size.y), COLOR_WHITE);
 				}
 
 				// :tether draw blue thingy

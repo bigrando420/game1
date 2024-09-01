@@ -132,7 +132,7 @@ Vector4 col_oxygen;
 Vector4 col_tether;
 
 // :tweaks
-float max_cam_shake_translate = 100.0f;
+float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
 float selection_reach_radius = 20.0f;
 float tether_connection_radius = 50.0;
@@ -2427,7 +2427,7 @@ int entry(int argc, char **argv) {
 
 					selected_en->health -= damage_amount;
 					if (selected_en->health <= 0) {
-						camera_shake(0.3); // shake only on death
+						camera_shake(0.2); // shake only on death
 
 						// :drops
 

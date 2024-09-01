@@ -2298,7 +2298,7 @@ int entry(int argc, char **argv) {
 						en->velocity = v2_mulf(target_normal, mag);
 
 						if (v2_dist(en->pos, player->pos) < 2.0f) {
-							// todo - pickup sound
+							play_one_audio_clip(STR("res/sound/item_pickup.wav"));
 							world->inventory_items[en->item_id].amount += en->item_amount;
 							entity_destroy(en);
 						}

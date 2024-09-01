@@ -128,6 +128,7 @@ Vector4 col_oxygen;
 Vector4 col_tether;
 
 // :tweaks
+float selection_reach_radius = 20.0f;
 float tether_connection_radius = 50.0;
 float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 0.1;
@@ -2144,7 +2145,9 @@ int entry(int argc, char **argv) {
 					|| en->arch == ARCH_research_station
 					|| en->right_click_remove;
 				// add extra :interact cases here ^^
-				if (en->is_valid && has_interaction) {
+
+				float dist_to_player = v2_dist(en->pos, get_player()->pos);
+				if (en->is_valid && has_interaction && dist_to_player < selection_reach_radius) {
 					Sprite* sprite = get_sprite(en->sprite_id);
 
 					int entity_tile_x = world_pos_to_tile_pos(en->pos.x);

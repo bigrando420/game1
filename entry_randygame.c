@@ -143,7 +143,7 @@ Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
 const float world_half_length = tile_width * 10;
 const float entity_selection_radius = 16.0f;
-const float player_pickup_radius = 10.0f;
+const float player_pickup_radius = 32.0f;
 const int grass_health = 3;
 const int flint_depo_health = 3;
 const int exp_vein_health = 3;
@@ -356,6 +356,13 @@ typedef struct Entity {
 	bool isnt_a_tile;
 	bool right_click_remove;
 	float health_bar_current_alpha; // note how caveman it feels to store this here lol. OOGA BOOGA
+	bool has_physics;
+	Vector2 velocity;
+	Vector2 acceleration;
+	float friction;
+	bool is_being_picked_up;
+	bool disable_friction;
+	float64 pick_up_cooldown_end_time;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -2273,13 +2280,53 @@ int entry(int argc, char **argv) {
 
 				// pickup item
 				if (is_player_alive() && en->arch == ARCH_item) {
-					// TODO - epic physics pickup like arcana
-					if (fabsf(v2_dist(en->pos, get_player()->pos)) < player_pickup_radius) {
-						world->inventory_items[en->item_id].amount += en->item_amount;
-						entity_destroy(en);
+
+					if (has_reached_end_time(en->pick_up_cooldown_end_time)
+					&& fabsf(v2_dist(en->pos, get_player()->pos)) < player_pickup_radius) {
+						en->is_being_picked_up = true;
+					}
+
+					if (en->is_being_picked_up) {
+
+						// physically accelerate towards the player
+						en->has_physics = true;
+						en->disable_friction = true;
+						Vector2 pick_up_target_pos = player->pos;
+						Vector2 target_normal = v2_normalize(v2_sub(pick_up_target_pos, en->pos));
+						en->acceleration = v2_mulf(target_normal, 1000.0f);
+						float mag = v2_length(en->velocity);
+						en->velocity = v2_mulf(target_normal, mag);
+
+						if (v2_dist(en->pos, player->pos) < 2.0f) {
+							// todo - pickup sound
+							world->inventory_items[en->item_id].amount += en->item_amount;
+							entity_destroy(en);
+						}
 					}
 				}
 			}
+		}
+
+		// :physics update
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			if (!en->is_valid || !en->has_physics) {
+				continue;
+			}
+
+			// https://guide.handmadehero.org/code/day043
+			
+			// "friction"
+			if (!en->disable_friction) {
+				en->acceleration = v2_sub(en->acceleration, v2_mulf(en->velocity, en->friction));
+			}
+
+			// integrate
+			en->velocity = v2_add(en->velocity, v2_mulf(en->acceleration, delta_t));
+			Vector2 next_pos = v2_add(en->pos, v2_mulf(en->velocity, delta_t));
+			en->acceleration = (Vector2){0};
+
+			en->pos = next_pos;
 		}
 
 		// :tether stuff
@@ -2453,6 +2500,7 @@ int entry(int argc, char **argv) {
 							setup_item(drop, drop_id);
 							drop->pos = selected_en->pos;
 							drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
+							drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
 						}
 
 						entity_destroy(selected_en);

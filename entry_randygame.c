@@ -79,6 +79,10 @@ Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
 
 // :utils
 
+// randy: it's sometimes easier to think about the inverse of min & max
+#define clamp_bottom(a, b) max(a, b)
+#define clamp_top(a, b) min(a, b)
+
 Vector4 v4_lerp(Vector4 from, Vector4 to, float x) {
 	return v4(lerpf(from.x, to.x, x), lerpf(from.y, to.y, x), lerpf(from.z, to.z, x), lerpf(from.w, to.w, x));
 }
@@ -128,6 +132,8 @@ Vector4 col_oxygen;
 Vector4 col_tether;
 
 // :tweaks
+float max_cam_shake_translate = 100.0f;
+float max_cam_shake_rotate = 4.0f;
 float selection_reach_radius = 20.0f;
 float tether_connection_radius = 50.0;
 float oxygen_regen_tick_length = 0.01;
@@ -147,7 +153,12 @@ const int tree_health = 3;
 const s32 layer_ui = 20;
 const s32 layer_world = 10;
 
-// :global app stuff
+// global :app stuff
+// we could move this into an AppState struct.
+// or we could just keep cavemaning it like this lol, since it's not needed.
+float camera_trauma = 0;
+float zoom = 5.3;
+Vector2 camera_pos = {0};
 float64 delta_t;
 Gfx_Font* font;
 u32 font_height = 48;
@@ -794,6 +805,10 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 }
 
 // :func dump
+
+void camera_shake(float amount) {
+	camera_trauma += amount;
+}
 
 typedef struct TileCache {
 	Entity* entity;
@@ -2001,9 +2016,6 @@ int entry(int argc, char **argv) {
 	float64 seconds_counter = 0.0;
 	s32 frame_count = 0;
 
-	float zoom = 5.3;
-	Vector2 camera_pos = v2(0, 0);
-
 	float64 last_time = os_get_elapsed_seconds();
 	while (!window.should_close) {
 		reset_temporary_storage();
@@ -2037,12 +2049,32 @@ int entry(int argc, char **argv) {
 		world_frame.world_proj = m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
 		// :camera
 		{
+			// camera shake - https://www.youtube.com/watch?v=tu-Qe66AvtY
+			camera_trauma -= delta_t;
+			camera_trauma = clamp_bottom(camera_trauma, 0);
+			float cam_shake = clamp_top(pow(camera_trauma, 3), 1);
+
 			Vector2 target_pos = get_player()->pos;
 			animate_v2_to_target(&camera_pos, target_pos, delta_t, 30.0f);
 
-			world_frame.world_view = m4_make_scale(v3(1.0, 1.0, 1.0));
-			world_frame.world_view = m4_mul(world_frame.world_view, m4_make_translation(v3(camera_pos.x, camera_pos.y, 0)));
-			world_frame.world_view = m4_mul(world_frame.world_view, m4_make_scale(v3(1.0/zoom, 1.0/zoom, 1.0)));
+			world_frame.world_view = m4_identity;
+
+			// randy: these might be ordered incorrectly for the camera shake. Not sure.
+
+			// translate into position
+			world_frame.world_view = m4_translate(world_frame.world_view, v3(camera_pos.x, camera_pos.y, 0));
+
+			// translational shake
+			float shake_x = max_cam_shake_translate * cam_shake * get_random_float32_in_range(-1, 1);
+			float shake_y = max_cam_shake_translate * cam_shake * get_random_float32_in_range(-1, 1);
+			world_frame.world_view = m4_translate(world_frame.world_view, v3(shake_x, shake_y, 0));
+
+			// rotational shake
+			// float shake_rotate = max_cam_shake_rotate * cam_shake * get_random_float32_in_range(-1, 1);
+			// world_frame.world_view = m4_rotate_z(world_frame.world_view, shake_rotate);
+
+			// scale the zoom
+			world_frame.world_view = m4_scale(world_frame.world_view, v3(1.0/zoom, 1.0/zoom, 1.0));
 		}
 		set_world_space();
 		push_z_layer(layer_world);
@@ -2395,6 +2427,8 @@ int entry(int argc, char **argv) {
 
 					selected_en->health -= damage_amount;
 					if (selected_en->health <= 0) {
+						camera_shake(0.3); // shake only on death
+
 						// :drops
 
 						ItemID *drops;

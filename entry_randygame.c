@@ -83,10 +83,6 @@ Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
 #define clamp_bottom(a, b) max(a, b)
 #define clamp_top(a, b) min(a, b)
 
-Vector4 v4_lerp(Vector4 from, Vector4 to, float x) {
-	return v4(lerpf(from.x, to.x, x), lerpf(from.y, to.y, x), lerpf(from.z, to.z, x), lerpf(from.w, to.w, x));
-}
-
 // 0 -> 1
 float sin_breathe(float time, float rate) {
 	return (sin(time * rate) + 1.0) / 2.0;
@@ -555,7 +551,7 @@ typedef struct World {
 	BuildingID selected_research_thing;
 	UnlockState building_unlocks[BUILDING_MAX];
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
-	// todo - figure out if we can legit just keep this as a pointer or not lol
+	// todo #ship - figure out if we can legit just keep this as a pointer or not lol
 	Entity* core_tether;
 	// :world :state
 } World;
@@ -2042,7 +2038,7 @@ int entry(int argc, char **argv) {
 		string source;
 		bool ok = os_read_entire_file("res/shader.hlsl", &source, get_heap_allocator());
 		assert(ok);
-		shader_recompile_with_extension(source, sizeof(ShaderConstBuffer));
+		gfx_shader_recompile_with_extension(source, sizeof(ShaderConstBuffer));
 		dealloc_string(get_heap_allocator(), source);
 	}
 

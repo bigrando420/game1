@@ -4,6 +4,7 @@
 
 #include "range.c"
 #include "config.c"
+#include "easings.c"
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 

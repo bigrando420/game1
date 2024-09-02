@@ -151,11 +151,11 @@ const float world_half_length = tile_width * 10;
 const float entity_selection_radius = 16.0f;
 const float player_pickup_radius = 32.0f;
 const int grass_health = 3;
-const int flint_depo_health = 3;
-const int exp_vein_health = 3;
-const int copper_health = 3;
-const int rock_health = 3;
-const int tree_health = 3;
+const int flint_depo_health = 10;
+const int exp_vein_health = 10;
+const int copper_health = 10;
+const int rock_health = 10;
+const int tree_health = 10;
 const s32 layer_ui = 20;
 const s32 layer_world = 10;
 

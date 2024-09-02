@@ -6,6 +6,30 @@
 		
 		All configuration properties has default values if you do not explicitly #define them.
 	
+		- OOGABOOGA_ENABLE_EXTENSIONS
+			Enable oogabooga extensions.
+		
+			0: Disable
+			1: Enable
+			
+			Example:
+			
+				#define OOGABOOGA_ENABLE_EXTENSIONS 1
+				
+			Note:
+				Your program needs to call ext_update_and_draw() each frame.
+				
+		- OOGABOOGA_EXTENSION_PARTICLES
+			Enable the 'particles' oogabooga extension to use particle emitters in your game.
+		
+			0: Disable
+			1: Enable
+			
+			Example:
+			
+				#define OOGABOOGA_EXTENSION_PARTICLES 1
+				
+	
 		- ENTRY_PROC
 			Define this as whatever the entry procedure of your program should be.
 				
@@ -112,13 +136,11 @@
             Example:
             
                 #define OOGABOOGA_HEADLESS 1
-		
-
 */
 
 #define OGB_VERSION_MAJOR 0
 #define OGB_VERSION_MINOR 1
-#define OGB_VERSION_PATCH 5
+#define OGB_VERSION_PATCH 8
 
 #define OGB_VERSION (OGB_VERSION_MAJOR*1000000+OGB_VERSION_MINOR*1000+OGB_VERSION_PATCH)
 
@@ -285,8 +307,8 @@ typedef u8 bool;
 #include "string_format.c"
 #include "hash.c"
 #include "path_utils.c"
-#include "linmath.c"
 #include "utility.c"
+#include "linmath.c"
 
 #include "hash_table.c"
 #include "growing_array.c"
@@ -321,6 +343,11 @@ typedef u8 bool;
     #include "drawing.c"
 
     #include "audio.c"
+#endif
+
+#if OOGABOOGA_ENABLE_EXTENSIONS
+
+	#include "extensions.c"
 #endif
 
 #if !OOGABOOGA_LINK_EXTERNAL_INSTANCE
@@ -379,6 +406,8 @@ ogb_instance void oogabooga_init(u64 program_memory_size);
 
 #if !OOGABOOGA_LINK_EXTERNAL_INSTANCE
 void oogabooga_init(u64 program_memory_size) {
+	seed_for_random = rdtsc();
+	
 	context.logger = default_logger;
 	temp_allocator = get_initialization_allocator();
 	Cpu_Capabilities features = query_cpu_capabilities();
@@ -391,6 +420,12 @@ void oogabooga_init(u64 program_memory_size) {
 #else
     log_info("Headless mode on");
 #endif
+
+#if OOGABOOGA_ENABLE_EXTENSIONS
+	ext_init();
+#endif
+
+
 	log_verbose("CPU has sse1:   %cs", features.sse1   ? "true" : "false");
 	log_verbose("CPU has sse2:   %cs", features.sse2   ? "true" : "false");
 	log_verbose("CPU has sse3:   %cs", features.sse3   ? "true" : "false");
@@ -437,6 +472,9 @@ int main(int argc, char **argv) {
 	dump_profile_result();
 	
 #endif
+	
+	// This is so any threads waiting for window to close will close on exit
+	window.should_close = true;
 	
 	printf("Ooga booga program exit with code %i\n", code);
 	

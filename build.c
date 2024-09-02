@@ -1,12 +1,11 @@
-// :shader stuff 
-// this drives an array of Vector4's in the user_data of Draw_Quad
-#define VERTEX_2D_USER_DATA_COUNT 1
-// #volatile current user data layout
-// Vector4 col_override; // rgb = color, a = the alpha for lerping to that color
-// ...
+
 
 ///
 // Build config stuff
+
+// To enable extensions:
+// #define OOGABOOGA_ENABLE_EXTENSIONS   1
+// #define OOGABOOGA_EXTENSION_PARTICLES 1
 
 #define INITIAL_PROGRAM_MEMORY_SIZE MB(5)
 
@@ -27,7 +26,7 @@ typedef struct Context_Extra {
 #define CONTEXT_EXTRA Context_Extra
 
 // This defaults to "entry", but we can set it to anything (except "main" or other existing proc names"
-	#define ENTRY_PROC entry
+#define ENTRY_PROC entry
 
 // Ooga booga needs to be included AFTER configuration and BEFORE the program code
 #include "oogabooga/oogabooga.c"
@@ -43,15 +42,19 @@ typedef struct Context_Extra {
 // #include "oogabooga/examples/text_rendering.c"
 // #include "oogabooga/examples/custom_logger.c"
 // #include "oogabooga/examples/renderer_stress_test.c"
-// #include "oogabooga/examples/tile_game.c"
 // #include "oogabooga/examples/audio_test.c"
 // #include "oogabooga/examples/custom_shader.c"
 // #include "oogabooga/examples/growing_array_example.c"
 // #include "oogabooga/examples/input_example.c"
 // #include "oogabooga/examples/sprite_animation.c"
+// #include "oogabooga/examples/window_test.c"
+#include "oogabooga/examples/offscreen_drawing.c"
+// #include "oogabooga/examples/threaded_drawing.c"
 
-// Randy's example game that he's building out as a tutorial for using the engine
-#include "entry_randygame.c"
+// These examples require some extensions to be enabled. See top respective files for more info.
+// #include "oogabooga/examples/particles_example.c" // Requires OOGABOOGA_EXTENSION_PARTICLES
+
+// #include "oogabooga/examples/sanity_tests.c"
 
 // This is where you swap in your own project!
 // #include "entry_yourepicgamename.c"

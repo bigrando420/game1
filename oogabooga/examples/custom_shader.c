@@ -23,8 +23,8 @@ Draw_Quad *draw_outlined_circle_xform(Matrix4 xform, Vector2 size, Vector4 color
 int entry(int argc, char **argv) {
 	
 	window.title = STR("Custom Shader Example");
-	window.scaled_width = 1280;
-	window.scaled_height = 720; 
+	window.point_width = 1280;
+	window.point_height = 720; 
 	window.x = 200;
 	window.y = 90;
 	window.clear_color = hex_to_rgba(0x6495EDff);
@@ -35,7 +35,7 @@ int entry(int argc, char **argv) {
 	
 	// This is slow and needs to recompile the shader. However, it should probably only happen once (or each hot reload)
 	// If it fails, it will return false and return to whatever shader it was before.
-	shader_recompile_with_extension(source, sizeof(My_Cbuffer));
+	gfx_shader_recompile_with_extension(source, sizeof(My_Cbuffer));
 	
 	dealloc_string(get_heap_allocator(), source);
 	
@@ -54,6 +54,10 @@ int entry(int argc, char **argv) {
 		last_time = now;
 	
 		reset_temporary_storage();
+		
+		float32 aspect = (float32)window.width/(float32)window.height;
+	
+		draw_frame.projection = m4_make_orthographic_projection(-aspect, aspect, -1, 1, -1, 10);
 		
 		cbuffer.mouse_pos_screen = v2(input_frame.mouse_x, input_frame.mouse_y);
 		cbuffer.window_size = v2(window.width, window.height);

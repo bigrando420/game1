@@ -1,13 +1,22 @@
 
-// See oogabooga/examples/text_rendering.c for usage
-
-
+// See oogabooga/examples/text_rendering.c for a practical example
 
 /*
-TODO:
-	- Justify rows in walk_glyphs
-*/
 
+	Example Usage:
+	
+	Gfx_Font *font = load_font_from_disk(STR("C:/windows/fonts/arial.ttf"), get_heap_allocator());
+	assert(font, "Failed loading arial.ttf");
+
+	while (...) {
+		...
+		
+		draw_text(font, STR("Some text"), raster_height, v2(x, y),  v2(scale_x, scale_y), v4(r, g, b, a));
+		
+		...
+	}
+
+*/
 
 // #Memory #Speed
 // This is terruble  and huge waste of video memory. We should have a constant codepoint range
@@ -289,6 +298,8 @@ typedef struct {
 } Walk_Glyphs_Spec;
 void walk_glyphs(Walk_Glyphs_Spec spec, Walk_Glyphs_Callback_Proc proc) {
 	
+	if (spec.text.data == 0 || spec.text.count <= 0) return;
+	
 	Gfx_Font_Variation *variation = &spec.font->variations[spec.raster_height];
 	
 	float x = 0;
@@ -394,8 +405,6 @@ bool measure_text_glyph_callback(Gfx_Glyph glyph, Gfx_Font_Atlas *atlas, float g
 	return true;
 }
 Gfx_Text_Metrics measure_text(Gfx_Font *font, string text, u32 raster_height, Vector2 scale) {
-
-	if (text.count <= 0) return ZERO(Gfx_Text_Metrics);
 
 	Measure_Text_Walk_Glyphs_Context c = ZERO(Measure_Text_Walk_Glyphs_Context);
 	

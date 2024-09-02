@@ -65,18 +65,25 @@ typedef struct Os_Context {
 
 typedef struct Os_Window {
 
-	// Keep in mind that setting these in runtime is potentially slow!
+	// Keep in mind that setting these in runtime is potentially slow since they might trigger win32 calls!
 	string title;
 	union { s32 width;  s32 pixel_width;  };
 	union { s32 height; s32 pixel_height; };
-	s32 scaled_width; // DPI scaled!
-	s32 scaled_height; // DPI scaled!
-	s32 x;
-	s32 y;
+	DEPRECATED(s32 scaled_width, "Use point_width instead, which is 72th of an inch");
+	DEPRECATED(s32 scaled_height, "Use point_height instead, which is 72th of an inch");
+	s32 point_width; // 72th of an inch
+	s32 point_height; // 72th of an inch
+	union { s32 x; s32 pixel_x; };
+	union { s32 y; s32 pixel_y; };
+	s32 point_x; // 72th of an inch
+	s32 point_y; // 72th of an inch
 	Vector4 clear_color;
 	bool enable_vsync;
 	bool fullscreen;
 	bool allow_resize;
+	bool force_topmost;
+	u32 dpi;
+	float64 point_size_in_pixels;
 	
 	bool should_close;
 	
@@ -164,6 +171,24 @@ void ogb_instance
 os_unlock_mutex(Mutex_Handle m);
 
 ///
+// Binary semaphore
+typedef struct Binary_Semaphore {
+    void *os_event;
+} Binary_Semaphore;
+
+void ogb_instance
+os_binary_semaphore_init(Binary_Semaphore *sem, bool initial_state);
+
+void ogb_instance
+os_binary_semaphore_destroy(Binary_Semaphore *sem);
+
+void ogb_instance
+os_binary_semaphore_wait(Binary_Semaphore *sem);
+
+void ogb_instance
+os_binary_semaphore_signal(Binary_Semaphore *sem);
+
+///
 // Threading utilities
 
 void ogb_instance
@@ -213,6 +238,18 @@ ogb_instance const File OS_INVALID_FILE;
 
 void ogb_instance
 os_write_string_to_stdout(string s);
+
+bool ogb_instance
+os_write_entire_file_handle(File f, string data);
+
+bool ogb_instance
+os_write_entire_file_s(string path, string data);
+
+bool ogb_instance
+os_read_entire_file_handle(File f, string *result, Allocator allocator);
+
+bool ogb_instance
+os_read_entire_file_s(string path, string *result, Allocator allocator);
 
 typedef enum Os_Io_Open_Flags {
 	O_READ   = 0,
@@ -266,19 +303,6 @@ os_file_get_size(File f);
 
 s64 ogb_instance
 os_file_get_size_from_path(string path);
-
-
-bool ogb_instance
-os_write_entire_file_handle(File f, string data);
-
-bool ogb_instance
-os_write_entire_file_s(string path, string data);
-
-bool ogb_instance
-os_read_entire_file_handle(File f, string *result, Allocator allocator);
-
-bool ogb_instance
-os_read_entire_file_s(string path, string *result, Allocator allocator);
 
 
 bool ogb_instance

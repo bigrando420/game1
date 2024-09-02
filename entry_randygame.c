@@ -136,8 +136,9 @@ float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
 float selection_reach_radius = 20.0f;
 float tether_connection_radius = 50.0;
+float o2_full_tank_deplete_length = 7.0f; // #volatile length of oxygen riser sfx
 float oxygen_regen_tick_length = 0.01;
-float oxygen_deplete_tick_length = 0.1;
+float oxygen_deplete_tick_length = 0.5f;
 float teleporter_radius = 8.0f;
 Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
@@ -153,6 +154,10 @@ const int tree_health = 3;
 const s32 layer_ui = 20;
 const s32 layer_world = 10;
 
+// :sounds
+Audio_Source oxygen_riser;
+Audio_Player* oxygen_riser_player;
+
 // global :app stuff
 // we could move this into an AppState struct.
 // or we could just keep cavemaning it like this lol, since it's not needed.
@@ -163,6 +168,12 @@ float64 delta_t;
 Gfx_Font* font;
 u32 font_height = 48;
 u32 font_height_body = 36;
+
+typedef struct AppFrame {
+	bool losing_o2;
+} AppFrame;
+AppFrame app_frame = {0};
+AppFrame last_app_frame = {0};
 
 int world_pos_to_tile_pos(float world_pos) {
 	return roundf(world_pos / (float)tile_width);
@@ -557,7 +568,7 @@ bool is_player_alive() {
 }
 
 int get_max_oxygen() {
-	return 100;
+	return o2_full_tank_deplete_length / (float)oxygen_deplete_tick_length;
 }
 
 Entity* entity_create() {
@@ -1809,6 +1820,14 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
+	// init :sounds
+	{
+		bool succ = audio_open_source_load(&oxygen_riser, STR("res/sound/o2_riser_short.wav"), get_heap_allocator());
+		assert(succ);
+		oxygen_riser_player = audio_player_get_one();
+		audio_player_set_source(oxygen_riser_player, oxygen_riser);
+	}
+
 	// :col
 	color_0 = hex_to_rgba(0x2a2d3aff);
 	col_oxygen = hex_to_rgba(0xaad9e6ff);
@@ -2039,6 +2058,10 @@ int entry(int argc, char **argv) {
 				en->frame = (EntityFrame){0};
 			}
 		}
+
+		// reset appframe
+		last_app_frame = app_frame;
+		app_frame = (AppFrame){0};
 
 		// find player lol
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -2392,7 +2415,12 @@ int entry(int argc, char **argv) {
 				}
 			}
 
-			if (closest_tether) {
+			bool is_losing_o2 = closest_tether == null;
+			app_frame.losing_o2 = is_losing_o2;
+
+			if (!is_losing_o2) {
+				player->oxygen_deplete_end_time = 0; // reset so it's a clean timer
+
 				draw_line(closest_tether->pos, player->pos, 1.0f, col_tether);
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
@@ -2412,6 +2440,23 @@ int entry(int argc, char **argv) {
 			}
 
 			player->oxygen = clamp(player->oxygen, 0, get_max_oxygen());
+
+			{
+				bool playing = oxygen_riser_player->state == AUDIO_PLAYER_STATE_PLAYING;
+
+				if (is_losing_o2 && !last_app_frame.losing_o2) {
+					// just started losing o2
+					if (!playing) {
+						audio_player_set_state(oxygen_riser_player, AUDIO_PLAYER_STATE_PLAYING);
+					}
+				}
+
+				if (!is_losing_o2 && last_app_frame.losing_o2) {
+					// just got back to tether
+					audio_player_set_state(oxygen_riser_player, AUDIO_PLAYER_STATE_PAUSED);
+					audio_player_set_progression_factor(oxygen_riser_player, 0);
+				}
+			}
 
 			// TODO, some special LUT desaturation effect as we get closer to oxygen 0
 			// :death

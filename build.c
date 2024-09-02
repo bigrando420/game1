@@ -1,4 +1,9 @@
-
+// :shader stuff 
+// this drives an array of Vector4's in the user_data of Draw_Quad
+#define VERTEX_2D_USER_DATA_COUNT 1
+// #volatile current user data layout
+// Vector4 col_override; // rgb = color, a = the alpha for lerping to that color
+// ...
 
 ///
 // Build config stuff

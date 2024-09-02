@@ -175,6 +175,17 @@ typedef struct AppFrame {
 AppFrame app_frame = {0};
 AppFrame last_app_frame = {0};
 
+// :shader
+typedef struct ShaderConstBuffer {
+	int we_dont_have_a_use_for_this_yet;
+} ShaderConstBuffer;
+ShaderConstBuffer cbuffer = {0};
+
+// #volatile
+void set_col_override(Draw_Quad* q, Vector4 col_override) {
+	q->userdata[0] = col_override;
+}
+
 int world_pos_to_tile_pos(float world_pos) {
 	return roundf(world_pos / (float)tile_width);
 }
@@ -374,6 +385,7 @@ typedef struct Entity {
 	bool is_being_picked_up;
 	bool disable_friction;
 	float64 pick_up_cooldown_end_time;
+	float white_flash_current_alpha;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -2025,6 +2037,15 @@ int entry(int argc, char **argv) {
 
 	// the :init zone
 
+	// :shader init
+	{
+		string source;
+		bool ok = os_read_entire_file("res/shader.hlsl", &source, get_heap_allocator());
+		assert(ok);
+		shader_recompile_with_extension(source, sizeof(ShaderConstBuffer));
+		dealloc_string(get_heap_allocator(), source);
+	}
+
 	// world load / setup
 	if (os_is_file_s(STR("world"))) {
 		bool succ = world_attempt_load_from_disk();
@@ -2073,6 +2094,8 @@ int entry(int argc, char **argv) {
 
 		// :frame update
 		draw_frame.enable_z_sorting = true;
+		cbuffer = (ShaderConstBuffer){0};
+		draw_frame.cbuffer = &cbuffer;
 
 		world_frame.world_proj = m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
 		// :camera
@@ -2493,6 +2516,8 @@ int entry(int argc, char **argv) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
 					play_one_audio_clip(STR("res/sound/hit_0.wav"));
+					selected_en->white_flash_current_alpha = 1.0;
+					camera_shake(0.1);
 
 					int damage_amount = 1;
 					if (selected_en->dmg_type == DMG_axe) {
@@ -2517,7 +2542,7 @@ int entry(int argc, char **argv) {
 
 					selected_en->health -= damage_amount;
 					if (selected_en->health <= 0) {
-						camera_shake(0.2); // shake only on death
+						camera_shake(0.1); // shake extra on death
 
 						// :drops
 
@@ -2619,7 +2644,12 @@ int entry(int argc, char **argv) {
 							col = COLOR_RED;
 						}
 
-						draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
+						if (en->white_flash_current_alpha != 0) {
+							animate_f32_to_target(&en->white_flash_current_alpha, 0, delta_t, 20.0f);
+						}
+
+						Draw_Quad* q = draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
+						set_col_override(q, v4(1, 1, 1, en->white_flash_current_alpha));
 
 						// debug pos 
 						// draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);

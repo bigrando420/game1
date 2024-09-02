@@ -80,6 +80,14 @@ Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
 
 // :utils
 
+bool get_random_bool() {
+	return get_random_int_in_range(0, 1);
+}
+
+int get_random_sign() {
+	return (get_random_int_in_range(0, 1) == 0 ? -1 : 1);
+}
+
 // randy: it's sometimes easier to think about the inverse of min & max
 #define clamp_bottom(a, b) max(a, b)
 #define clamp_top(a, b) min(a, b)
@@ -917,6 +925,114 @@ void world_setup()
 		en->pos.x = -20.0;
 	}
 	#endif
+}
+
+// :particle system
+typedef enum ParticleFlags {
+	PARTICLE_FLAGS_valid = (1<<0),
+	PARTICLE_FLAGS_physics = (1<<1),
+	PARTICLE_FLAGS_friction = (1<<2),
+	PARTICLE_FLAGS_fade_out_with_velocity = (1<<3),
+	// PARTICLE_FLAGS_gravity = (1<<3),
+	// PARTICLE_FLAGS_bounce = (1<<4),
+} ParticleFlags;
+typedef struct Particle {
+	ParticleFlags flags;
+	Vector4 col;
+	Vector2 pos;
+	Vector2 velocity;
+	Vector2 acceleration;
+	float friction;
+	float64 end_time;
+	float fade_out_vel_range;
+} Particle;
+Particle particles[2048] = {0};
+int particle_cursor = 0;
+
+Particle* particle_new() {
+	Particle* p = &particles[particle_cursor];
+	particle_cursor += 1;
+	if (particle_cursor >= ARRAY_COUNT(particles)) {
+		particle_cursor = 0;
+	}
+	if (p->flags & PARTICLE_FLAGS_valid) {
+		log_warning("too many particles, overwriting existing");
+	}
+	p->flags |= PARTICLE_FLAGS_valid;
+	return p;
+}
+void particle_clear(Particle* p) {
+	memset(p, 0, sizeof(Particle));
+}
+void particle_update() {
+	for (int i = 0; i < ARRAY_COUNT(particles); i++) {
+		Particle* p = &particles[i];
+		if (!(p->flags & PARTICLE_FLAGS_valid)) {
+			continue;
+		}
+
+		if (p->end_time && has_reached_end_time(p->end_time)) {
+			particle_clear(p);
+			continue;
+		}
+
+		if (p->flags & PARTICLE_FLAGS_fade_out_with_velocity
+		&& v2_length(p->velocity) < 0.01) {
+			particle_clear(p);
+		}
+
+		if (p->flags & PARTICLE_FLAGS_physics) {
+			if (p->flags & PARTICLE_FLAGS_friction) {
+				p->acceleration = v2_sub(p->acceleration, v2_mulf(p->velocity, p->friction));
+			}
+			p->velocity = v2_add(p->velocity, v2_mulf(p->acceleration, delta_t));
+			Vector2 next_pos = v2_add(p->pos, v2_mulf(p->velocity, delta_t));
+			p->acceleration = (Vector2){0};
+			p->pos = next_pos;
+		}
+	}
+}
+void particle_render() {
+	for (int i = 0; i < ARRAY_COUNT(particles); i++) {
+		Particle* p = &particles[i];
+		if (!(p->flags & PARTICLE_FLAGS_valid)) {
+			continue;
+		}
+
+		Vector4 col = p->col;
+		if (p->flags & PARTICLE_FLAGS_fade_out_with_velocity) {
+			col.a *= float_alpha(fabsf(v2_length(p->velocity)), 0, p->fade_out_vel_range);
+		}
+
+		draw_rect(p->pos, v2(1, 1), col);
+	}
+}
+
+typedef enum ParticleKind {
+	PFX_footstep,
+	PFX_hit,
+} ParticleKind;
+void particle_emit(Vector2 pos, ParticleKind kind) {
+	switch (kind) {
+		case PFX_footstep: {
+			// ...
+		} break;
+
+		case PFX_hit: {
+			for (int i = 0; i < 10; i++) {
+				Particle* p = particle_new();
+				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_friction | PARTICLE_FLAGS_fade_out_with_velocity;
+				p->pos = pos;
+				p->pos.x += get_random_float32_in_range(-2, 2);
+				p->pos.y += get_random_float32_in_range(-2, 2);
+				p->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
+				p->velocity = v2_mulf(p->velocity, get_random_float32_in_range(200, 200));
+				p->col = COLOR_WHITE;
+				p->friction = 20.0f;
+				p->fade_out_vel_range = 30.0f;
+			}
+		} break;
+	}
 }
 
 // caveman :serialisation™️
@@ -2515,6 +2631,7 @@ int entry(int argc, char **argv) {
 					play_one_audio_clip(STR("res/sound/hit_0.wav"));
 					selected_en->white_flash_current_alpha = 1.0;
 					camera_shake(0.1);
+					particle_emit(selected_en->pos, PFX_hit);
 
 					int damage_amount = 1;
 					if (selected_en->dmg_type == DMG_axe) {
@@ -2740,6 +2857,9 @@ int entry(int argc, char **argv) {
 			Entity* player = get_player();
 			player->pos = v2_add(player->pos, v2_mulf(input_axis, 70.0 * delta_t));
 		}
+
+		particle_update();
+		particle_render();
 
 		// player :hud
 		if (is_player_alive())

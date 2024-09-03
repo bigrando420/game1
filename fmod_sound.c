@@ -15,6 +15,10 @@ FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
 	ok = FMOD_Studio_EventDescription_CreateInstance(event_desc, &instance);
   assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
 
+	// set the cooldown so we don't get doubles (won't play if another one hits within 40ms)
+	ok = FMOD_Studio_EventInstance_SetProperty(instance, FMOD_STUDIO_EVENT_PROPERTY_COOLDOWN, 40.0/1000.0);
+  assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
+
 	ok = FMOD_Studio_EventInstance_Start(instance);
   assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
 

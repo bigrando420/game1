@@ -1011,6 +1011,7 @@ void particle_render() {
 typedef enum ParticleKind {
 	PFX_footstep,
 	PFX_hit,
+	// :particle
 } ParticleKind;
 void particle_emit(Vector2 pos, ParticleKind kind) {
 	switch (kind) {
@@ -1019,7 +1020,7 @@ void particle_emit(Vector2 pos, ParticleKind kind) {
 		} break;
 
 		case PFX_hit: {
-			for (int i = 0; i < 10; i++) {
+			for (int i = 0; i < 4; i++) {
 				Particle* p = particle_new();
 				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_friction | PARTICLE_FLAGS_fade_out_with_velocity;
 				p->pos = pos;

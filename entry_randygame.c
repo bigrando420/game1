@@ -6,6 +6,10 @@
 #include "config.c"
 #include "easings.c"
 
+#include "fmod/fmod_errors.h"
+#include "fmod/fmod.h"
+#include "fmod/fmod_studio.h"
+
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
 inline float v2_dist(Vector2 a, Vector2 b) {
@@ -158,10 +162,6 @@ const int rock_health = 10;
 const int tree_health = 10;
 const s32 layer_ui = 20;
 const s32 layer_world = 10;
-
-// :sounds
-Audio_Source oxygen_riser;
-Audio_Player* oxygen_riser_player;
 
 // global :app stuff
 // we could move this into an AppState struct.
@@ -1946,12 +1946,16 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
-	// init :sounds
+	// :fmod init
 	{
-		bool succ = audio_open_source_load(&oxygen_riser, STR("res/sound/o2_riser_short.wav"), get_heap_allocator());
-		assert(succ);
-		oxygen_riser_player = audio_player_get_one();
-		audio_player_set_source(oxygen_riser_player, oxygen_riser);
+		FMOD_RESULT ok;
+
+		FMOD_STUDIO_SYSTEM* studio_system;
+		ok = FMOD_Studio_System_Create(&studio_system, FMOD_VERSION);
+		assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
+
+		ok = FMOD_Studio_System_Initialize(studio_system, 512, FMOD_STUDIO_INIT_NORMAL, FMOD_INIT_NORMAL, null);
+		assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
 	}
 
 	// :col
@@ -2458,7 +2462,8 @@ int entry(int argc, char **argv) {
 						en->velocity = v2_mulf(target_normal, mag);
 
 						if (v2_dist(en->pos, player->pos) < 2.0f) {
-							play_one_audio_clip(STR("res/sound/item_pickup.wav"));
+							// todo
+							// play_one_audio_clip(STR("res/sound/item_pickup.wav"));
 							world->inventory_items[en->item_id].amount += en->item_amount;
 							entity_destroy(en);
 						}
@@ -2579,19 +2584,12 @@ int entry(int argc, char **argv) {
 			player->oxygen = clamp(player->oxygen, 0, get_max_oxygen());
 
 			{
-				bool playing = oxygen_riser_player->state == AUDIO_PLAYER_STATE_PLAYING;
-
 				if (is_losing_o2 && !last_app_frame.losing_o2) {
-					// just started losing o2
-					if (!playing) {
-						audio_player_set_state(oxygen_riser_player, AUDIO_PLAYER_STATE_PLAYING);
-					}
+					// just left tether
 				}
 
 				if (!is_losing_o2 && last_app_frame.losing_o2) {
 					// just got back to tether
-					audio_player_set_state(oxygen_riser_player, AUDIO_PLAYER_STATE_PAUSED);
-					audio_player_set_progression_factor(oxygen_riser_player, 0);
 				}
 			}
 
@@ -2629,7 +2627,8 @@ int entry(int argc, char **argv) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-					play_one_audio_clip(STR("res/sound/hit_0.wav"));
+					// todo
+					// play_one_audio_clip(STR("res/sound/hit_0.wav"));
 					selected_en->white_flash_current_alpha = 1.0;
 					camera_shake(0.1);
 					particle_emit(selected_en->pos, PFX_hit);

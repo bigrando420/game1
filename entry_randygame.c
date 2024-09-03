@@ -38,6 +38,7 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
 		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
 		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
+		case PIVOT_top_left: pivot_mul = v2(0.0, 1.0); break;
 		default:
 		log_error("pivot not supported yet. fill in case at draw_text_with_pivot");
 		break;
@@ -137,6 +138,7 @@ Range2f quad_to_range(Draw_Quad quad) {
 Vector4 color_0;
 Vector4 col_oxygen;
 Vector4 col_tether;
+Vector4 col_exp;
 
 // :tweaks
 float max_cam_shake_translate = 200.0f;
@@ -169,6 +171,7 @@ float zoom = 5.3;
 Vector2 camera_pos = {0};
 float64 delta_t;
 Gfx_Font* font;
+u32 font_height_beeg = 128;
 u32 font_height = 48;
 u32 font_height_body = 36;
 
@@ -304,6 +307,7 @@ typedef enum ArchetypeID {
 	ARCH_grass = 13,
 	ARCH_core_tether = 14,
 	ARCH_tether = 15,
+	ARCH_exp_orb = 16,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -389,6 +393,7 @@ typedef struct Entity {
 	bool disable_friction;
 	float64 pick_up_cooldown_end_time;
 	float white_flash_current_alpha;
+	int exp_amount;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -606,6 +611,11 @@ void entity_destroy(Entity* entity) {
 }
 
 // :setup things
+
+void setup_exp_orb(Entity* en) {
+	en->arch = ARCH_exp_orb;
+	en->exp_amount = 1;
+}
 
 void setup_tether(Entity* en) {
 	en->arch = ARCH_tether;
@@ -1072,6 +1082,16 @@ void do_ui_stuff() {
 	Vector4 bg_col = v4(0, 0, 0, 0.90);
 	Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
 	Vector4 accent_col = hex_to_rgba(0x44c3daff);
+
+	// exp amount
+	{
+		string txt = tprint("%i", get_player()->exp_amount);
+		Vector2 pos = {0};
+		pos.y += screen_height - 2.0f;
+		pos.x += 1.0f;
+
+		draw_text_with_pivot(font, txt, font_height_beeg, pos, text_scale, COLOR_WHITE, PIVOT_top_left);
+	}
 
 	// :respawn ui
 	if (world->ux_state == UX_respawn) {
@@ -1948,6 +1968,7 @@ int entry(int argc, char **argv) {
 	fmod_init();
 
 	// :col
+	col_exp = hex_to_rgba(0x7bd47aff);
 	color_0 = hex_to_rgba(0x2a2d3aff);
 	col_oxygen = hex_to_rgba(0xaad9e6ff);
 	col_tether = col_oxygen;
@@ -2431,6 +2452,32 @@ int entry(int argc, char **argv) {
 					}
 				}
 
+				// pickup exp
+				if (is_player_alive() && en->arch == ARCH_exp_orb) {
+
+					if (has_reached_end_time(en->pick_up_cooldown_end_time)) {
+						en->is_being_picked_up = true;
+					}
+
+					if (en->is_being_picked_up) {
+
+						// physically accelerate towards the player
+						en->has_physics = true;
+						en->disable_friction = true;
+						Vector2 pick_up_target_pos = player->pos;
+						Vector2 target_normal = v2_normalize(v2_sub(pick_up_target_pos, en->pos));
+						en->acceleration = v2_mulf(target_normal, 2000.0f);
+						float mag = v2_length(en->velocity);
+						en->velocity = v2_mulf(target_normal, mag);
+
+						if (v2_dist(en->pos, player->pos) < 2.0f) {
+							play_sound("event:/exp_pickup");
+							player->exp_amount += en->exp_amount;
+							entity_destroy(en);
+						}
+					}
+				}
+
 				// pickup item
 				if (is_player_alive() && en->arch == ARCH_item) {
 
@@ -2680,6 +2727,19 @@ int entry(int argc, char **argv) {
 							drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
 						}
 
+						// exp orb drops
+						for (int i = 0; i < get_random_int_in_range(2, 3); i++) {
+							Entity* orb = entity_create();
+							setup_exp_orb(orb);
+							orb->pos = selected_en->pos;
+							orb->has_physics = true;
+							orb->friction = 20.f;
+							orb->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
+							orb->velocity = v2_mulf(orb->velocity, get_random_float32_in_range(100, 200));
+							orb->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.4, 0.6);
+						}
+
+
 						entity_destroy(selected_en);
 					}
 				}
@@ -2733,6 +2793,10 @@ int entry(int argc, char **argv) {
 				switch (en->arch) {
 
 					case ARCH_player: break;
+
+					case ARCH_exp_orb: {
+						draw_rect(en->pos, v2(1, 1), col_exp);
+					} break;
 
 					default:
 					{
@@ -2859,16 +2923,16 @@ int entry(int argc, char **argv) {
 		{
 			Entity* player = get_player();
 
-			Vector2 size = {6, 1};
-			Vector2 draw_pos = player->pos;
-			draw_pos.x -= size.x * 0.5;
-			draw_pos.y -= 6.0;
-
-			draw_rect(draw_pos, size, COLOR_BLACK);
-
-			float alpha = (float)player->oxygen / (float)get_max_oxygen();
-
-			draw_rect(draw_pos, v2(size.x * alpha, size.y), col_oxygen);
+			// o2 meter
+			{
+				Vector2 size = {6, 1};
+				Vector2 draw_pos = player->pos;
+				draw_pos.x -= size.x * 0.5;
+				draw_pos.y -= 6.0;
+				draw_rect(draw_pos, size, COLOR_BLACK);
+				float alpha = (float)player->oxygen / (float)get_max_oxygen();
+				draw_rect(draw_pos, v2(size.x * alpha, size.y), col_oxygen);
+			}
 		}
 
 		gfx_update();

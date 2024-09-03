@@ -2451,8 +2451,7 @@ int entry(int argc, char **argv) {
 						en->velocity = v2_mulf(target_normal, mag);
 
 						if (v2_dist(en->pos, player->pos) < 2.0f) {
-							// todo
-							// play_one_audio_clip(STR("res/sound/item_pickup.wav"));
+							play_sound("event:/item_pickup");
 							world->inventory_items[en->item_id].amount += en->item_amount;
 							entity_destroy(en);
 						}
@@ -2573,12 +2572,18 @@ int entry(int argc, char **argv) {
 			player->oxygen = clamp(player->oxygen, 0, get_max_oxygen());
 
 			{
+				local_persist FMOD_STUDIO_EVENTINSTANCE* o2_riser = 0;
+
 				if (is_losing_o2 && !last_app_frame.losing_o2) {
 					// just left tether
+					o2_riser = play_sound("event:/o2_riser");
 				}
 
 				if (!is_losing_o2 && last_app_frame.losing_o2) {
 					// just got back to tether
+					if (o2_riser) {
+						stop_sound(o2_riser);
+					}
 				}
 			}
 

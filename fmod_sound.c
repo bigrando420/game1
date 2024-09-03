@@ -6,7 +6,7 @@ FMOD_STUDIO_SYSTEM* fmod_studio_system = 0;
 FMOD_STUDIO_BANK* fmod_studio_bank = 0;
 FMOD_STUDIO_BANK* fmod_studio_strings_bank = 0;
 
-void play_sound(char* path) {
+FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
   FMOD_STUDIO_EVENTDESCRIPTION* event_desc;
   FMOD_RESULT ok = FMOD_Studio_System_GetEvent(fmod_studio_system, path, &event_desc);
   assert(ok == FMOD_OK, "error playing - %s - %s", path, FMOD_ErrorString(ok));
@@ -20,6 +20,13 @@ void play_sound(char* path) {
 
 	// this auto-releases when event is finished
 	ok = FMOD_Studio_EventInstance_Release(instance);
+  assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
+
+	return instance;
+}
+
+void stop_sound(FMOD_STUDIO_EVENTINSTANCE* instance) {
+	FMOD_RESULT ok = FMOD_Studio_EventInstance_Stop(instance, FMOD_STUDIO_STOP_ALLOWFADEOUT);
   assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
 }
 

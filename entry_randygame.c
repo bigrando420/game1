@@ -6,9 +6,7 @@
 #include "config.c"
 #include "easings.c"
 
-#include "fmod/fmod_errors.h"
-#include "fmod/fmod.h"
-#include "fmod/fmod_studio.h"
+#include "fmod_sound.c"
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
@@ -1947,17 +1945,7 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
-	// :fmod init
-	{
-		FMOD_RESULT ok;
-
-		FMOD_STUDIO_SYSTEM* studio_system;
-		ok = FMOD_Studio_System_Create(&studio_system, FMOD_VERSION);
-		assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
-
-		ok = FMOD_Studio_System_Initialize(studio_system, 512, FMOD_STUDIO_INIT_NORMAL, FMOD_INIT_NORMAL, null);
-		assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
-	}
+	fmod_init();
 
 	// :col
 	color_0 = hex_to_rgba(0x2a2d3aff);
@@ -2628,8 +2616,7 @@ int entry(int argc, char **argv) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-					// todo
-					// play_one_audio_clip(STR("res/sound/hit_0.wav"));
+					play_sound("event:/hit_generic");
 					selected_en->white_flash_current_alpha = 1.0;
 					camera_shake(0.1);
 					particle_emit(selected_en->pos, PFX_hit);
@@ -2880,6 +2867,7 @@ int entry(int argc, char **argv) {
 		}
 
 		gfx_update();
+		fmod_update();
 		seconds_counter += delta_t;
 		frame_count += 1;
 		if (seconds_counter > 1.0) {
@@ -2910,6 +2898,7 @@ int entry(int argc, char **argv) {
 	}
 
 	world_save_to_disk();
+	fmod_shutdown();
 
 	return 0;
 }

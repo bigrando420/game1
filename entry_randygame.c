@@ -150,6 +150,7 @@ Vector4 col_tether;
 Vector4 col_exp;
 
 // :tweaks
+Vector2 tether_connection_offset = {0, 4};
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
 float selection_reach_radius = 20.0f;
@@ -252,7 +253,7 @@ typedef enum SpriteID {
 	SPRITE_flint_scythe,
 	SPRITE_grass,
 	SPRITE_coal,
-	SPRITE_core_tether,
+	SPRITE_oxygenerator,
 	SPRITE_tether,
 	// :sprite
 	SPRITE_MAX,
@@ -315,7 +316,7 @@ typedef enum ArchetypeID {
 	ARCH_copper_depo = 11,
 	ARCH_flint_depo = 12,
 	ARCH_grass = 13,
-	ARCH_core_tether = 14,
+	ARCH_oxygenerator = 14,
 	ARCH_tether = 15,
 	ARCH_exp_orb = 16,
 	// :arch
@@ -574,7 +575,7 @@ typedef struct World {
 	UnlockState building_unlocks[BUILDING_MAX];
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	// todo #ship - figure out if we can legit just keep this as a pointer or not lol
-	Entity* core_tether;
+	Entity* oxygenerator;
 	// :world :state
 } World;
 World* world = 0;
@@ -634,9 +635,9 @@ void setup_tether(Entity* en) {
 	en->right_click_remove = true;
 }
 
-void setup_core_tether(Entity* en) {
-	en->arch = ARCH_core_tether;
-	en->sprite_id = SPRITE_core_tether;
+void setup_oxygenerator(Entity* en) {
+	en->arch = ARCH_oxygenerator;
+	en->sprite_id = SPRITE_oxygenerator;
 	en->is_oxygen_tether = true;
 }
 
@@ -760,7 +761,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_copper_depo: setup_copper_depo(en); break;
 		case ARCH_flint_depo: setup_flint_depo(en); break;
 		case ARCH_grass: setup_grass(en); break;
-		case ARCH_core_tether: setup_core_tether(en); break;
+		case ARCH_oxygenerator: setup_oxygenerator(en); break;
 		case ARCH_tether: setup_tether(en); break;
 		// :arch :setup
 		default: log_error("missing entity_setup case entry"); break;
@@ -915,8 +916,8 @@ void world_setup()
 	setup_player(player_en);
 
 	Entity* en = entity_create();
-	setup_core_tether(en);
-	world->core_tether = en;
+	setup_oxygenerator(en);
+	world->oxygenerator = en;
 
 	world->building_unlocks[BUILDING_research_station].research_progress = 100;
 	world->building_unlocks[BUILDING_workbench].research_progress = 100;
@@ -1042,8 +1043,6 @@ void particle_emit(Vector2 pos, ParticleKind kind) {
 				Particle* p = particle_new();
 				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_friction | PARTICLE_FLAGS_fade_out_with_velocity;
 				p->pos = pos;
-				p->pos.x += get_random_float32_in_range(-2, 2);
-				p->pos.y += get_random_float32_in_range(-2, 2);
 				p->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
 				p->velocity = v2_mulf(p->velocity, get_random_float32_in_range(200, 200));
 				p->col = COLOR_WHITE;
@@ -1455,7 +1454,7 @@ void do_ui_stuff() {
 					Entity* tether = &world->entities[i];
 					if (tether->is_valid && tether->is_oxygen_tether && tether->last_frame.is_powered) {
 						if (v2_dist(tether->pos, pos) < tether_connection_radius) {
-							draw_line(tether->pos, pos, 1.0f, col_tether);
+							draw_line(v2_add(tether->pos, tether_connection_offset), v2_add(pos, tether_connection_offset), 1.0f, col_tether);
 							break;
 						}
 					}
@@ -1871,7 +1870,7 @@ int entry(int argc, char **argv) {
 		sprites[0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/missing_tex.png"), get_heap_allocator()) };
 		sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
 		sprites[SPRITE_tree0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree0.png"), get_heap_allocator()) };
-		sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree1.png"), get_heap_allocator()) };
+		sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree_beeg.png"), get_heap_allocator()) };
 		sprites[SPRITE_rock0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/rock0.png"), get_heap_allocator()) };
 		sprites[SPRITE_item_pine_wood] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_pine_wood.png"), get_heap_allocator()) };
 		sprites[SPRITE_item_rock] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_rock.png"), get_heap_allocator()) };
@@ -1892,7 +1891,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_flint_scythe] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/flint_scythe.png"), get_heap_allocator())};
 		sprites[SPRITE_grass] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/grass.png"), get_heap_allocator())};
 		sprites[SPRITE_coal] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/coal.png"), get_heap_allocator())};
-		sprites[SPRITE_core_tether] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/core_tether.png"), get_heap_allocator())};
+		sprites[SPRITE_oxygenerator] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/oxygenerator.png"), get_heap_allocator())};
 		sprites[SPRITE_tether] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/tether.png"), get_heap_allocator())};
 		// :sprite
 
@@ -2423,7 +2422,7 @@ int entry(int argc, char **argv) {
 
 		// :tether stuff
 		{
-			world->core_tether->frame.is_powered = true;
+			world->oxygenerator->frame.is_powered = true;
 
 			// for each tether, find all nearby tethers
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -2449,7 +2448,7 @@ int entry(int argc, char **argv) {
 			{
 				Entity** connection_stack;
 				growing_array_init_reserve((void**)&connection_stack, sizeof(Entity*), 1, get_temporary_allocator());
-				growing_array_add((void**)&connection_stack, &world->core_tether);
+				growing_array_add((void**)&connection_stack, &world->oxygenerator);
 
 				while (growing_array_get_valid_count(connection_stack)) {
 					Entity* current = connection_stack[growing_array_get_valid_count(connection_stack)-1];
@@ -2460,7 +2459,7 @@ int entry(int argc, char **argv) {
 						if (!connected_tether->frame.is_powered) {
 							growing_array_add((void**)&connection_stack, &connected_tether);
 							connected_tether->frame.is_powered = true;
-							draw_line(connected_tether->pos, current->pos, 1.0f, col_tether);
+							draw_line(v2_add(connected_tether->pos, tether_connection_offset), v2_add(current->pos, tether_connection_offset), 1.0f, col_tether);
 						}
 					}
 				}
@@ -2473,7 +2472,7 @@ int entry(int argc, char **argv) {
 			float closest_dist = INFINITY;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* tether = &world->entities[i];
-				if (tether->is_valid && tether->is_oxygen_tether && (tether->frame.is_powered || tether->arch == ARCH_core_tether)) {
+				if (tether->is_valid && tether->is_oxygen_tether && (tether->frame.is_powered || tether->arch == ARCH_oxygenerator)) {
 					float dist = v2_dist(tether->pos, player->pos);
 					if (dist < tether_connection_radius) {
 						if (!closest_tether || dist < closest_dist) {
@@ -2490,7 +2489,7 @@ int entry(int argc, char **argv) {
 			if (!is_losing_o2) {
 				player->oxygen_deplete_end_time = 0; // reset so it's a clean timer
 
-				draw_line(closest_tether->pos, player->pos, 1.0f, col_tether);
+				draw_line(v2_add(closest_tether->pos, tether_connection_offset), player->pos, 1.0f, col_tether);
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
 				}
@@ -2562,7 +2561,7 @@ int entry(int argc, char **argv) {
 					play_sound("event:/hit_generic");
 					selected_en->white_flash_current_alpha = 1.0;
 					camera_shake(0.1);
-					particle_emit(selected_en->pos, PFX_hit);
+					particle_emit(get_mouse_pos_in_world_space(), PFX_hit);
 
 					int damage_amount = 1;
 					if (selected_en->dmg_type == DMG_axe) {

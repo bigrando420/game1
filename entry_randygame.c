@@ -1093,7 +1093,7 @@ void do_ui_stuff() {
 	Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
 	Vector4 accent_col = hex_to_rgba(0x44c3daff);
 
-	// exp amount
+	// :exp amount
 	{
 		// animate the error flash
 		if (exp_error_flash_alpha_target == 1.f) {
@@ -1109,7 +1109,7 @@ void do_ui_stuff() {
 		if (exp_error_flash_alpha) {
 			col.xyz = v3_lerp(col.xyz, COLOR_RED.xyz, exp_error_flash_alpha);
 		}
-		string txt = tprint("%i", get_player()->exp_amount);
+		string txt = tprint("%iml", get_player()->exp_amount);
 		Vector2 pos = {0};
 		pos.y += screen_height - 2.0f;
 		pos.x += 1.0f;

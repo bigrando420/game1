@@ -16,6 +16,12 @@ inline float v2_dist(Vector2 a, Vector2 b) {
 
 #define m4_identity m4_make_scale(v3(1, 1, 1))
 
+Range2f m4_transform_range2f(Matrix4 m, Range2f r) {
+	r.min = m4_transform(m, v4(r.min.x, r.min.y, 0, 1)).xy;
+	r.max = m4_transform(m, v4(r.max.x, r.max.y, 0, 1)).xy;
+	return r;
+}
+
 typedef enum Pivot {
 	PIVOT_bottom_left,
 	PIVOT_bottom_center,
@@ -112,14 +118,17 @@ bool almost_equals(float a, float b, float epsilon) {
  return fabs(a - b) <= epsilon;
 }
 
-bool animate_f32_to_target(float* value, float target, float delta_t, float rate) {
+bool animate_f32_to_target_with_epsilon(float* value, float target, float delta_t, float rate, float epsilon) {
 	*value += (target - *value) * (1.0 - pow(2.0f, -rate * delta_t));
-	if (almost_equals(*value, target, 0.001f))
+	if (almost_equals(*value, target, epsilon))
 	{
 		*value = target;
 		return true; // reached
 	}
 	return false;
+}
+bool animate_f32_to_target(float* value, float target, float delta_t, float rate) {
+	return animate_f32_to_target_with_epsilon(value, target, delta_t, rate, 0.001f);
 }
 
 void animate_v2_to_target(Vector2* value, Vector2 target, float delta_t, float rate) {
@@ -149,7 +158,6 @@ float o2_full_tank_deplete_length = 7.0f; // #volatile length of oxygen riser sf
 float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 0.5f;
 float teleporter_radius = 8.0f;
-Vector4 bg_box_col = {0, 0, 0, 0.5};
 const int tile_width = 8;
 const float world_half_length = tile_width * 10;
 const float entity_selection_radius = 16.0f;
@@ -166,6 +174,8 @@ const s32 layer_world = 10;
 // global :app stuff
 // we could move this into an AppState struct.
 // or we could just keep cavemaning it like this lol, since it's not needed.
+float exp_error_flash_alpha = 0;
+float exp_error_flash_alpha_target = 0;
 float camera_trauma = 0;
 float zoom = 5.3;
 Vector2 camera_pos = {0};
@@ -418,7 +428,7 @@ typedef enum BuildingID {
 typedef struct BuildingData {
 	ArchetypeID to_build;
 	SpriteID icon;
-	int pct_per_research_exp; // this jank will get replaced with a recipe one day
+	int exp_cost;
 	string description;
 	ItemAmount ingredients[8];
 	int ingredients_count;
@@ -1085,12 +1095,26 @@ void do_ui_stuff() {
 
 	// exp amount
 	{
+		// animate the error flash
+		if (exp_error_flash_alpha_target == 1.f) {
+			bool reached = animate_f32_to_target_with_epsilon(&exp_error_flash_alpha, exp_error_flash_alpha_target, delta_t, 30.f, 0.01f);
+			if (reached) {
+				exp_error_flash_alpha_target = 0.f;
+			}
+		} else if (exp_error_flash_alpha_target == 0.f && exp_error_flash_alpha != 0.f) {
+			animate_f32_to_target(&exp_error_flash_alpha, exp_error_flash_alpha_target, delta_t, 15.f);
+		}
+
+		Vector4 col = COLOR_WHITE;
+		if (exp_error_flash_alpha) {
+			col.xyz = v3_lerp(col.xyz, COLOR_RED.xyz, exp_error_flash_alpha);
+		}
 		string txt = tprint("%i", get_player()->exp_amount);
 		Vector2 pos = {0};
 		pos.y += screen_height - 2.0f;
 		pos.x += 1.0f;
 
-		draw_text_with_pivot(font, txt, font_height_beeg, pos, text_scale, COLOR_WHITE, PIVOT_top_left);
+		draw_text_with_pivot(font, txt, font_height_beeg, pos, text_scale, col, PIVOT_top_left);
 	}
 
 	// :respawn ui
@@ -1152,7 +1176,7 @@ void do_ui_stuff() {
 			{
 				Matrix4 xform = m4_identity;
 				xform = m4_translate(xform, v3(x_start_pos, y_pos, 0.0));
-				draw_rect_xform(xform, v2(entire_thing_width_idk, icon_width), bg_box_col);
+				draw_rect_xform(xform, v2(entire_thing_width_idk, icon_width), bg_col);
 			}
 
 			int slot_index = 0;
@@ -1214,7 +1238,7 @@ void do_ui_stuff() {
 						// xform = m4_pivot_box(xform, box_size, PIVOT_top_center);
 						xform = m4_translate(xform, v3(box_size.x * -0.5, -box_size.y - icon_width * 0.5, 0));
 						xform = m4_translate(xform, v3(icon_center.x, icon_center.y, 0));
-						draw_rect_xform(xform, box_size, bg_box_col);
+						draw_rect_xform(xform, box_size, bg_col);
 
 						float current_y_pos = icon_center.y;
 						{
@@ -1688,254 +1712,121 @@ void do_ui_stuff() {
 	if (world->ux_state == UX_research) {
 		Entity* entity = world->interacting_with_entity;
 
-		Vector2 section_size = v2(50.0, 70.0);
-		float gap_between_panels = 10.0;
+		Vector2 pane_size = v2(60.0, 70.0);
 		float text_height_pad = 4.0;
 
-		float ui_width_thing = section_size.x * 2.0 + gap_between_panels;
+		float x0 = screen_width * 0.5 - pane_size.x * 0.5;
+		float y0 = screen_height * 0.5 - pane_size.y * 0.5;
 
-		float x0 = screen_width * 0.5 - ui_width_thing * 0.5;
-		float y0 = screen_height * 0.5 - section_size.y * 0.5;
-		float x_left_pane_start = x0;
-		float y_bottom = y0;
-		float y_top = y0 + section_size.y;
+		draw_rect(v2(x0, y0), pane_size, bg_col);
 
-		// left pane
-		{
-			Matrix4 xform = m4_identity;
-			xform = m4_translate(xform, v3(x0, y0, 0));
-			draw_rect_xform(xform, section_size, bg_col);
+		y0 += pane_size.y;
 
+		float icon_length = 10.f;
+		y0 -= icon_length;
+		BuildingID selected = 0;
+		for (int i = 1; i < BUILDING_MAX; i++) {
+			UnlockState unlock_state = world->building_unlocks[i];
+			BuildingData building_data = get_building_data(i);
+			if (is_fully_unlocked(unlock_state)) {
+				continue;
+			}
+
+			{
+				Range2f box = range2f_make_bottom_left(v2(x0, y0), v2(icon_length, icon_length));
+
+				Matrix4 xform = m4_identity;
+
+				float scale = 1.f;
+				if (range2f_contains(box, get_mouse_pos_in_world_space())) {
+					scale = 1.2f;
+					selected = i;
+				}
+
+				Range2f render_box = range2f_make_bottom_left(v2(0, 0), v2(icon_length, icon_length));
+				xform = m4_translate(xform, v3(x0, y0, 1));
+				xform = m4_translate(xform, v3(icon_length * 0.5, icon_length * 0.5, 1));
+				xform = m4_scale(xform, v3(scale, scale, 1));
+				xform = m4_translate(xform, v3(icon_length * -0.5, icon_length * -0.5, 1));
+				render_box = m4_transform_range2f(xform, render_box);
+
+				draw_sprite_in_rect(building_data.icon, render_box, COLOR_WHITE, 0.2);
+			}
+			x0 += icon_length;
+
+			// scuffed row advance
+			if (i % 5 == 0) {
+				y0 -= icon_length;
+			}
+		}
+
+		if (selected) {
+			UnlockState* unlock_state = &world->building_unlocks[selected];
+			BuildingData building_data = get_building_data(selected);
+
+			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+
+				if (get_player()->exp_amount >= building_data.exp_cost) {
+					get_player()->exp_amount -= building_data.exp_cost;
+					unlock_state->research_progress = 100;
+					play_sound("event:/research");
+				} else {
+					play_sound("event:/error");
+					exp_error_flash_alpha_target = 1.0f;
+				}
+			}
+
+			Vector2 size = v2(40, 30);
+
+			float x_left = get_mouse_pos_in_world_space().x;
+			float y_top = get_mouse_pos_in_world_space().y;
+			float x_middle = x_left + size.x * 0.5;
+			float y_bottom = y_top - size.y;
+
+			float x0 = x_left;
+			float y0 = y_top;
+
+			y0 = y_bottom;
+			draw_rect(v2(x0, y0), size, v4(0.2, 0.2, 0.2, 1.));
+
+			x0 = x_left + size.x * 0.5;
 			y0 = y_top;
+			y0 -= 2.f;
 
 			// title
 			{
-				string title = STR("Research Station");
-				Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
-
-				float center_pos = x0 + section_size.x * 0.5;
-				Vector2 draw_pos = v2(center_pos, y0);
-				draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-				draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
-				draw_pos.y -= text_height_pad;
-
-				draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-
-				y0 = draw_pos.y; // TODO - workie?
-				y0 -= text_height_pad;
-				// y1 -= 20.0;
+				string txt = get_archetype_data(building_data.to_build).pretty_name;
+				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+				y0 -= met.visual_size.y + 2.f;
 			}
 
-			Vector2 item_icon_size = v2(8, 8);
+			// description
+			{
+				x0 = x_middle;
 
-			y0 -= item_icon_size.y;
+				float wrap_width = size.x;
+				string text = building_data.description;
 
-			// draw research list
-			// TODO - make this an icon list like the crafting. That way it's more close to the final design of the tech tree
-			for (int i = 1; i < BUILDING_MAX; i++) {
-				UnlockState unlock_state = world->building_unlocks[i];
-				BuildingData building_data = get_building_data(i);
-				if (is_fully_unlocked(unlock_state)) {
-					continue;
+				string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
+				for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
+					string line = lines[i];
+					Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+					y0 -= metrics.visual_size.y;
 				}
-
-				Vector2 element_size = v2(section_size.x * 0.8, 6.0);
-
-				x0 = x_left_pane_start + (section_size.x - element_size.x) * 0.5;
-
-				// bg box thing
-				Vector2 box_start = v2(x0, y0);
-				Range2f box = range2f_make_bottom_left(box_start, element_size);
-				if (range2f_contains(box, get_mouse_pos_in_world_space())) {
-					// todo - hover ux
-					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-						world->selected_research_thing = i;
-					}
-				}
-				draw_rect(box_start, element_size, fill_col);
-
-				// get icon size
-				float item_icon_length = element_size.y;
-
-				// get text size
-				string txt = get_archetype_pretty_name(building_data.to_build);
-				Vector2 txt_size;
-				Vector2 txt_offset_for_center;
-				{
-					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
-					txt_size = metrics.visual_size;
-					txt_offset_for_center = metrics.visual_pos_min;
-					txt_offset_for_center = v2_sub(txt_offset_for_center, v2_mul(metrics.visual_size, v2(0, 0.5)));
-				}
-
-				float pad_between_elements = 2.0;
-				float total_width = item_icon_length + txt_size.x + pad_between_elements;
-
-				// draw icon
-				{
-					x0 = (box_start.x + element_size.x * 0.5) - total_width * 0.5;
-					y0 = box_start.y;
-
-					Range2f box = range2f_make_bottom_left(v2(x0, y0), v2(item_icon_length, item_icon_length));
-					draw_sprite_in_rect(building_data.icon, box, COLOR_WHITE, 0.2);
-				}
-				x0 += item_icon_length;
-				x0 += pad_between_elements;
-				y0 = box_start.y; // reset the Y for the next txt element
-
-				// draw txt
-				{
-					Vector2 draw_pos = v2(x0, y0 + element_size.y * 0.5);
-					draw_pos = v2_add(draw_pos, txt_offset_for_center);
-					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-				}
-
-				y0 -= element_size.y;
-				y0 -= 2.0f; // padding @cleanup
 			}
-		}
-		
-		y0 = y_bottom;
-		x0 = x_left_pane_start;
-		x0 += section_size.x;
-		x0 += gap_between_panels;
 
+			y0 = y_bottom;
+			y0 += 4.f;
 
-		// right pane
-		float x_right_pane_start = x0;
-		{
-			Matrix4 xform = m4_identity;
-			xform = m4_translate(xform, v3(x0, y0, 0));
-			draw_rect_xform(xform, section_size, bg_col);
-
-			if (world->selected_research_thing) {
-				BuildingData building_data = get_building_data(world->selected_research_thing);
-				UnlockState* unlock_data = &world->building_unlocks[world->selected_research_thing];
-
-				// title
-				y0 += section_size.y;
-				{
-					string title = get_archetype_pretty_name(get_building_data(world->selected_research_thing).to_build);
-					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
-
-					float center_pos = x0 + section_size.x * 0.5;
-					Vector2 draw_pos = v2(center_pos, y0);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
-					draw_pos.y -= text_height_pad;
-
-					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-
-					y0 = draw_pos.y; // TODO - workie?
-					y0 -= text_height_pad;
-					// y1 -= 20.0;
+			// exp cost
+			{
+				Vector4 col = COLOR_WHITE;
+				if (exp_error_flash_alpha) {
+					col.xyz = v3_lerp(col.xyz, COLOR_RED.xyz, exp_error_flash_alpha);
 				}
-
-				// research % bar
-				{
-					Vector2 size = v2(section_size.x * 0.8, 4.0);
-					float research_alpha = (float)unlock_data->research_progress / 100.0f;
-
-					y0 -= size.y;
-					y0 -= 4.0; // element padding
-					x0 += (section_size.x - size.x) * 0.5; // center horizontally
-
-					// bg
-					draw_rect(v2(x0, y0), size, fill_col);
-
-					// fill
-					draw_rect(v2(x0, y0), v2(size.x * research_alpha, size.y), accent_col);
-
-					string txt = tprint("%i%%", unlock_data->research_progress);
-
-					x0 = x_right_pane_start;
-					x0 += section_size.x * 0.5;
-					y0 -= 4.0; // arbitrary
-
-					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_center_center);
-				}
-
-				// todo - put this into a research_recipe array so we can do multiple items for research.
-				bool has_enough_for_research = world->inventory_items[ITEM_exp].amount > 0;
-
-				// research button
-				{
-					Vector2 size = v2(section_size.x * 0.8, 6.0);
-
-					x0 = x_right_pane_start + (section_size.x - size.x) * 0.5;
-					y0 = y_bottom;
-					y0 += 5.0f; // padding from bottom @cleanup
-
-					Range2f btn_range = range2f_make_bottom_left(v2(x0, y0), size);
-					Vector4 col = fill_col;
-					if (has_enough_for_research && range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
-						col = COLOR_RED;
-						world_frame.hover_consumed = true;
-						// :research action
-						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							unlock_data->research_progress += building_data.pct_per_research_exp;
-							world->inventory_items[ITEM_exp].amount -= 1;
-							assert(world->inventory_items[ITEM_exp].amount >= 0, "pre-check failed.");
-							if (unlock_data->research_progress >= 100) {
-								unlock_data->research_progress = 100;
-								// todo - epic feeback
-								world->selected_research_thing = 0;
-								world->ux_state = 0;
-							}
-						}
-					}
-					draw_rect(v2(x0, y0), size, col);
-
-					string txt = STR("RESEARCH");
-					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
-					Vector2 draw_pos = v2(x0 + size.x * 0.5, y0 + size.y * 0.5);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
-
-					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-
-					y0 += size.y;
-				}
-
-				y0 += 6.0f; // arbitrary spacing
-
-				// material icon list
-				{
-					// EXP, x1 (red if out)
-					x0 = x_right_pane_start + section_size.x * 0.5;
-
-					// icon
-					{
-						float item_icon_length = 6.0;
-						Range2f box = range2f_make_center_right(v2(x0, y0), v2(item_icon_length, item_icon_length));
-						draw_sprite_in_rect(SPRITE_exp, box, COLOR_WHITE, 0.4);
-					}
-
-					Vector4 col = COLOR_WHITE;
-					if (!has_enough_for_research) {
-						col = COLOR_RED;
-					}
-
-					string txt = tprint("x1");
-					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, col, PIVOT_center_left);
-				}
-
-
-			} else {
-				// select item first text
-				y0 += section_size.y * 0.5;
-				{
-					string title = STR("Select Recipe");
-					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
-
-					Vector2 draw_pos = v2(x0 + section_size.x * 0.5, y0);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
-
-					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-				}
+				string txt = tprint("Costs: %iml", building_data.exp_cost);
+				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, col, PIVOT_bottom_center);
 			}
 		}
 
@@ -2032,7 +1923,7 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_tether,
 			.icon=SPRITE_tether,
 			.description=STR("Extends oxygen range"),
-			.pct_per_research_exp=10,
+			.exp_cost=50,
 			.ingredients_count=1,
 			.ingredients={ {ITEM_copper_ingot, 2} }
 		};
@@ -2041,7 +1932,7 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_furnace,
 			.icon=SPRITE_furnace,
 			.description=STR("Can burn stuff into something more useful."),
-			.pct_per_research_exp=10,
+			.exp_cost=30,
 			.ingredients_count=1,
 			.ingredients={ {ITEM_rock, 20} }
 		};
@@ -2065,7 +1956,7 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_teleporter1,
 			.icon=SPRITE_teleporter1,
 			.description=STR("A gateway to the next world."),
-			.pct_per_research_exp=2,
+			.exp_cost=1000,
 			.ingredients_count=2,
 			.ingredients={ {ITEM_pine_wood, 100}, {ITEM_rock, 100} }
 		};

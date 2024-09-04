@@ -1857,6 +1857,7 @@ int entry(int argc, char **argv) {
 	memset(world, 0, sizeof(World));
 
 	fmod_init();
+	play_sound("event:/bg_loop");
 
 	// :col
 	col_exp = hex_to_rgba(0x7bd47aff);

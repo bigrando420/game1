@@ -1127,7 +1127,7 @@ void do_ui_stuff() {
 		draw_text_with_pivot(font, STR("DED"), title_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_bottom_center);
 
 		y0 -= 5.0;
-		draw_text_with_pivot(font, STR("All Oxygen Shards were lost"), subtitle_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+		draw_text_with_pivot(font, STR("Half the EXP was lost"), subtitle_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 
 		y0 -= 10.0;
 		draw_text_with_pivot(font, STR("press 'R' to respawn"), subtitle_font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
@@ -2533,10 +2533,6 @@ int entry(int argc, char **argv) {
 				for (ItemID item_id = 1; item_id < ARRAY_COUNT(world->inventory_items); item_id++) {
 					InventoryItemData* inv_item_data = &world->inventory_items[item_id];
 					if (inv_item_data->amount > 0) {
-						if (item_id == ITEM_exp) {
-							inv_item_data->amount = 0;
-						}
-
 						Entity* drop = entity_create();
 						setup_item(drop, item_id);
 						drop->pos = player->pos;
@@ -2544,6 +2540,9 @@ int entry(int argc, char **argv) {
 					}
 					inv_item_data->amount = 0;
 				}
+
+				// remove half of exp
+				player->exp_amount *= 0.5;
 
 				world->ux_state = UX_respawn;
 			}

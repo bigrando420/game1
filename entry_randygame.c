@@ -148,6 +148,7 @@ Vector4 color_0;
 Vector4 col_oxygen;
 Vector4 col_tether;
 Vector4 col_exp;
+#define COLOR_GRAY v4(0.5, 0.5, 0.5, 1.0)
 
 // :tweaks
 Vector2 tether_connection_offset = {0, 4};
@@ -163,6 +164,7 @@ const int tile_width = 8;
 const float world_half_length = tile_width * 10;
 const float entity_selection_radius = 16.0f;
 const float player_pickup_radius = 32.0f;
+const int ice_vein_health = 10;
 const int grass_health = 3;
 const int flint_depo_health = 10;
 const int exp_vein_health = 10;
@@ -255,6 +257,8 @@ typedef enum SpriteID {
 	SPRITE_coal,
 	SPRITE_oxygenerator,
 	SPRITE_tether,
+	SPRITE_o2_shard,
+	SPRITE_ice_vein,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -288,6 +292,7 @@ typedef enum ItemID {
 	ITEM_flint_pickaxe,
 	ITEM_flint_scythe,
 	ITEM_coal,
+	ITEM_o2_shard,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -319,6 +324,7 @@ typedef enum ArchetypeID {
 	ARCH_oxygenerator = 14,
 	ARCH_tether = 15,
 	ARCH_exp_orb = 16,
+	ARCH_ice_vein = 17,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -448,6 +454,7 @@ typedef enum UXState {
 	UX_workbench,
 	UX_research,
 	UX_respawn,
+	UX_oxygenerator,
 	// :ux
 	UX_MAX,
 } UXState;
@@ -486,6 +493,7 @@ WorldResourceData world_resources[] = {
 	{ BIOME_forest, ARCH_tree, 10 },
 	{ BIOME_forest, ARCH_flint_depo, 15 },
 	{ BIOME_forest, ARCH_grass, 10 },
+	{ BIOME_forest, ARCH_ice_vein, 20 },
 
 	{ BIOME_barren, ARCH_rock, 10 },
 	{ BIOME_barren, ARCH_copper_depo, 10 },
@@ -576,6 +584,7 @@ typedef struct World {
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	// todo #ship - figure out if we can legit just keep this as a pointer or not lol
 	Entity* oxygenerator;
+	ItemAmount mouse_cursor_item;
 	// :world :state
 } World;
 World* world = 0;
@@ -585,6 +594,7 @@ typedef struct WorldFrame {
 	Matrix4 world_proj;
 	Matrix4 world_view;
 	bool hover_consumed;
+	bool show_inventory;
 	Entity* player;
 	// :frame state
 } WorldFrame;
@@ -622,6 +632,17 @@ void entity_destroy(Entity* entity) {
 }
 
 // :setup things
+
+void setup_ice_vein(Entity* en) {
+	en->arch = ARCH_ice_vein;
+	en->sprite_id = SPRITE_ice_vein;
+	en->health = ice_vein_health;
+	en->max_health = en->health;
+	en->destroyable_world_item = true;
+	en->drops_count = 1;
+	en->drops[0] = (ItemAmount){.id=ITEM_o2_shard, .amount=get_random_int_in_range(2, 3)};
+	en->dmg_type = DMG_pickaxe;
+}
 
 void setup_exp_orb(Entity* en) {
 	en->arch = ARCH_exp_orb;
@@ -763,6 +784,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_grass: setup_grass(en); break;
 		case ARCH_oxygenerator: setup_oxygenerator(en); break;
 		case ARCH_tether: setup_tether(en); break;
+		case ARCH_ice_vein: setup_ice_vein(en); break;
 		// :arch :setup
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -1116,6 +1138,52 @@ void do_ui_stuff() {
 		draw_text_with_pivot(font, txt, font_height_beeg, pos, text_scale, col, PIVOT_top_left);
 	}
 
+	// :oxygenerator ui
+	// first attempt
+	/*
+	if (world->ux_state == UX_oxygenerator && world->interacting_with_entity)
+	{
+		world_frame.hover_consumed = true;
+		Vector2 bg_size = {60, 60};
+
+		float x_left = screen_width * 0.5 - bg_size.x * 0.5;
+		float y_top = screen_height * 0.5 + bg_size.y * 0.5;
+		float x_middle = x_left + bg_size.x * 0.5;
+		float y_bottom = y_top - bg_size.y;
+
+		float x0 = x_left;
+		float y0 = y_bottom;
+
+		draw_rect(v2(x0, y0), bg_size, bg_col);
+
+		// slot in center, can input shards into it
+		{
+			x0 = x_middle;
+			y0 = y_bottom + bg_size.y * 0.5;
+
+			Vector2 slot_size = { 10, 10 };
+			x0 -= slot_size.x * 0.5;
+			y0 -= slot_size.y * 0.5;
+
+			Range2f slot = range2f_make_bottom_left(v2(x0, y0), slot_size);
+
+			draw_rect(slot.min, slot_size, COLOR_GRAY);
+		}
+
+		// progress meter of how much fuel is left
+		{
+			x0 = x_middle;
+			y0 -= 4.f;
+
+			Vector2 size = { bg_size.x * 0.8, 4.f };
+			x0 -= size.x * 0.5;
+			y0 -= size.y;
+
+			draw_rect(v2(x0, y0), size, COLOR_WHITE);
+		}
+	}
+	*/
+
 	// :respawn ui
 	if (world->ux_state == UX_respawn) {
 		u32 title_font_height = 128;
@@ -1148,12 +1216,15 @@ void do_ui_stuff() {
 			world->ux_state = (world->ux_state == UX_inventory ? UX_nil : UX_inventory);
 		}
 		world->inventory_alpha_target = (world->ux_state == UX_inventory ? 1.0 : 0.0);
+		if (world_frame.show_inventory) {
+			world->inventory_alpha_target = 1.f;
+		}
 		animate_f32_to_target(&world->inventory_alpha, world->inventory_alpha_target, delta_t, 15.0);
 		bool is_inventory_enabled = world->inventory_alpha_target == 1.0;
 		if (world->inventory_alpha_target != 0.0)
 		{
 			// TODO - some opacity thing here.
-			float y_pos = 70.0;
+			float y_pos = screen_height - 14.f;
 
 			int item_count = 0;
 			for (int i = 0; i < ARCH_MAX; i++) {
@@ -1173,12 +1244,24 @@ void do_ui_stuff() {
 
 			// bg box rendering thing
 			{
-				Matrix4 xform = m4_identity;
-				xform = m4_translate(xform, v3(x_start_pos, y_pos, 0.0));
-				draw_rect_xform(xform, v2(entire_thing_width_idk, icon_width), bg_col);
+				Vector2 size = v2(entire_thing_width_idk, icon_width);
+				Range2f box = range2f_make_bottom_left(v2(x_start_pos, y_pos), size);
+				draw_rect(box.min, size, bg_col);
+
+				// put :cursor item back
+				if (world->mouse_cursor_item.id) {
+					is_inventory_enabled = false;
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT) && range2f_contains(box, get_mouse_pos_in_world_space())) {
+						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						world->inventory_items[world->mouse_cursor_item.id].amount += world->mouse_cursor_item.amount;
+						world->mouse_cursor_item = (ItemAmount){0};
+					}
+				}
 			}
 
+
 			int slot_index = 0;
+			ItemID hovered_item = 0;
 			for (int i = 1; i < ITEM_MAX; i++) {
 				ItemData item_data = get_item_data(i);
 				InventoryItemData* item = &world->inventory_items[i];
@@ -1197,6 +1280,7 @@ void do_ui_stuff() {
 					Range2f icon_box = quad_to_range(*quad);
 					if (is_inventory_enabled && range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
 						is_selected_alpha = 1.0;
+						hovered_item = i;
 					}
 
 					Matrix4 box_bottom_right_xform = xform;
@@ -1271,6 +1355,16 @@ void do_ui_stuff() {
 					}
 
 					slot_index += 1;
+				}
+			}
+
+			// :cusor item
+			if (!world->mouse_cursor_item.id && hovered_item) {
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+					InventoryItemData* item = &world->inventory_items[hovered_item];
+					world->mouse_cursor_item = (ItemAmount){.id=hovered_item, .amount=item->amount};
+					item->amount = 0;
 				}
 			}
 		}
@@ -1832,6 +1926,19 @@ void do_ui_stuff() {
 		world_frame.hover_consumed = true;
 	}
 
+	// :cursor item drawing
+	if (world->mouse_cursor_item.id) {
+		// Range2f rect = range2f_make_center_center(get_mouse_pos_in_world_space(), v2(10, 10));
+
+		Sprite* sprite = get_sprite(get_sprite_id_from_item(world->mouse_cursor_item.id));
+		Vector2 pos = get_mouse_pos_in_world_space();
+		Vector2 size = get_sprite_size(sprite);
+		pos.x -= size.x * 0.5;
+		pos.y -= size.y * 0.5;
+		
+		draw_image(sprite->image, pos, size, COLOR_WHITE);
+	}
+
 	// esc exit
 	if (world->ux_state != UX_nil && is_key_just_pressed(KEY_ESCAPE)) {
 		consume_key_just_pressed(KEY_ESCAPE);
@@ -1855,8 +1962,11 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
+	// :sound init
 	fmod_init();
+	#if CONFIGURATION == RELEASE
 	play_sound("event:/bg_loop");
+	#endif
 
 	// :col
 	col_exp = hex_to_rgba(0x7bd47aff);
@@ -1893,6 +2003,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_coal] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/coal.png"), get_heap_allocator())};
 		sprites[SPRITE_oxygenerator] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/oxygenerator.png"), get_heap_allocator())};
 		sprites[SPRITE_tether] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/tether.png"), get_heap_allocator())};
+		sprites[SPRITE_o2_shard] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/o2_shard.png"), get_heap_allocator())};
+		sprites[SPRITE_ice_vein] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/ice_vein.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -1971,7 +2083,8 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item
-		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_exp};
+		item_data[ITEM_o2_shard] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_o2_shard};
+		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Old Rock Thing"), .icon=SPRITE_exp};
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock };
 		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood };
 		item_data[ITEM_raw_copper] = (ItemData){ .pretty_name=STR("Raw Copper"), .icon=SPRITE_raw_copper };
@@ -2153,9 +2266,14 @@ int entry(int argc, char **argv) {
 		int mouse_tile_x = world_pos_to_tile_pos(mouse_pos_world.x);
 		int mouse_tile_y = world_pos_to_tile_pos(mouse_pos_world.y);
 
+		if (world->ux_state == UX_oxygenerator) {
+			world_frame.hover_consumed = true;
+			world_frame.show_inventory = true;
+		}
+
 		do_ui_stuff();
 
-		// :world update
+		// world update
 		{
 			world->time_elapsed += delta_t;
 		}
@@ -2254,6 +2372,7 @@ int entry(int argc, char **argv) {
 				bool has_interaction = en->destroyable_world_item
 					|| en->workbench_thing
 					|| en->arch == ARCH_research_station
+					|| en->arch == ARCH_oxygenerator
 					|| en->right_click_remove;
 				// add extra :interact cases here ^^
 
@@ -2594,11 +2713,6 @@ int entry(int argc, char **argv) {
 						// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
 						growing_array_init_reserve((void**)&drops, sizeof(ItemID), 2, get_temporary_allocator());
 
-						// add in exp
-						if (pct_chance(0.5)) {
-							growing_array_add((void**)&drops, &(ItemID){ITEM_exp});
-						}
-						
 						// drops from entity data
 						for (int i = 0; i < selected_en->drops_count; i++) {
 							ItemAmount drop = selected_en->drops[i];
@@ -2649,6 +2763,15 @@ int entry(int argc, char **argv) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 					world->ux_state = UX_research;
+					world->interacting_with_entity = selected_en;
+				}
+			}
+
+			// interact oxygenerator
+			if (selected_en && selected_en->arch == ARCH_oxygenerator) {
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+					world->ux_state = UX_oxygenerator;
 					world->interacting_with_entity = selected_en;
 				}
 			}
@@ -2719,6 +2842,15 @@ int entry(int argc, char **argv) {
 					}
 				}
 
+				if (en->arch == ARCH_oxygenerator) {
+					Vector2 size = {1, 5};
+					Vector2 draw_pos = en->pos;
+					draw_pos.x -= 0.5;
+					draw_pos.y -= 3;
+
+					draw_rect(draw_pos, v2(size.x, size.y), col_oxygen);
+				}
+
 				// health bar
 				if (en->health && en->health < en->max_health) {
 					Vector2 size = {6, 1};
@@ -2739,7 +2871,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// :tether draw blue thingy
-				if (en->is_oxygen_tether && en->frame.is_powered) {
+				if (en->arch != ARCH_oxygenerator && en->is_oxygen_tether && en->frame.is_powered) {
 					draw_rect(v2_add(en->pos, v2(-1, 3)), v2(2, 2), col_oxygen);
 				}
 
@@ -2767,6 +2899,31 @@ int entry(int argc, char **argv) {
 						draw_circle_xform(xform, v2(radius*2, radius*2), COLOR_BLACK);
 					}
 				}
+			}
+		}
+
+		// in-game :ui
+		{
+			// randy: I'm trying out making this UI be more diagetic and in the world.
+			// that way we can just communicate the inputs/outputs and have the bare minimum info.
+			// Instead of popping up a big ugly UI box.
+			// I think it's roughly the same amount of work to do it this way, if proven effective.
+			if (world->ux_state == UX_oxygenerator && world->interacting_with_entity) {
+
+				Entity* en = world->interacting_with_entity;
+				float x0 = en->pos.x;
+				float y0 = en->pos.y;
+				y0 += 6.f;
+
+				Vector2 size = v2(10, 10);
+				x0 -= size.x * 0.5;
+
+				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
+				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+					// TODO - place item in here.
+				}
+
+				draw_rect(rect.min, size, COLOR_GRAY);
 			}
 		}
 

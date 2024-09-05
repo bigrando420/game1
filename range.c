@@ -18,6 +18,11 @@ Range2f range2f_shift(Range2f r, Vector2 shift) {
   return r;
 }
 
+Range2f range2f_make_center_center(Vector2 pos, Vector2 size) {
+  return (Range2f){v2_add(pos, v2_mulf(size, -0.5)), v2_add(pos, v2_mulf(size, 0.5))};
+}
+
+// ?????
 Range2f range2f_make_bottom_center(Vector2 size) {
   Range2f range = {0};
   range.max = size;

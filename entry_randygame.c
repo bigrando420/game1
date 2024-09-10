@@ -411,6 +411,7 @@ typedef struct Entity {
 	float64 pick_up_cooldown_end_time;
 	float white_flash_current_alpha;
 	int exp_amount;
+	ItemAmount input0;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -1952,10 +1953,8 @@ void do_ui_stuff() {
 // :entry
 int entry(int argc, char **argv) {
 	window.title = STR("Randy's Game");
-	window.width = 1280;
-	window.height = 720;
-	window.x = 200;
-	window.y = 200;
+	window.width = 1920;
+	window.height = 1080;
 	window.clear_color = COLOR_BLACK;
 	window.force_topmost = false;
 
@@ -2920,10 +2919,41 @@ int entry(int argc, char **argv) {
 
 				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
 				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-					// TODO - place item in here.
+					
+					// interact with the slot
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+						if (world->mouse_cursor_item.id) {
+							if (en->input0.id) {
+								if (en->input0.id == world->mouse_cursor_item.id) {
+									// attempt stack
+									en->input0.amount += world->mouse_cursor_item.amount;
+									world->mouse_cursor_item = (ItemAmount){0};
+								} else {
+									// swap
+									ItemAmount temp = world->mouse_cursor_item;
+									world->mouse_cursor_item = en->input0;
+									en->input0 = temp;
+								}
+							} else {
+								// place inside
+								en->input0 = world->mouse_cursor_item;
+								world->mouse_cursor_item = (ItemAmount){0};
+							}
+						} else {
+							if (en->input0.id) {
+								// take into hand
+								world->mouse_cursor_item = en->input0;
+								en->input0 = (ItemAmount){0};
+							}
+						}
+					}
 				}
 
 				draw_rect(rect.min, size, COLOR_GRAY);
+
+				if (en->input0.id) {
+					draw_sprite_in_rect(get_sprite_id_from_item(en->input0.id), rect, COLOR_WHITE, 0.1);
+				}
 			}
 		}
 

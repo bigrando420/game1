@@ -145,6 +145,7 @@ Range2f quad_to_range(Draw_Quad quad) {
 
 // :col
 // these get inited on startup because we don't have a #run for the hex_to_rgba(0x2a2d3aff) lol
+Vector4 col_select;
 Vector4 color_0;
 Vector4 col_oxygen;
 Vector4 col_tether;
@@ -1176,7 +1177,7 @@ void do_ui_stuff() {
 		draw_text_with_pivot(font, txt, font_height_beeg, pos, text_scale, col, PIVOT_top_left);
 	}
 
-	// :oxygenerator ui
+	// oxygenerator ui
 	// first attempt
 	/*
 	if (world->ux_state == UX_oxygenerator && world->interacting_with_entity)
@@ -1489,7 +1490,9 @@ void do_ui_stuff() {
 
 				draw_rect(pos, size, COLOR_BLACK);
 
-				float x0, y0;
+				float x0 = pos.x;
+				float y0 = pos.y;
+				float y_bottom = y0;
 				x0 = pos.x + size.x * 0.5;
 				y0 = pos.y + size.y;
 				y0 -= 2.f; // arbitrary padding
@@ -1501,13 +1504,19 @@ void do_ui_stuff() {
 				// description
 				if (building->description.count)
 				{
-					// todo - text wrapping
 					float wrap_width = size.x;
 					string text = building->description;
-					draw_text_with_pivot(font, text, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+
+					string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
+					for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
+						string line = lines[i];
+						Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+						y0 -= metrics.visual_size.y;
+					}
 				}
-				// todo - advance by whatever the wrapped text box turns out to be...
-				y0 -= 30.f;
+
+				y0 = y_bottom;
+				y0 += 2.f;
 
 				// ingredients list
 				for (int j = 0; j < building->ingredients_count; j++) {
@@ -1547,8 +1556,8 @@ void do_ui_stuff() {
 					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), txt_col);
 					// y0 += metrics.visual_size.y;
 
-					y0 -= element_size.y;
-					y0 -= 2.0f; // padding @cleanup
+					y0 += element_size.y;
+					y0 += 2.0f; // padding @cleanup
 				}
 			}
 		}
@@ -1652,7 +1661,7 @@ void do_ui_stuff() {
 
 					Vector4 col = COLOR_WHITE;
 					if (workbench_en->selected_crafting_item == i) {
-						col = COLOR_RED;
+						col = col_select;
 					}
 
 					Range2f rect = range2f_make_bottom_left(v2(x1, y1), item_icon_size);
@@ -1792,7 +1801,7 @@ void do_ui_stuff() {
 					Range2f btn_range = range2f_make_bottom_left(v2(x0, y0), size);
 					Vector4 col = fill_col;
 					if (has_enough_for_crafting && range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
-						col = COLOR_RED;
+						col = col_select;
 						world_frame.hover_consumed = true;
 						// TODO - where do we put the state for the animation of the button?
 						// Either just manually rip it via the App state, or some kind of hash string thing that's probably overcomplicated as shit.
@@ -2008,6 +2017,7 @@ int entry(int argc, char **argv) {
 
 	// :col
 	col_exp = hex_to_rgba(0x7bd47aff);
+	col_select = col_exp;
 	color_0 = hex_to_rgba(0x2a2d3aff);
 	col_oxygen = hex_to_rgba(0xaad9e6ff);
 	col_tether = col_oxygen;
@@ -2098,7 +2108,7 @@ int entry(int argc, char **argv) {
 		buildings[BUILDING_research_station] = (BuildingData){
 			.to_build=ARCH_research_station,
 			.icon=SPRITE_research_station,
-			.description=STR("Researches recipes to unlock more buildings. This should wrap nicely at some point in the future lol..."),
+			.description=STR("Research recipes to unlock more buildings."),
 			.ingredients_count=2,
 			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
 		};
@@ -2159,7 +2169,7 @@ int entry(int argc, char **argv) {
 		//
 		item_data[ITEM_flint_axe] = (ItemData){
 			.pretty_name=STR("Flint Axe"),
-			.description=STR("+1 damage to trees\nThis is also something that should wrap really nicely. Yay look at that sexy text box wrap. Isn't that just beautiful."),
+			.description=STR("+1 damage to trees"),
 			.icon=SPRITE_flint_axe,
 			.craft_length=10,
 			.extra_axe_dmg=1,
@@ -2883,7 +2893,7 @@ int entry(int argc, char **argv) {
 
 						Vector4 col = COLOR_WHITE;
 						if (world_frame.selected_entity == en) {
-							col = COLOR_RED;
+							col = col_select;
 						}
 
 						if (en->white_flash_current_alpha != 0) {

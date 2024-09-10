@@ -31,7 +31,9 @@ FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
 
 void stop_sound(FMOD_STUDIO_EVENTINSTANCE* instance) {
 	FMOD_RESULT ok = FMOD_Studio_EventInstance_Stop(instance, FMOD_STUDIO_STOP_ALLOWFADEOUT);
-  assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
+  if (ok != FMOD_OK) {
+    log_error("FMOD error: %s", FMOD_ErrorString(ok));
+  }
 }
 
 void fmod_init() {

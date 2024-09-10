@@ -2514,6 +2514,9 @@ int entry(int argc, char **argv) {
 				if (en->arch == ARCH_oxygenerator) {
 
 					if (has_reached_end_time(en->fuel_expire_end_time)) {
+						if (en->fuel_expire_end_time != 0 && !en->input0.id) {
+							play_sound("event:/shutdown");
+						}
 						en->fuel_expire_end_time = 0;
 					}
 
@@ -2632,6 +2635,7 @@ int entry(int argc, char **argv) {
 			}
 
 			// run through connections recursively, starting at the core tether
+			if (world->oxygenerator->fuel_expire_end_time != 0)
 			{
 				Entity** connection_stack;
 				growing_array_init_reserve((void**)&connection_stack, sizeof(Entity*), 1, get_temporary_allocator());
@@ -2706,6 +2710,7 @@ int entry(int argc, char **argv) {
 
 				if (!is_losing_o2 && last_app_frame.losing_o2) {
 					// just got back to tether
+					play_sound("event:/o2_hiss");
 					if (o2_riser) {
 						stop_sound(o2_riser);
 					}

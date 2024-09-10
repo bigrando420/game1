@@ -41,6 +41,7 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 	switch (pivot) {
 		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
 		case PIVOT_bottom_center: pivot_mul = v2(0.5, 0.0); break;
+		case PIVOT_bottom_right: pivot_mul = v2(1.0, 0.0); break;
 		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
 		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
 		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
@@ -151,6 +152,7 @@ Vector4 col_exp;
 #define COLOR_GRAY v4(0.5, 0.5, 0.5, 1.0)
 
 // :tweaks
+float o2_fuel_length = 30.f;
 Vector2 tether_connection_offset = {0, 4};
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
@@ -412,6 +414,7 @@ typedef struct Entity {
 	float white_flash_current_alpha;
 	int exp_amount;
 	ItemAmount input0;
+	float64 fuel_expire_end_time;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -881,6 +884,38 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 
 // :func dump
 
+void draw_item_amount_in_rect(ItemAmount item_amount, Range2f rect) {
+	draw_sprite_in_rect(get_sprite_id_from_item(item_amount.id), rect, COLOR_WHITE, 0.1);
+
+	float x0 = rect.max.x;
+	float y0 = rect.min.y;
+	x0 -= 1;
+	y0 += 1;
+
+	Vector2 text_scale = v2(0.1, 0.1);
+	string txt = tprint("%i", item_amount.amount);
+	draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_bottom_right);
+}
+
+void item_tooltip(ItemAmount item_amount) {
+
+	Vector2 text_scale = v2(0.1, 0.1);
+	ItemData item_data = get_item_data(item_amount.id);
+
+	Vector2 size = v2(40, 20);
+	Vector2 pos = get_mouse_pos_in_world_space();
+
+	draw_rect(pos, size, COLOR_BLACK);
+
+	float x0, y0;
+	x0 = pos.x + size.x * 0.5;
+	y0 = pos.y + size.y;
+	y0 -= 2.f; // arbitrary padding
+
+	Gfx_Text_Metrics met = draw_text_with_pivot(font, item_data.pretty_name, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+
+}
+
 void camera_shake(float amount) {
 	camera_trauma += amount;
 }
@@ -941,6 +976,7 @@ void world_setup()
 	Entity* en = entity_create();
 	setup_oxygenerator(en);
 	world->oxygenerator = en;
+	en->fuel_expire_end_time = now() + o2_fuel_length;
 
 	world->building_unlocks[BUILDING_research_station].research_progress = 100;
 	world->building_unlocks[BUILDING_workbench].research_progress = 100;
@@ -1547,7 +1583,7 @@ void do_ui_stuff() {
 			{
 				for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 					Entity* tether = &world->entities[i];
-					if (tether->is_valid && tether->is_oxygen_tether && tether->last_frame.is_powered) {
+					if (tether->is_valid && tether->last_frame.is_powered) {
 						if (v2_dist(tether->pos, pos) < tether_connection_radius) {
 							draw_line(v2_add(tether->pos, tether_connection_offset), v2_add(pos, tether_connection_offset), 1.0f, col_tether);
 							break;
@@ -2461,6 +2497,28 @@ int entry(int argc, char **argv) {
 					}
 				}
 
+				// :oxygenerator update
+				if (en->arch == ARCH_oxygenerator) {
+
+					if (has_reached_end_time(en->fuel_expire_end_time)) {
+						en->fuel_expire_end_time = 0;
+					}
+
+					// check for fuel expire.
+					if (en->fuel_expire_end_time == 0 && en->input0.id) {
+						// consume fuel
+						en->input0.amount -= 1;
+						if (en->input0.amount <= 0) {
+							en->input0 = (ItemAmount){0};
+						}
+						en->fuel_expire_end_time = now() + o2_fuel_length;
+					}
+
+					if (en->fuel_expire_end_time != 0) {
+						en->frame.is_powered = true;
+					}
+				}
+
 				// pickup exp
 				if (is_player_alive() && en->arch == ARCH_exp_orb) {
 
@@ -2540,8 +2598,6 @@ int entry(int argc, char **argv) {
 
 		// :tether stuff
 		{
-			world->oxygenerator->frame.is_powered = true;
-
 			// for each tether, find all nearby tethers
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* self_tether = &world->entities[i];
@@ -2590,7 +2646,7 @@ int entry(int argc, char **argv) {
 			float closest_dist = INFINITY;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* tether = &world->entities[i];
-				if (tether->is_valid && tether->is_oxygen_tether && (tether->frame.is_powered || tether->arch == ARCH_oxygenerator)) {
+				if (tether->is_valid && tether->is_oxygen_tether && tether->frame.is_powered) {
 					float dist = v2_dist(tether->pos, player->pos);
 					if (dist < tether_connection_radius) {
 						if (!closest_tether || dist < closest_dist) {
@@ -2841,11 +2897,14 @@ int entry(int argc, char **argv) {
 					}
 				}
 
+				// :oxygenerator render
 				if (en->arch == ARCH_oxygenerator) {
 					Vector2 size = {1, 5};
 					Vector2 draw_pos = en->pos;
 					draw_pos.x -= 0.5;
 					draw_pos.y -= 3;
+
+					size.y = size.y * (1.0-alpha_from_end_time(en->fuel_expire_end_time, o2_fuel_length));
 
 					draw_rect(draw_pos, v2(size.x, size.y), col_oxygen);
 				}
@@ -2870,7 +2929,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// :tether draw blue thingy
-				if (en->arch != ARCH_oxygenerator && en->is_oxygen_tether && en->frame.is_powered) {
+				if (en->arch != ARCH_oxygenerator && en->frame.is_powered) {
 					draw_rect(v2_add(en->pos, v2(-1, 3)), v2(2, 2), col_oxygen);
 				}
 
@@ -2907,6 +2966,7 @@ int entry(int argc, char **argv) {
 			// that way we can just communicate the inputs/outputs and have the bare minimum info.
 			// Instead of popping up a big ugly UI box.
 			// I think it's roughly the same amount of work to do it this way, if proven effective.
+			// :oxygenerator ui
 			if (world->ux_state == UX_oxygenerator && world->interacting_with_entity) {
 
 				Entity* en = world->interacting_with_entity;
@@ -2917,42 +2977,56 @@ int entry(int argc, char **argv) {
 				Vector2 size = v2(10, 10);
 				x0 -= size.x * 0.5;
 
+				bool do_tooltip = false;
 				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
 				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
 					
 					// interact with the slot
-					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					{
 						if (world->mouse_cursor_item.id) {
 							if (en->input0.id) {
 								if (en->input0.id == world->mouse_cursor_item.id) {
 									// attempt stack
-									en->input0.amount += world->mouse_cursor_item.amount;
-									world->mouse_cursor_item = (ItemAmount){0};
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										en->input0.amount += world->mouse_cursor_item.amount;
+										world->mouse_cursor_item = (ItemAmount){0};
+									}
 								} else {
-									// this part is redundant rn, but you imagine it being useful when we have other types of fuel we can put inside here. Not just the o2 shard.
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										if (world->mouse_cursor_item.id == ITEM_o2_shard) {
+											// swap
+											ItemAmount temp = world->mouse_cursor_item;
+											world->mouse_cursor_item = en->input0;
+											en->input0 = temp;
+										} else {
+											play_sound("event:/error");
+										}
+									}
+								}
+							} else {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 									if (world->mouse_cursor_item.id == ITEM_o2_shard) {
-										// swap
-										ItemAmount temp = world->mouse_cursor_item;
-										world->mouse_cursor_item = en->input0;
-										en->input0 = temp;
+										// place inside
+										en->input0 = world->mouse_cursor_item;
+										world->mouse_cursor_item = (ItemAmount){0};
 									} else {
 										play_sound("event:/error");
 									}
 								}
-							} else {
-								if (world->mouse_cursor_item.id == ITEM_o2_shard) {
-									// place inside
-									en->input0 = world->mouse_cursor_item;
-									world->mouse_cursor_item = (ItemAmount){0};
-								} else {
-									play_sound("event:/error");
-								}
 							}
 						} else {
 							if (en->input0.id) {
-								// take into hand
-								world->mouse_cursor_item = en->input0;
-								en->input0 = (ItemAmount){0};
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									// take into hand
+									world->mouse_cursor_item = en->input0;
+									en->input0 = (ItemAmount){0};
+								}
+
+								do_tooltip = true;
 							}
 						}
 					}
@@ -2961,10 +3035,14 @@ int entry(int argc, char **argv) {
 				draw_rect(rect.min, size, COLOR_GRAY);
 
 				if (en->input0.id) {
-					draw_sprite_in_rect(get_sprite_id_from_item(en->input0.id), rect, COLOR_WHITE, 0.1);
+					draw_item_amount_in_rect(en->input0, rect);
 				} else {
 					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
 					set_col_override(quad, v4(0,0,0, 0.8));
+				}
+
+				if (do_tooltip) {
+					item_tooltip(en->input0);
 				}
 			}
 		}

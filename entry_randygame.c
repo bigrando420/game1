@@ -2929,15 +2929,24 @@ int entry(int argc, char **argv) {
 									en->input0.amount += world->mouse_cursor_item.amount;
 									world->mouse_cursor_item = (ItemAmount){0};
 								} else {
-									// swap
-									ItemAmount temp = world->mouse_cursor_item;
-									world->mouse_cursor_item = en->input0;
-									en->input0 = temp;
+									// this part is redundant rn, but you imagine it being useful when we have other types of fuel we can put inside here. Not just the o2 shard.
+									if (world->mouse_cursor_item.id == ITEM_o2_shard) {
+										// swap
+										ItemAmount temp = world->mouse_cursor_item;
+										world->mouse_cursor_item = en->input0;
+										en->input0 = temp;
+									} else {
+										play_sound("event:/error");
+									}
 								}
 							} else {
-								// place inside
-								en->input0 = world->mouse_cursor_item;
-								world->mouse_cursor_item = (ItemAmount){0};
+								if (world->mouse_cursor_item.id == ITEM_o2_shard) {
+									// place inside
+									en->input0 = world->mouse_cursor_item;
+									world->mouse_cursor_item = (ItemAmount){0};
+								} else {
+									play_sound("event:/error");
+								}
 							}
 						} else {
 							if (en->input0.id) {
@@ -2953,6 +2962,9 @@ int entry(int argc, char **argv) {
 
 				if (en->input0.id) {
 					draw_sprite_in_rect(get_sprite_id_from_item(en->input0.id), rect, COLOR_WHITE, 0.1);
+				} else {
+					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
+					set_col_override(quad, v4(0,0,0, 0.8));
 				}
 			}
 		}

@@ -152,7 +152,7 @@ Vector4 col_exp;
 #define COLOR_GRAY v4(0.5, 0.5, 0.5, 1.0)
 
 // :tweaks
-float o2_fuel_length = 30.f;
+float o2_fuel_length = 60.f;
 Vector2 tether_connection_offset = {0, 4};
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
@@ -453,7 +453,6 @@ BuildingData get_building_data(BuildingID id) {
 typedef enum UXState {
 	UX_nil,
 	UX_inventory,
-	UX_building,
 	UX_place_mode,
 	UX_workbench,
 	UX_research,
@@ -495,11 +494,12 @@ typedef struct WorldResourceData {
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
 	{ BIOME_forest, ARCH_tree, 10 },
-	{ BIOME_forest, ARCH_flint_depo, 15 },
+	{ BIOME_forest, ARCH_rock, 15 },
 	{ BIOME_forest, ARCH_grass, 10 },
 	{ BIOME_forest, ARCH_ice_vein, 20 },
 
 	{ BIOME_barren, ARCH_rock, 10 },
+	{ BIOME_barren, ARCH_flint_depo, 10 },
 	{ BIOME_barren, ARCH_copper_depo, 10 },
 	// :spawn_res system
 };
@@ -972,6 +972,7 @@ void world_setup()
 {
 	Entity* player_en = entity_create();
 	setup_player(player_en);
+	player_en->pos.x = 20.f;
 
 	Entity* en = entity_create();
 	setup_oxygenerator(en);
@@ -1408,13 +1409,9 @@ void do_ui_stuff() {
 	}
 
 	// :building ui
+	// is now just shadowing the inventory
 	{
-		if (is_key_just_pressed('C')) {
-			consume_key_just_pressed('C');
-			world->ux_state = (world->ux_state == UX_building ? UX_nil : UX_building);
-		}
-
-		world->building_alpha_target = (world->ux_state == UX_building ? 1.0 : 0.0);
+		world->building_alpha_target = (world->ux_state == UX_inventory ? 1.0 : 0.0);
 		animate_f32_to_target(&world->building_alpha, world->building_alpha_target, delta_t, 15.0);
 		bool is_building_enabled = world->building_alpha_target == 1.0;
 
@@ -1531,7 +1528,8 @@ void do_ui_stuff() {
 						float x1 = pos.x + size.x * 0.5 - element_size.y;
 						float y1 = y0 + (item_icon_length - element_size.y) * -0.5;
 
-						draw_image(get_sprite(get_sprite_id_from_item(ing_amount.id))->image, v2(x1, y1), v2(item_icon_length, item_icon_length), COLOR_WHITE);
+						Range2f rect = {v2(x1, y1), v2(x1 + item_icon_length, y1 + item_icon_length)};
+						draw_sprite_in_rect(get_sprite_id_from_item(ing_amount.id), rect, COLOR_WHITE, 0);
 					}
 
 					InventoryItemData inv_item = world->inventory_items[ing_amount.id];
@@ -1784,6 +1782,11 @@ void do_ui_stuff() {
 							has_enough_for_crafting = false;
 							break;
 						}
+					}
+
+					// disable craft button when something is already crafing.
+					if (workbench_en->current_crafting_item && workbench_en->current_crafting_item != workbench_en->selected_crafting_item) {
+						has_enough_for_crafting = false;
 					}
 
 					Range2f btn_range = range2f_make_bottom_left(v2(x0, y0), size);
@@ -2071,8 +2074,8 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_tether,
 			.description=STR("Extends oxygen range"),
 			.exp_cost=50,
-			.ingredients_count=1,
-			.ingredients={ {ITEM_copper_ingot, 2} }
+			.ingredients_count=2,
+			.ingredients={ {ITEM_copper_ingot, 2}, {ITEM_fiber, 10} }
 		};
 
 		buildings[BUILDING_furnace] = (BuildingData){
@@ -2080,8 +2083,8 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_furnace,
 			.description=STR("Can burn stuff into something more useful."),
 			.exp_cost=30,
-			.ingredients_count=1,
-			.ingredients={ {ITEM_rock, 20} }
+			.ingredients_count=2,
+			.ingredients={ {ITEM_rock, 10}, {ITEM_flint, 2} }
 		};
 
 		buildings[BUILDING_workbench] = (BuildingData){
@@ -2735,7 +2738,7 @@ int entry(int argc, char **argv) {
 					play_sound("event:/hit_generic");
 					selected_en->white_flash_current_alpha = 1.0;
 					camera_shake(0.1);
-					particle_emit(get_mouse_pos_in_world_space(), PFX_hit);
+					particle_emit(selected_en->pos, PFX_hit);
 
 					int damage_amount = 1;
 					if (selected_en->dmg_type == DMG_axe) {

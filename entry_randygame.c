@@ -496,7 +496,8 @@ typedef enum BiomeID {
 	BIOME_core,
 	BIOME_barren,
 	BIOME_forest,
-	// :biome
+	BIOME_copper,
+	// :biome #volatile
 	BIOME_MAX,
 } BiomeID;
 
@@ -507,14 +508,14 @@ typedef struct WorldResourceData {
 } WorldResourceData;
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
-	{ BIOME_forest, ARCH_tree, 10 },
-	{ BIOME_forest, ARCH_rock, 15 },
-	{ BIOME_forest, ARCH_grass, 10 },
-	{ BIOME_forest, ARCH_ice_vein, 20 },
+	{ BIOME_forest, ARCH_tree, 5 },
+	{ BIOME_forest, ARCH_grass, 3 },
 
 	{ BIOME_barren, ARCH_rock, 10 },
 	{ BIOME_barren, ARCH_flint_depo, 10 },
-	{ BIOME_barren, ARCH_copper_depo, 10 },
+	{ BIOME_barren, ARCH_ice_vein, 20 },
+
+	{ BIOME_copper, ARCH_copper_depo, 10 },
 	// :spawn_res system
 };
 
@@ -524,6 +525,22 @@ typedef struct Map {
 	BiomeID* tiles;
 } Map;
 Map map = {0};
+
+u32 biome_colors[BIOME_MAX] = {
+	0x000000, // void
+	0xffffff, // core,
+	0x484848, // barren,
+	0x3553b9, // forest,
+	0xbf6937, // copper,
+	// :biome #volatile
+};
+
+Vector4 biome_col_hex_to_rgba(u32 col) {
+	u8 r = (col>>16) & 0x000000FF;
+	u8 g = (col>>8) & 0x000000FF;
+	u8 b = (col>>0) & 0x000000FF;
+	return (Vector4){r/255.0, g/255.0, b/255.0, 1};
+}
 
 void init_biome_maps() {
 
@@ -556,12 +573,10 @@ void init_biome_maps() {
 
 		u32 pixel_no_alpha = pixel_color >> 8;
 
-		if (pixel_no_alpha == 0xffffff) {
-			map.tiles[index] = BIOME_core;
-		} else if (pixel_no_alpha == 0x3553b9) {
-			map.tiles[index] = BIOME_forest;
-		} else if (pixel_no_alpha == 0x484848) {
-			map.tiles[index] = BIOME_barren;
+		for (BiomeID i = 0; i < ARRAY_COUNT(biome_colors); i++) {
+			if (biome_colors[i] == pixel_no_alpha) {
+				map.tiles[index] = i;
+			}
 		}
 	}
 }
@@ -954,8 +969,9 @@ TileEntityCache* create_tile_entity_pair_cache() {
 		Entity* en = &world->entities[i];
 		Vector2i local_tile_pos = world_tile_to_local_map(v2_world_pos_to_tile_pos(en->pos));
 		int index = local_tile_pos.y * map.width + local_tile_pos.x;
-		assert(index >= 0 && index < cache->tile_count);
-		cache->tiles[index].entity = en;
+		if (index >= 0 && index < cache->tile_count) {
+			cache->tiles[index].entity = en;
+		}
 	}
 
 	return cache;
@@ -2497,7 +2513,7 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// :tile rendering
+		// :tile :rendering
 		{
 			int player_tile_x = world_pos_to_tile_pos(get_player()->pos.x);
 			int player_tile_y = world_pos_to_tile_pos(get_player()->pos.y);
@@ -2516,9 +2532,7 @@ int entry(int argc, char **argv) {
 					if ((x + (y % 2 == 0) ) % 2 == 0) {
 						col.a = 0.9;
 					}
-					if (biome == BIOME_forest) {
-						col = v4_lerp(col, COLOR_BLUE, 0.1);
-					}
+					col = v4_lerp(col, biome_col_hex_to_rgba(biome_colors[biome]), 0.1f);
 					float x_pos = x * tile_width;
 					float y_pos = y * tile_width;
 					draw_rect(v2(x_pos + tile_width * -0.5, y_pos + tile_width * -0.5), v2(tile_width, tile_width), col);

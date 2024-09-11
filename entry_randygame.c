@@ -157,7 +157,7 @@ Vector4 col_exp;
 #define COLOR_GRAY v4(0.5, 0.5, 0.5, 1.0)
 
 // :tweaks
-float o2_fuel_length = 60.f;
+float o2_fuel_length = 30.f;
 Vector2 tether_connection_offset = {0, 4};
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
@@ -497,6 +497,9 @@ typedef enum BiomeID {
 	BIOME_barren,
 	BIOME_forest,
 	BIOME_copper,
+	BIOME_copper_heavy,
+	BIOME_ice,
+	BIOME_ice_heavy,
 	// :biome #volatile
 	BIOME_MAX,
 } BiomeID;
@@ -513,9 +516,14 @@ WorldResourceData world_resources[] = {
 
 	{ BIOME_barren, ARCH_rock, 10 },
 	{ BIOME_barren, ARCH_flint_depo, 10 },
-	{ BIOME_barren, ARCH_ice_vein, 20 },
 
 	{ BIOME_copper, ARCH_copper_depo, 10 },
+
+	{ BIOME_copper_heavy, ARCH_copper_depo, 4 },
+	{ BIOME_copper_heavy, ARCH_rock, 10 },
+
+	{ BIOME_ice, ARCH_ice_vein, 10 },
+	{ BIOME_ice_heavy, ARCH_ice_vein, 4 },
 	// :spawn_res system
 };
 
@@ -532,6 +540,9 @@ u32 biome_colors[BIOME_MAX] = {
 	0x484848, // barren,
 	0x3553b9, // forest,
 	0xbf6937, // copper,
+	0xa54b18, // copper heavy
+	0x70d6cd, // ice
+	0x26c9bc, // ice heavy
 	// :biome #volatile
 };
 
@@ -560,6 +571,8 @@ void init_biome_maps() {
 	map.height = height;
 	map.tiles = alloc(get_heap_allocator(), width * height * sizeof(BiomeID));
 
+	bool found_biomes[BIOME_MAX] = {0};
+
 	for (int y = 0; y < height; y++)
 	for (int x = 0; x < width; x++)
 	{
@@ -576,8 +589,13 @@ void init_biome_maps() {
 		for (BiomeID i = 0; i < ARRAY_COUNT(biome_colors); i++) {
 			if (biome_colors[i] == pixel_no_alpha) {
 				map.tiles[index] = i;
+				found_biomes[i] = true;
 			}
 		}
+	}
+
+	for (BiomeID i = 0; i < BIOME_MAX; i++) {
+		assert(found_biomes[i], "Biome %i is unused", i);
 	}
 }
 
@@ -676,7 +694,7 @@ void setup_ice_vein(Entity* en) {
 	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_o2_shard, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemAmount){.id=ITEM_o2_shard, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 }
 
@@ -1020,10 +1038,10 @@ void world_setup()
 		setup_ice_vein(en);
 		en->pos.x = 50.f;
 
-		en = entity_create();
-		setup_ice_vein(en);
-		en->pos.x = -10.f;
-		en->pos.y = 30.f;
+		// en = entity_create();
+		// setup_ice_vein(en);
+		// en->pos.x = -10.f;
+		// en->pos.y = 30.f;
 	}
 
 	// :test stuff

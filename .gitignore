@@ -8,6 +8,7 @@ asset_workbench/game1_reaper/**
 # not included because of licensing. Download the fmod SDK from https://www.fmod.com/download
 fmod/**
 
+build_release/**
 world
 *.raddbgi
 **/worlds

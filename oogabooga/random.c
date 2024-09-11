@@ -39,5 +39,8 @@ f64 get_random_float64_in_range(f64 min, f64 max) {
 }
 
 s64 get_random_int_in_range(s64 min, s64 max) {
+    if (min == max) return 0;
+    if (min > max) swap(min, max, s64);
+
     return min + (s64)(get_random() % (max - min + 1));
 }

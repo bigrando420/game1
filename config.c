@@ -1,11 +1,13 @@
 
-// CONFIGURATION can be RELEASE or DEBUG, depending on build
-// TODO
-// #if CONFIGURATION == RELEASE
-// 	#define GAME_RELEASE
-// #endif
-// #if CONFIGURATION == RELEASE
 
-// :config
+#if CONFIGURATION == RELEASE
+#define LOOP_SOUND
+#endif
 
+#if CONFIGURATION == DEBUG
+
+// we can turn on/off whatever we want in here, while having the release override always be valid.
 // #define DEV_TESTING
+#define LOOP_SOUND
+
+#endif

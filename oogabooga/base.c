@@ -24,10 +24,10 @@ dump_stack_trace();
 
 #define RAW_STRING(...) (#__VA_ARGS__)
 
-#if CONFIGURATION == RELEASE
-#undef assert
-#define assert(x, ...) (void)(x)
-#endif
+// #if CONFIGURATION == RELEASE
+// #undef assert
+// #define assert(x, ...) (void)(x)
+// #endif
 
 #define panic(...) { print(__VA_ARGS__); crash(); }
 

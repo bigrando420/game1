@@ -534,17 +534,20 @@ void init_biome_maps() {
 	for (int x = 0; x < width; x++)
 	{
 		int index = y * width + x;
-		u8* pixel = stb_data + index * channels;
+		u8* pixel_first_channel = stb_data + index * channels;
+		u32 pixel_color =
+			(pixel_first_channel[0]) << 24 | // r
+			(pixel_first_channel[1]) << 16 | // g
+			(pixel_first_channel[2]) << 8 | // b
+			(pixel_first_channel[3]) << 0; // a
 
-		u8 r = pixel[0];
-		u8 g = pixel[1];
-		u8 b = pixel[2];
-		Vector4 col = {(float)r/255.0f, (float)g/255.0f, (float)b/255.0f, 1.0};
-		if (v4_equals(col, COLOR_WHITE)) {
+		u32 pixel_no_alpha = pixel_color >> 8;
+
+		if (pixel_no_alpha == 0xffffff) {
 			map.tiles[index] = BIOME_core;
-		} else if (v4_equals(col, hex_to_rgba(0x3553b9ff))) {
+		} else if (pixel_no_alpha == 0x3553b9) {
 			map.tiles[index] = BIOME_forest;
-		} else if (!v4_equals(col, COLOR_BLACK)) {
+		} else if (pixel_no_alpha == 0x484848) {
 			map.tiles[index] = BIOME_barren;
 		}
 	}
@@ -982,6 +985,18 @@ void world_setup()
 
 	world->building_unlocks[BUILDING_research_station].research_progress = 100;
 	world->building_unlocks[BUILDING_workbench].research_progress = 100;
+
+	// spawn ice depos nearby
+	{
+		en = entity_create();
+		setup_ice_vein(en);
+		en->pos.x = 50.f;
+
+		en = entity_create();
+		setup_ice_vein(en);
+		en->pos.x = -10.f;
+		en->pos.y = 30.f;
+	}
 
 	// :test stuff
 	#if defined(DEV_TESTING)
@@ -2011,7 +2026,7 @@ int entry(int argc, char **argv) {
 
 	// :sound init
 	fmod_init();
-	#if CONFIGURATION == RELEASE
+	#if defined(LOOP_SOUND)
 	play_sound("event:/bg_loop");
 	#endif
 
@@ -2414,7 +2429,7 @@ int entry(int argc, char **argv) {
 			// log("%f, %f", mouse_pos_world.x, mouse_pos_world.y);
 			// draw_text(font, sprint(temp, STR("%f %f"), mouse_pos_world.x, mouse_pos_world.y), font_height, mouse_pos_world, v2(0.1, 0.1), COLOR_RED);
 
-			float smallest_dist = INFINITY;
+			float smallest_dist = 99999;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
 				bool has_interaction = en->destroyable_world_item
@@ -2660,7 +2675,7 @@ int entry(int argc, char **argv) {
 		// :player specific caveman update
 		{
 			Entity* closest_tether = 0;
-			float closest_dist = INFINITY;
+			float closest_dist = 99999;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* tether = &world->entities[i];
 				if (tether->is_valid && tether->is_oxygen_tether && tether->frame.is_powered) {
@@ -3132,7 +3147,7 @@ int entry(int argc, char **argv) {
 
 		// load/save commands
 		// these are at the bottom, because we'll want to have a clean spot to do this to avoid any mid-way operation bugs.
-		#if defined(DEBUG)
+		#if CONFIGURATION == DEBUG
 		{
 			if (is_key_just_pressed('F')) {
 				world_save_to_disk();

@@ -342,16 +342,6 @@ typedef enum ArchetypeID {
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
-typedef struct ArchetypeData {
-	string pretty_name;
-} ArchetypeData;
-ArchetypeData archetype_data[ARCH_MAX] = {0};
-ArchetypeData get_archetype_data(ArchetypeID id) {
-	return archetype_data[id];
-}
-string get_archetype_pretty_name(ArchetypeID id) {
-	return get_archetype_data(id).pretty_name;
-}
 
 // :item
 typedef struct ItemData {
@@ -434,11 +424,33 @@ typedef struct Entity {
 	float64 time_til_next_frame;
 	Vector2i last_move_dir;
 
+	// state that is completely constant, derived by archetype
+	// this was originally in a separate data structure, but it feels better inside here.
+	// even though it's a "waste of memory" since these are constant across all entities.
+	Vector2i tile_size;
+	string pretty_name;
+	//
+
 	EntityFrame frame;
 	EntityFrame last_frame;
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
+
+Entity entity_archetype_data[ARCH_MAX] = {0};
+void entity_setup(Entity* en, ArchetypeID id); // forward decl
+void setup_entity_archetype_data_cache() {
+	for (ArchetypeID i = 1; i < ARCH_MAX; i++) {
+		entity_setup(&entity_archetype_data[i], i);
+	}
+}
+Entity get_archetype_data(ArchetypeID id) {
+	return entity_archetype_data[id];
+}
+string get_archetype_pretty_name(ArchetypeID id) {
+	return get_archetype_data(id).pretty_name;
+}
+
 
 // building resource
 // NOTE, a "resource" is a thing that we set up during startup, and is constant.
@@ -693,6 +705,8 @@ void entity_destroy(Entity* entity) {
 
 void setup_burner_drill(Entity* en) {
 	en->arch = ARCH_burner_drill;
+	en->pretty_name = STR("Burner Drill");
+	en->tile_size = v2i(2, 2);
 	en->sprite_id = SPRITE_burner_drill;
 }
 
@@ -719,6 +733,7 @@ void setup_exp_orb(Entity* en) {
 
 void setup_tether(Entity* en) {
 	en->arch = ARCH_tether;
+	en->pretty_name = STR("Tether");
 	en->sprite_id = SPRITE_tether;
 	en->is_oxygen_tether = true;
 	en->right_click_remove = true;
@@ -765,6 +780,7 @@ void setup_copper_depo(Entity* en) {
 
 void setup_teleporter1(Entity* en) {
 	en->arch = ARCH_teleporter1;
+	en->pretty_name = STR("Teleporter");
 	en->sprite_id = SPRITE_teleporter1;
 }
 
@@ -781,6 +797,7 @@ void setup_exp_vein(Entity* en) {
 
 void setup_furnace(Entity* en) {
 	en->arch = ARCH_furnace;
+	en->pretty_name = STR("Furnace");
 	en->sprite_id = SPRITE_furnace;
 	en->workbench_thing = true;
 	en->right_click_remove = true;
@@ -788,6 +805,7 @@ void setup_furnace(Entity* en) {
 
 void setup_workbench(Entity* en) {
 	en->arch = ARCH_workbench;
+	en->pretty_name = STR("Workbench");
 	en->sprite_id = SPRITE_workbench;
 	en->workbench_thing = true;
 	en->right_click_remove = true;
@@ -795,6 +813,7 @@ void setup_workbench(Entity* en) {
 
 void setup_research_station(Entity* en) {
 	en->arch = ARCH_research_station;
+	en->pretty_name = STR("Research Station");
 	en->sprite_id = SPRITE_research_station;
 	en->right_click_remove = true;
 }
@@ -839,6 +858,13 @@ void setup_item(Entity* en, ItemID item_id) {
 
 void entity_setup(Entity* en, ArchetypeID id) {
 	switch (id) {
+		// filling these in so we can get compiler errors for missing cases
+		case ARCH_nil: break;
+		case ARCH_MAX: break;
+		case ARCH_item: setup_item(en, 0); log_warning("setting up item in entity_setup ???"); break;
+		//
+		case ARCH_exp_orb: setup_exp_orb(en); break;
+		case ARCH_player: setup_player(en); break;
 		case ARCH_furnace: setup_furnace(en); break;
 		case ARCH_workbench: setup_workbench(en); break;
 		case ARCH_research_station: setup_research_station(en); break;
@@ -854,8 +880,6 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_ice_vein: setup_ice_vein(en); break;
 		case ARCH_tile_resource: setup_tile_resource(en); break;
 		case ARCH_burner_drill: setup_burner_drill(en); break;
-		// :arch :setup
-		default: log_error("missing entity_setup case entry"); break;
 	}
 }
 
@@ -1676,6 +1700,9 @@ void do_ui_stuff() {
 			Vector2 pos = mouse_pos_world;
 			pos = round_v2_to_tile(pos);
 
+			// now we can just do this to get the tile size. Even though we have no entity setup.
+			get_archetype_data(building.to_build).tile_size;
+
 			Matrix4 xform = m4_identity;
 			xform = m4_translate(xform, v3(pos.x, pos.y, 0));
 
@@ -2109,6 +2136,8 @@ int entry(int argc, char **argv) {
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
 
+	// :init
+
 	// :sound init
 	fmod_init();
 	#if defined(LOOP_SOUND)
@@ -2172,16 +2201,8 @@ int entry(int argc, char **argv) {
 	font = load_font_from_disk(STR("C:/windows/fonts/arial.ttf"), get_heap_allocator());
 	assert(font, "Failed loading arial.ttf, %d", GetLastError());
 
-	// :arch data setup
-	{
-		archetype_data[ARCH_workbench].pretty_name = STR("Workbench");
-		archetype_data[ARCH_furnace].pretty_name = STR("Furnace");
-		archetype_data[ARCH_research_station].pretty_name = STR("Research Station");
-		archetype_data[ARCH_teleporter1].pretty_name = STR("Teleporter");
-		archetype_data[ARCH_tether].pretty_name = STR("Tether");
-		archetype_data[ARCH_burner_drill].pretty_name = STR("Burner Drill");
-	}
-
+	setup_entity_archetype_data_cache();
+	
 	// :building resource setup
 	{
 		buildings[BUILDING_burner_drill] = (BuildingData){

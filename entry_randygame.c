@@ -10,6 +10,10 @@
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
+inline int extract_sign(float a) {
+	return a == 0 ? 0 : (a < 0 ? -1 : 1);
+}
+
 inline float v2_dist(Vector2 a, Vector2 b) {
   return fabsf(v2_length(v2_sub(a, b)));
 }
@@ -232,10 +236,11 @@ Vector2 round_v2_to_tile(Vector2 world_pos) {
 
 typedef struct Sprite {
 	Gfx_Image* image;
+	int frames;
 } Sprite;
 typedef enum SpriteID {
 	SPRITE_nil,
-	SPRITE_player,
+	// SPRITE_player,
 	SPRITE_tree0,
 	SPRITE_tree1,
 	SPRITE_rock0,
@@ -262,6 +267,8 @@ typedef enum SpriteID {
 	SPRITE_tether,
 	SPRITE_o2_shard,
 	SPRITE_ice_vein,
+	SPRITE_player_walk,
+	SPRITE_player_idle,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -377,6 +384,9 @@ typedef struct Entity Entity; // needs forward declare
 typedef struct EntityFrame {
 	Entity** connected_to_tethers;
 	bool is_powered;
+	Vector2 input_axis;
+	SpriteID functional_sprite_id;
+	// :frame
 } EntityFrame;
 
 typedef struct Entity {
@@ -416,6 +426,9 @@ typedef struct Entity {
 	int exp_amount;
 	ItemAmount input0;
 	float64 fuel_expire_end_time;
+	int anim_index;
+	float64 time_til_next_frame;
+	Vector2i last_move_dir;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -741,7 +754,6 @@ void setup_research_station(Entity* en) {
 
 void setup_player(Entity* en) {
 	en->arch = ARCH_player;
-	en->sprite_id = SPRITE_player;
 	en->health = 1;
 	en->max_health = en->health;
 	en->oxygen = get_max_oxygen();
@@ -2041,7 +2053,7 @@ int entry(int argc, char **argv) {
 	// sprite setup
 	{
 		sprites[0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/missing_tex.png"), get_heap_allocator()) };
-		sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
+		// sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
 		sprites[SPRITE_tree0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree0.png"), get_heap_allocator()) };
 		sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree_beeg.png"), get_heap_allocator()) };
 		sprites[SPRITE_rock0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/rock0.png"), get_heap_allocator()) };
@@ -2068,6 +2080,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_tether] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/tether.png"), get_heap_allocator())};
 		sprites[SPRITE_o2_shard] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/o2_shard.png"), get_heap_allocator())};
 		sprites[SPRITE_ice_vein] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/ice_vein.png"), get_heap_allocator())};
+		sprites[SPRITE_player_walk] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/player_walk.png"), get_heap_allocator()), .frames=4};
+		sprites[SPRITE_player_idle] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/player_idle.png"), get_heap_allocator()), .frames=1};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2285,6 +2299,32 @@ int entry(int argc, char **argv) {
 			if (en->is_valid && en->arch == ARCH_player) {
 				world_frame.player = en;
 			}
+		}
+
+		// :player input axis
+		if (is_player_alive()) {
+			Vector2 input_axis = v2(0, 0);
+			if (is_key_down('A')) {
+				input_axis.x -= 1.0;
+			}
+			if (is_key_down('D')) {
+				input_axis.x += 1.0;
+			}
+			if (is_key_down('S')) {
+				input_axis.y -= 1.0;
+			}
+			if (is_key_down('W')) {
+				input_axis.y += 1.0;
+			}
+			input_axis = v2_normalize(input_axis);
+			Entity* player = get_player();
+			if (input_axis.x != 0) {
+				player->last_move_dir.x = extract_sign(input_axis.x);
+			}
+			if (input_axis.y != 0) {
+				player->last_move_dir.y = extract_sign(input_axis.y);
+			}
+			player->frame.input_axis = input_axis;
 		}
 
 		// :frame update
@@ -3080,39 +3120,53 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// render player
-		if (is_player_alive())
-		{
+		// :player integrate (todo - move into physics)
+		player->pos = v2_add(player->pos, v2_mulf(player->frame.input_axis, 70.0 * delta_t));
+
+		// render :player
+		if (is_player_alive()) {
 			Entity* en = get_player();
-			Sprite* sprite = get_sprite(en->sprite_id);
+
+			en->frame.functional_sprite_id = SPRITE_player_idle;
+
+			if (en->frame.input_axis.x != 0 || en->frame.input_axis.y != 0) {
+				en->frame.functional_sprite_id = SPRITE_player_walk;
+			}
+
+			if (en->frame.functional_sprite_id != en->last_frame.functional_sprite_id) {
+				en->anim_index = 0;
+				en->time_til_next_frame = 0;
+			}
+
+			Sprite* sprite = get_sprite(en->frame.functional_sprite_id);
+
+			if (has_reached_end_time(en->time_til_next_frame)) {
+				en->anim_index += 1;
+				if (en->anim_index >= sprite->frames) {
+					en->anim_index = 0;
+				}
+				en->time_til_next_frame = now() + 0.1;
+			}
+
+			Vector2i size = v2i(sprite->image->width / sprite->frames, sprite->image->height);
+
 			Matrix4 xform = m4_scalar(1.0);
 			xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));
 			xform         = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
-			xform         = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, 0.0, 0));
+			if (en->last_move_dir.x == -1) {
+				xform = m4_scale(xform, v3(-1, 1, 1)); // flip if moving left
+			}
+			xform         = m4_translate(xform, v3(size.x * -0.5, 0.0, 0));
 
 			Vector4 col = COLOR_WHITE;
-			draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
-		}
+			Draw_Quad* quad = draw_image_xform(sprite->image, xform, v2(size.x, size.y), col);
 
-		// player movement
-		if (is_player_alive())
-		{
-			Vector2 input_axis = v2(0, 0);
-			if (is_key_down('A')) {
-				input_axis.x -= 1.0;
-			}
-			if (is_key_down('D')) {
-				input_axis.x += 1.0;
-			}
-			if (is_key_down('S')) {
-				input_axis.y -= 1.0;
-			}
-			if (is_key_down('W')) {
-				input_axis.y += 1.0;
-			}
-			input_axis = v2_normalize(input_axis);
-			Entity* player = get_player();
-			player->pos = v2_add(player->pos, v2_mulf(input_axis, 70.0 * delta_t));
+			u32 anim_sheet_pos_x = en->anim_index * size.x;
+			u32 anim_sheet_pos_y = 0;
+			quad->uv.x1 = (float32)(anim_sheet_pos_x)/(float32)sprite->image->width;
+			quad->uv.y1 = (float32)(anim_sheet_pos_y)/(float32)sprite->image->height;
+			quad->uv.x2 = (float32)(anim_sheet_pos_x+size.x) /(float32)sprite->image->width;
+			quad->uv.y2 = (float32)(anim_sheet_pos_y+size.y)/(float32)sprite->image->height;
 		}
 
 		particle_update();

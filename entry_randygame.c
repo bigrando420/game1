@@ -269,6 +269,8 @@ typedef enum SpriteID {
 	SPRITE_ice_vein,
 	SPRITE_player_walk,
 	SPRITE_player_idle,
+	SPRITE_ice_tile,
+	SPRITE_burner_drill,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -335,6 +337,8 @@ typedef enum ArchetypeID {
 	ARCH_tether = 15,
 	ARCH_exp_orb = 16,
 	ARCH_ice_vein = 17,
+	ARCH_tile_resource = 18,
+	ARCH_burner_drill = 19,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -447,6 +451,7 @@ typedef enum BuildingID {
 	BUILDING_research_station,
 	BUILDING_teleporter1,
 	BUILDING_tether,
+	BUILDING_burner_drill,
 	// :building resource
 	BUILDING_MAX,
 } BuildingID;
@@ -523,7 +528,6 @@ WorldResourceData world_resources[] = {
 	{ BIOME_copper_heavy, ARCH_rock, 10 },
 
 	{ BIOME_ice, ARCH_ice_vein, 10 },
-	{ BIOME_ice_heavy, ARCH_ice_vein, 4 },
 	// :spawn_res system
 };
 
@@ -687,6 +691,16 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
+void setup_burner_drill(Entity* en) {
+	en->arch = ARCH_burner_drill;
+	en->sprite_id = SPRITE_burner_drill;
+}
+
+void setup_tile_resource(Entity* en) {
+	en->arch = ARCH_tile_resource;
+	en->sprite_id = SPRITE_ice_tile;
+}
+
 void setup_ice_vein(Entity* en) {
 	en->arch = ARCH_ice_vein;
 	en->sprite_id = SPRITE_ice_vein;
@@ -734,7 +748,7 @@ void setup_flint_depo(Entity* en) {
 	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_pickaxe;
 }
 
@@ -745,7 +759,7 @@ void setup_copper_depo(Entity* en) {
 	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_pickaxe;
 }
 
@@ -799,7 +813,7 @@ void setup_rock(Entity* en) {
 	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 }
 
@@ -811,7 +825,7 @@ void setup_tree(Entity* en) {
 	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_pine_wood, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemAmount){.id=ITEM_pine_wood, .amount=1};
 	en->dmg_type = DMG_axe;
 }
 
@@ -838,6 +852,8 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_oxygenerator: setup_oxygenerator(en); break;
 		case ARCH_tether: setup_tether(en); break;
 		case ARCH_ice_vein: setup_ice_vein(en); break;
+		case ARCH_tile_resource: setup_tile_resource(en); break;
+		case ARCH_burner_drill: setup_burner_drill(en); break;
 		// :arch :setup
 		default: log_error("missing entity_setup case entry"); break;
 	}
@@ -1044,9 +1060,32 @@ void world_setup()
 		// en->pos.y = 30.f;
 	}
 
+	// loop thru all resource biomes
+	{
+		for (int y = 0; y < map.height; y++)
+		for (int x = 0; x < map.width; x++)
+		{
+			BiomeID biome_at_tile = map.tiles[y * map.width + x];
+			Tile tile = local_map_to_world_tile(v2i(x, y));
+
+			switch (biome_at_tile) {
+				case BIOME_ice_heavy: {
+					// spawn ice entity thingo
+					Entity* en = entity_create();
+					setup_tile_resource(en);
+					en->pos = v2_tile_pos_to_world_pos(tile);
+				} break;
+
+				default: break;
+			}
+		}
+	}
+
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
+		player_en->exp_amount = 1000;
+		
 		world->building_unlocks[BUILDING_tether].research_progress = 100;
 
 		world->inventory_items[ITEM_pine_wood].amount = 50;
@@ -2116,6 +2155,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_ice_vein] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/ice_vein.png"), get_heap_allocator())};
 		sprites[SPRITE_player_walk] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/player_walk.png"), get_heap_allocator()), .frames=4};
 		sprites[SPRITE_player_idle] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/player_idle.png"), get_heap_allocator()), .frames=1};
+		sprites[SPRITE_ice_tile] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/ice_tile.png"), get_heap_allocator())};
+		sprites[SPRITE_burner_drill] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/burner_drill.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2138,17 +2179,27 @@ int entry(int argc, char **argv) {
 		archetype_data[ARCH_research_station].pretty_name = STR("Research Station");
 		archetype_data[ARCH_teleporter1].pretty_name = STR("Teleporter");
 		archetype_data[ARCH_tether].pretty_name = STR("Tether");
+		archetype_data[ARCH_burner_drill].pretty_name = STR("Burner Drill");
 	}
 
 	// :building resource setup
 	{
+		buildings[BUILDING_burner_drill] = (BuildingData){
+			.to_build=ARCH_burner_drill,
+			.icon=SPRITE_burner_drill,
+			.description=STR("Place on top of resources to mine."),
+			.exp_cost=500,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
+		};
+
 		buildings[BUILDING_tether] = (BuildingData){
 			.to_build=ARCH_tether,
 			.icon=SPRITE_tether,
 			.description=STR("Extends oxygen range"),
 			.exp_cost=50,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_copper_ingot, 2}, {ITEM_fiber, 10} }
+			.ingredients={ {ITEM_copper_ingot, 2}, {ITEM_fiber, 2} }
 		};
 
 		buildings[BUILDING_furnace] = (BuildingData){

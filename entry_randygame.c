@@ -147,6 +147,7 @@ Range2f quad_to_range(Draw_Quad quad) {
 
 // :col
 // these get inited on startup because we don't have a #run for the hex_to_rgba(0x2a2d3aff) lol
+Vector4 col_fire;
 Vector4 col_select;
 Vector4 color_0;
 Vector4 col_oxygen;
@@ -159,7 +160,7 @@ float o2_fuel_length = 30.f;
 Vector2 tether_connection_offset = {0, 4};
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
-float selection_reach_radius = 20.0f;
+float selection_reach_radius = 30.0f;
 float tether_connection_radius = 50.0;
 float o2_full_tank_deplete_length = 16.0f; // #volatile length of oxygen riser sfx
 float oxygen_regen_tick_length = 0.01;
@@ -425,6 +426,10 @@ typedef struct Entity {
 	Vector2i last_move_dir;
 	float64 next_hit_end_time;
 	float radius;
+	bool interactable_entity;
+	int last_fuel_max;
+	int current_fuel;
+	bool offset_based_on_tile_height;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -476,7 +481,7 @@ typedef enum UXState {
 	UX_workbench,
 	UX_research,
 	UX_respawn,
-	UX_oxygenerator,
+	UX_entity_interaction,
 	// :ux
 	UX_MAX,
 } UXState;
@@ -714,6 +719,7 @@ void setup_burner_drill(Entity* en) {
 	en->tile_size = v2i(2, 2);
 	en->sprite_id = SPRITE_burner_drill;
 	en->radius = tile_width * 4;
+	en->interactable_entity = true;
 }
 
 void setup_tile_resource(Entity* en) {
@@ -748,6 +754,7 @@ void setup_oxygenerator(Entity* en) {
 	en->arch = ARCH_oxygenerator;
 	en->sprite_id = SPRITE_oxygenerator;
 	en->is_oxygen_tether = true;
+	en->interactable_entity = true;
 }
 
 void setup_grass(Entity* en) {
@@ -821,6 +828,7 @@ void setup_research_station(Entity* en) {
 	en->tile_size = v2i(2, 1);
 	en->pretty_name = STR("Research Station");
 	en->sprite_id = SPRITE_research_station;
+	en->interactable_entity = true;
 }
 
 void setup_player(Entity* en) {
@@ -843,6 +851,8 @@ void setup_rock(Entity* en) {
 
 void setup_tree(Entity* en) {
 	en->arch = ARCH_tree;
+	en->tile_size = v2i(2, 2);
+	en->offset_based_on_tile_height = true;
 	en->sprite_id = SPRITE_tree1;
 	// en->sprite_id = SPRITE_tree1;
 	en->health = tree_health;
@@ -1007,6 +1017,22 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+Vector2 get_offset_for_rendering(Entity* en) {
+	Sprite* sprite = get_sprite(en->sprite_id);
+
+	Vector2 offset = {0};
+	offset.x -= get_sprite_size(sprite).x * 0.5;
+
+	if (en->offset_based_on_tile_height) {
+		offset.y -= en->tile_size.y * tile_width * 0.5;
+	} else {
+		offset.y -= get_sprite_size(sprite).y * 0.5;
+	}
+
+	return offset;
+}
+
+
 void do_entity_drops(Entity* en) {
 	ItemID *drops;
 	// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
@@ -1168,6 +1194,7 @@ void world_setup()
 		world->building_unlocks[BUILDING_tether].research_progress = 100;
 
 		world->inventory_items[ITEM_pine_wood].amount = 50;
+		world->inventory_items[ITEM_coal].amount = 50;
 		world->inventory_items[ITEM_o2_shard].amount = 50;
 		world->inventory_items[ITEM_rock].amount = 1000;
 		world->inventory_items[ITEM_exp].amount = 100;
@@ -2225,6 +2252,7 @@ int entry(int argc, char **argv) {
 	#endif
 
 	// :col
+	col_fire = hex_to_rgba(0xf66144ff);
 	col_exp = hex_to_rgba(0x7bd47aff);
 	col_select = col_exp;
 	color_0 = hex_to_rgba(0x2a2d3aff);
@@ -2298,7 +2326,7 @@ int entry(int argc, char **argv) {
 		buildings[BUILDING_burner_drill] = (BuildingData){
 			.to_build=ARCH_burner_drill,
 			.icon=SPRITE_burner_drill,
-			.description=STR("Place on top of resources to mine."),
+			.description=STR("Destroys things in a 4 block radius"),
 			.exp_cost=500,
 			.ingredients_count=2,
 			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
@@ -2565,8 +2593,7 @@ int entry(int argc, char **argv) {
 		int mouse_tile_x = world_pos_to_tile_pos(mouse_pos_world.x);
 		int mouse_tile_y = world_pos_to_tile_pos(mouse_pos_world.y);
 
-		if (world->ux_state == UX_oxygenerator) {
-			world_frame.hover_consumed = true;
+		if (world->ux_state == UX_entity_interaction) {
 			world_frame.show_inventory = true;
 		}
 
@@ -2660,6 +2687,10 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		if (world->interacting_with_entity && world->ux_state == 0) {
+			world->interacting_with_entity = 0;
+		}
+
 		// select entity
 		if (!world_frame.hover_consumed)
 		{
@@ -2670,11 +2701,13 @@ int entry(int argc, char **argv) {
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
 				bool has_interaction = en->destroyable_world_item
-					|| en->workbench_thing
-					|| en->arch == ARCH_research_station
-					|| en->arch == ARCH_oxygenerator
+					|| en->interactable_entity
 					|| en->right_click_remove;
 				// add extra :interact cases here ^^
+
+				if (en->interactable_entity && world->interacting_with_entity == en) {
+					continue;
+				}
 
 				float dist_to_player = v2_dist(en->pos, get_player()->pos);
 				if (en->is_valid && has_interaction && dist_to_player < selection_reach_radius) {
@@ -2731,35 +2764,53 @@ int entry(int argc, char **argv) {
 
 				// :burner update
 				if (en->arch == ARCH_burner_drill) {
-					if (en->next_hit_end_time == 0) {
-						en->next_hit_end_time = now() + 1.f;
-					}
 
-					if (has_reached_end_time(en->next_hit_end_time)) {
-						en->next_hit_end_time = 0;
+					// fuel processing
+					if (en->current_fuel <= 0) {
+						// attempt fuel consume
+						if (en->input0.id) {
+							en->last_fuel_max = 20;
+							en->current_fuel = 20;
 
-						// get all entities in radius
-						bool did_hit_something = false;
-						for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
-							Entity* against = &world->entities[j];
-							if (against->destroyable_world_item && v2_dist(en->pos, against->pos) < en->radius) {
-								did_hit_something = true;
-
-								against->white_flash_current_alpha = 1.0;
-								particle_emit(against->pos, PFX_hit);
-								against->health -= 1;
-
-								play_sound_at_pos("event:/hit_generic", against->pos);
-
-								if (against->health <= 0) {
-									do_entity_drops(against);
-									entity_destroy(against);
-								}
+							en->input0.amount -= 1;
+							if (en->input0.amount <= 0) {
+								en->input0 = (ItemAmount){0};
 							}
 						}
+					}
 
-						if (did_hit_something) {
-							camera_shake(0.1);
+					// hit timer processing
+					if (en->current_fuel > 0) {
+						if (en->next_hit_end_time == 0) {
+							en->next_hit_end_time = now() + 1.f;
+						}
+						if (has_reached_end_time(en->next_hit_end_time)) {
+							en->next_hit_end_time = 0;
+
+							// get all entities in radius
+							bool did_hit_something = false;
+							for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+								Entity* against = &world->entities[j];
+								if (against->destroyable_world_item && v2_dist(en->pos, against->pos) < en->radius) {
+									did_hit_something = true;
+									en->current_fuel -= 1;
+
+									against->white_flash_current_alpha = 1.0;
+									particle_emit(against->pos, PFX_hit);
+									against->health -= 1;
+
+									play_sound_at_pos("event:/hit_generic", against->pos);
+
+									if (against->health <= 0) {
+										do_entity_drops(against);
+										entity_destroy(against);
+									}
+								}
+							}
+
+							if (did_hit_something) {
+								camera_shake(0.1);
+							}
 						}
 					}
 				}
@@ -2976,7 +3027,9 @@ int entry(int argc, char **argv) {
 				}
 				if (has_reached_end_time(player->oxygen_deplete_end_time)) {
 					player->oxygen_deplete_end_time = 0;
+					#if !defined(DISABLE_O2)
 					player->oxygen -= 1;
+					#endif
 				}
 			}
 
@@ -2987,7 +3040,9 @@ int entry(int argc, char **argv) {
 
 				if (is_losing_o2 && !last_app_frame.losing_o2) {
 					// just left tether
+					#if !defined(DISABLE_O2)
 					o2_riser = play_sound("event:/o2_riser");
+					#endif
 				}
 
 				if (!is_losing_o2 && last_app_frame.losing_o2) {
@@ -3022,7 +3077,7 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// :selection stuff
+		// :selection :interact stuff
 		if (is_player_alive())
 		{
 			Entity* selected_en = world_frame.selected_entity;
@@ -3100,11 +3155,11 @@ int entry(int argc, char **argv) {
 				}
 			}
 
-			// interact oxygenerator
-			if (selected_en && selected_en->arch == ARCH_oxygenerator) {
+			// generic interact entity
+			if (selected_en && world->interacting_with_entity != selected_en && selected_en->interactable_entity) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-					world->ux_state = UX_oxygenerator;
+					world->ux_state = UX_entity_interaction;
 					world->interacting_with_entity = selected_en;
 				}
 			}
@@ -3152,13 +3207,9 @@ int entry(int argc, char **argv) {
 							xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
 						}
 
-						// all entities have a center center position
+						// all entities basically have a center center position
 						// that way the ->pos is very easily used in other areas intuitively.
-						Vector2 draw_pos = en->pos;
-
-						// center the sprite
-						draw_pos.x -= get_sprite_size(sprite).x * 0.5;
-						draw_pos.y -= get_sprite_size(sprite).y * 0.5;
+						Vector2 draw_pos = v2_add(en->pos, get_offset_for_rendering(en));
 						xform = m4_translate(xform, v3(draw_pos.x, draw_pos.y, 0));
 
 						Vector4 col = COLOR_WHITE;
@@ -3172,6 +3223,11 @@ int entry(int argc, char **argv) {
 
 						Draw_Quad* q = draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
 						set_col_override(q, v4(1, 1, 1, en->white_flash_current_alpha));
+
+						// :burner fuel error flash
+						if (en->arch == ARCH_burner_drill && en->last_fuel_max && en->current_fuel == 0) {
+							set_col_override(q, v4(1, 0, 0, 0.8 * sin_breathe(os_get_elapsed_seconds(), 6.f)));
+						}
 
 						// debug pos 
 						// draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);
@@ -3192,12 +3248,14 @@ int entry(int argc, char **argv) {
 					draw_rect(draw_pos, v2(size.x, size.y), col_oxygen);
 				}
 
-				// health bar
+				// :health bar
 				if (en->health && en->health < en->max_health) {
 					Vector2 size = {6, 1};
 					Vector2 draw_pos = en->pos;
 					draw_pos.x -= size.x * 0.5;
-					draw_pos.y -= 6.0;
+
+					draw_pos.y += get_offset_for_rendering(en).y;
+					draw_pos.y -= 2;
 
 					draw_rect(draw_pos, size, COLOR_BLACK);
 
@@ -3244,15 +3302,18 @@ int entry(int argc, char **argv) {
 		}
 
 		// in-game :ui
-		{
+		if (world->ux_state == UX_entity_interaction && world->interacting_with_entity) {
+
 			// randy: I'm trying out making this UI be more diagetic and in the world.
 			// that way we can just communicate the inputs/outputs and have the bare minimum info.
 			// Instead of popping up a big ugly UI box.
 			// I think it's roughly the same amount of work to do it this way, if proven effective.
 			// :oxygenerator ui
-			if (world->ux_state == UX_oxygenerator && world->interacting_with_entity) {
 
-				Entity* en = world->interacting_with_entity;
+			Entity* en = world->interacting_with_entity;
+
+			if (en->arch == ARCH_oxygenerator) {
+
 				float x0 = en->pos.x;
 				float y0 = en->pos.y;
 				y0 += 6.f;
@@ -3322,6 +3383,106 @@ int entry(int argc, char **argv) {
 				} else {
 					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
 					set_col_override(quad, v4(0,0,0, 0.8));
+				}
+
+				if (do_tooltip) {
+					item_tooltip(en->input0);
+				}
+			}
+
+			// :burner ux
+			if (en->arch == ARCH_burner_drill) {
+
+				ItemID desired_item = ITEM_coal;
+
+				Entity* en = world->interacting_with_entity;
+				float x0 = en->pos.x;
+				float y0 = en->pos.y;
+				y0 += 10.f;
+
+				Vector2 size = v2(10, 10);
+				x0 -= size.x * 0.5;
+
+				bool do_tooltip = false;
+				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
+				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+					
+					// interact with the slot
+					{
+						if (world->mouse_cursor_item.id) {
+							if (en->input0.id) {
+								if (en->input0.id == world->mouse_cursor_item.id) {
+									// attempt stack
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										en->input0.amount += world->mouse_cursor_item.amount;
+										world->mouse_cursor_item = (ItemAmount){0};
+									}
+								} else {
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										if (world->mouse_cursor_item.id == desired_item) {
+											// swap
+											ItemAmount temp = world->mouse_cursor_item;
+											world->mouse_cursor_item = en->input0;
+											en->input0 = temp;
+										} else {
+											play_sound("event:/error");
+										}
+									}
+								}
+							} else {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									if (world->mouse_cursor_item.id == desired_item) {
+										// place inside
+										en->input0 = world->mouse_cursor_item;
+										world->mouse_cursor_item = (ItemAmount){0};
+									} else {
+										play_sound("event:/error");
+									}
+								}
+							}
+						} else {
+							if (en->input0.id) {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									// take into hand
+									world->mouse_cursor_item = en->input0;
+									en->input0 = (ItemAmount){0};
+								}
+
+								do_tooltip = true;
+							}
+						}
+					}
+				}
+
+				draw_rect(rect.min, size, COLOR_GRAY);
+
+				if (en->input0.id) {
+					draw_item_amount_in_rect(en->input0, rect);
+				} else {
+					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
+
+					if (en->current_fuel == 0) {
+						set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
+					} else {
+						set_col_override(quad, v4(0,0,0, 0.8));
+					}
+				}
+
+				// fuel bar
+				{
+					x0 += size.x + 1.f;
+
+					Vector2 bar_size = v2(2, size.y);
+
+					draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+
+					float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
+
+					draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
 				}
 
 				if (do_tooltip) {

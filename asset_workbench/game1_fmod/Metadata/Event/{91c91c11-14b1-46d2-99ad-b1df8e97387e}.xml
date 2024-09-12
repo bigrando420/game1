@@ -5,7 +5,7 @@
 			<value>hit_generic</value>
 		</property>
 		<property name="outputFormat">
-			<value>1</value>
+			<value>2</value>
 		</property>
 		<relationship name="folder">
 			<destination>{113aaa80-9c9e-4fae-8951-5f780b6e9f27}</destination>
@@ -117,6 +117,7 @@
 		<relationship name="effects">
 			<destination>{87d11cbf-1010-4616-8b42-00540a1eab81}</destination>
 			<destination>{f22d8c81-edf9-48b6-a703-27ba090303b6}</destination>
+			<destination>{fe44206e-e269-4800-b450-ec66bbb061a4}</destination>
 		</relationship>
 	</object>
 	<object class="MixerBusPanner" id="{e112ff3c-5187-482a-8656-98356805860b}" />
@@ -131,6 +132,17 @@
 	<object class="ThreeEQEffect" id="{f22d8c81-edf9-48b6-a703-27ba090303b6}">
 		<property name="midGain">
 			<value>-9</value>
+		</property>
+	</object>
+	<object class="SpatialiserEffect" id="{fe44206e-e269-4800-b450-ec66bbb061a4}">
+		<property name="minimumDistance">
+			<value>20</value>
+		</property>
+		<property name="maximumDistance">
+			<value>80</value>
+		</property>
+		<property name="overrideRange">
+			<value>true</value>
 		</property>
 	</object>
 	<object class="MixerBusFader" id="{c870e552-efbe-4b33-b289-552ba65522c5}" />

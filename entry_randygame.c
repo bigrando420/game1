@@ -742,7 +742,6 @@ void setup_tether(Entity* en) {
 	en->pretty_name = STR("Tether");
 	en->sprite_id = SPRITE_tether;
 	en->is_oxygen_tether = true;
-	en->right_click_remove = true;
 }
 
 void setup_oxygenerator(Entity* en) {
@@ -808,7 +807,6 @@ void setup_furnace(Entity* en) {
 	en->pretty_name = STR("Furnace");
 	en->sprite_id = SPRITE_furnace;
 	en->workbench_thing = true;
-	en->right_click_remove = true;
 }
 
 void setup_workbench(Entity* en) {
@@ -816,7 +814,6 @@ void setup_workbench(Entity* en) {
 	en->pretty_name = STR("Workbench");
 	en->sprite_id = SPRITE_workbench;
 	en->workbench_thing = true;
-	en->right_click_remove = true;
 }
 
 void setup_research_station(Entity* en) {
@@ -824,7 +821,6 @@ void setup_research_station(Entity* en) {
 	en->tile_size = v2i(2, 1);
 	en->pretty_name = STR("Research Station");
 	en->sprite_id = SPRITE_research_station;
-	en->right_click_remove = true;
 }
 
 void setup_player(Entity* en) {
@@ -1814,6 +1810,7 @@ void do_ui_stuff() {
 				Entity* en = entity_create();
 				entity_setup(en, arch_id);
 				en->pos = pos;
+				en->right_click_remove = true;
 				world->ux_state = 0;
 			}
 		}
@@ -2741,23 +2738,28 @@ int entry(int argc, char **argv) {
 					if (has_reached_end_time(en->next_hit_end_time)) {
 						en->next_hit_end_time = 0;
 
-						play_sound("event:/hit_generic");
-						camera_shake(0.1);
-
 						// get all entities in radius
+						bool did_hit_something = false;
 						for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
 							Entity* against = &world->entities[j];
 							if (against->destroyable_world_item && v2_dist(en->pos, against->pos) < en->radius) {
+								did_hit_something = true;
 
 								against->white_flash_current_alpha = 1.0;
 								particle_emit(against->pos, PFX_hit);
 								against->health -= 1;
+
+								play_sound_at_pos("event:/hit_generic", against->pos);
 
 								if (against->health <= 0) {
 									do_entity_drops(against);
 									entity_destroy(against);
 								}
 							}
+						}
+
+						if (did_hit_something) {
+							camera_shake(0.1);
 						}
 					}
 				}
@@ -2795,7 +2797,7 @@ int entry(int argc, char **argv) {
 
 					if (has_reached_end_time(en->fuel_expire_end_time)) {
 						if (en->fuel_expire_end_time != 0 && !en->input0.id) {
-							play_sound("event:/shutdown");
+							play_sound_at_pos("event:/shutdown", en->pos);
 						}
 						en->fuel_expire_end_time = 0;
 					}
@@ -3030,7 +3032,7 @@ int entry(int argc, char **argv) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-					play_sound("event:/hit_generic");
+					play_sound_at_pos("event:/hit_generic", selected_en->pos);
 					selected_en->white_flash_current_alpha = 1.0;
 					camera_shake(0.1);
 					particle_emit(selected_en->pos, PFX_hit);

@@ -6,8 +6,6 @@
 #include "config.c"
 #include "easings.c"
 
-#include "fmod_sound.c"
-
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
 inline int extract_sign(float a) {
@@ -665,6 +663,9 @@ WorldFrame world_frame;
 Entity* get_player() {
 	return world_frame.player;
 }
+
+// I <3 C
+#include "fmod_sound.c"
 
 bool is_player_alive() {
 	return get_player()->health > 0;

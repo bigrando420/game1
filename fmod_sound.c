@@ -6,7 +6,7 @@ FMOD_STUDIO_SYSTEM* fmod_studio_system = 0;
 FMOD_STUDIO_BANK* fmod_studio_bank = 0;
 FMOD_STUDIO_BANK* fmod_studio_strings_bank = 0;
 
-FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
+FMOD_STUDIO_EVENTINSTANCE* play_sound_at_pos(char* path, Vector2 pos) {
   FMOD_STUDIO_EVENTDESCRIPTION* event_desc;
   FMOD_RESULT ok = FMOD_Studio_System_GetEvent(fmod_studio_system, path, &event_desc);
   assert(ok == FMOD_OK, "error playing - %s - %s", path, FMOD_ErrorString(ok));
@@ -22,11 +22,23 @@ FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
 	ok = FMOD_Studio_EventInstance_Start(instance);
   assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
 
+  // set pos
+	FMOD_3D_ATTRIBUTES attributes;
+	attributes.position = (FMOD_VECTOR){pos.x, pos.y, 0};
+	attributes.forward = (FMOD_VECTOR){0, 0, 1};
+	attributes.up = (FMOD_VECTOR){0, 1, 0};
+	FMOD_Studio_EventInstance_Set3DAttributes(instance, &attributes);
+
 	// this auto-releases when event is finished
 	ok = FMOD_Studio_EventInstance_Release(instance);
   assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
 
-	return instance;
+  return instance;
+}
+
+
+FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
+	return play_sound_at_pos(path, v2(99999, 99999));
 }
 
 void stop_sound(FMOD_STUDIO_EVENTINSTANCE* instance) {
@@ -56,6 +68,16 @@ void fmod_shutdown() {
 }
 
 void fmod_update() {
-  FMOD_RESULT ok = FMOD_Studio_System_Update(fmod_studio_system);
+  FMOD_RESULT ok;
+
+  // update listener pos
+  FMOD_3D_ATTRIBUTES attributes;
+	attributes.position = (FMOD_VECTOR){get_player()->pos.x, get_player()->pos.y, 0};
+	attributes.forward = (FMOD_VECTOR){0, 0, 1};
+	attributes.up = (FMOD_VECTOR){0, 1, 0};
+	ok = FMOD_Studio_System_SetListenerAttributes(fmod_studio_system, 0, &attributes, 0);
+  assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
+
+  ok = FMOD_Studio_System_Update(fmod_studio_system);
   assert(ok == FMOD_OK, "%s", FMOD_ErrorString(ok));
 }

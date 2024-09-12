@@ -8,6 +8,9 @@
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
+// got this from ryan fleury's codebase, https://www.rfleury.com/ (originally called DeferLoop)
+#define defer_scope(start, end) for(int _i_ = ((start), 0); _i_ == 0; _i_ += 1, (end))
+
 inline int extract_sign(float a) {
 	return a == 0 ? 0 : (a < 0 ? -1 : 1);
 }
@@ -271,6 +274,7 @@ typedef enum SpriteID {
 	SPRITE_ice_tile,
 	SPRITE_burner_drill,
 	SPRITE_longboi_test,
+	SPRITE_coal_depo,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -340,6 +344,7 @@ typedef enum ArchetypeID {
 	ARCH_tile_resource = 18,
 	ARCH_burner_drill = 19,
 	ARCH_longboi_test = 20,
+	ARCH_coal_depo = 21,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -467,6 +472,7 @@ typedef struct BuildingData {
 	string description;
 	ItemAmount ingredients[8];
 	int ingredients_count;
+	bool disable_building;
 } BuildingData;
 BuildingData buildings[BUILDING_MAX];
 BuildingData get_building_data(BuildingID id) {
@@ -525,11 +531,12 @@ WorldResourceData world_resources[] = {
 	{ BIOME_forest, ARCH_grass, 3 },
 
 	{ BIOME_barren, ARCH_rock, 10 },
-	{ BIOME_barren, ARCH_flint_depo, 10 },
+	{ BIOME_barren, ARCH_coal_depo, 20 },
 
 	{ BIOME_copper, ARCH_copper_depo, 10 },
 
 	{ BIOME_copper_heavy, ARCH_copper_depo, 4 },
+	{ BIOME_copper_heavy, ARCH_flint_depo, 20 },
 	{ BIOME_copper_heavy, ARCH_rock, 10 },
 
 	{ BIOME_ice, ARCH_ice_vein, 10 },
@@ -706,6 +713,18 @@ void entity_destroy(Entity* entity) {
 
 // :setup things
 
+void setup_coal_depo(Entity* en) {
+	en->arch = ARCH_coal_depo;
+	en->tile_size = v2i(2, 1);
+	en->sprite_id = SPRITE_coal_depo;
+	en->health = 10;
+	en->max_health = en->health;
+	en->destroyable_world_item = true;
+	en->drops_count = 1;
+	en->drops[0] = (ItemAmount){.id=ITEM_coal, .amount=1};
+	en->dmg_type = DMG_pickaxe;
+}
+
 void setup_longboi_test(Entity* en) {
 	en->arch = ARCH_longboi_test;
 	en->pretty_name = STR("asdf");
@@ -715,7 +734,7 @@ void setup_longboi_test(Entity* en) {
 
 void setup_burner_drill(Entity* en) {
 	en->arch = ARCH_burner_drill;
-	en->pretty_name = STR("Burner Drill");
+	en->pretty_name = STR("Thumper");
 	en->tile_size = v2i(2, 2);
 	en->sprite_id = SPRITE_burner_drill;
 	en->radius = tile_width * 4;
@@ -825,7 +844,7 @@ void setup_workbench(Entity* en) {
 
 void setup_research_station(Entity* en) {
 	en->arch = ARCH_research_station;
-	en->tile_size = v2i(2, 1);
+	en->tile_size = v2i(2, 2);
 	en->pretty_name = STR("Research Station");
 	en->sprite_id = SPRITE_research_station;
 	en->interactable_entity = true;
@@ -896,6 +915,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_tile_resource: setup_tile_resource(en); break;
 		case ARCH_burner_drill: setup_burner_drill(en); break;
 		case ARCH_longboi_test: setup_longboi_test(en); break;
+		case ARCH_coal_depo: setup_coal_depo(en); break;
 		// :setup
 	}
 }
@@ -1772,76 +1792,73 @@ void do_ui_stuff() {
 
 	// :placement mode
 	// TODO - alpha animation for place mode
-	if (world->ux_state == UX_place_mode) {
-		// TODO - put this into macro :)
-		set_world_space();
+	if (world->ux_state == UX_place_mode)
+	defer_scope(set_world_space(), set_screen_space())
+	{
+		Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
+		BuildingData building = get_building_data(world->placing_building);
+		Sprite* icon = get_sprite(building.icon);
+
+		ArchetypeID arch_id = building.to_build;
+
+		Vector2 pos = mouse_pos_world;
+		Vector2i tile_size = get_archetype_data(arch_id).tile_size;
 		{
-			Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
-			BuildingData building = get_building_data(world->placing_building);
-			Sprite* icon = get_sprite(building.icon);
-
-			ArchetypeID arch_id = building.to_build;
-
-			Vector2 pos = mouse_pos_world;
-			Vector2i tile_size = get_archetype_data(arch_id).tile_size;
-			{
-				if (tile_size.x % 2 == 0) {
-					pos.x = roundf(pos.x / (float)tile_width) * tile_width;
-				} else {
-					pos.x = floorf(pos.x / (float)tile_width) * tile_width;
-					pos.x += tile_width * 0.5;
-				}
-
-				if (tile_size.y % 2 == 0) {
-					pos.y = roundf(pos.y / (float)tile_width) * tile_width;
-				} else {
-					pos.y = floorf(pos.y / (float)tile_width) * tile_width;
-					pos.y += tile_width * 0.5;
-				}
+			if (tile_size.x % 2 == 0) {
+				pos.x = roundf(pos.x / (float)tile_width) * tile_width;
+			} else {
+				pos.x = floorf(pos.x / (float)tile_width) * tile_width;
+				pos.x += tile_width * 0.5;
 			}
 
-			// range preview
-			if (arch_id == ARCH_burner_drill)
-			{
-				float radius = get_archetype_data(arch_id).radius;
-				// #polish - make this an outline, copy custom shader example
-				draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.1));
+			if (tile_size.y % 2 == 0) {
+				pos.y = roundf(pos.y / (float)tile_width) * tile_width;
+			} else {
+				pos.y = floorf(pos.y / (float)tile_width) * tile_width;
+				pos.y += tile_width * 0.5;
 			}
+		}
 
-			// draw preview
-			{
-				Matrix4 xform = m4_identity;
-				Vector2 sprite_size = get_sprite_size(icon);
-				xform = m4_translate(xform, v3(pos.x, pos.y, 0));
-				xform = m4_translate(xform, v3(sprite_size.x * -0.5, sprite_size.y * -0.5, 0));
+		// range preview
+		if (arch_id == ARCH_burner_drill)
+		{
+			float radius = get_archetype_data(arch_id).radius;
+			// #polish - make this an outline, copy custom shader example
+			draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.1));
+		}
 
-				draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
-			}
+		// draw preview
+		{
+			Matrix4 xform = m4_identity;
+			Vector2 sprite_size = get_sprite_size(icon);
+			xform = m4_translate(xform, v3(pos.x, pos.y, 0));
+			xform = m4_translate(xform, v3(sprite_size.x * -0.5, sprite_size.y * -0.5, 0));
 
-			// :tether connection preview
-			if (arch_id == ARCH_tether)
-			{
-				for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
-					Entity* tether = &world->entities[i];
-					if (tether->is_valid && tether->last_frame.is_powered) {
-						if (v2_dist(tether->pos, pos) < tether_connection_radius) {
-							draw_line(v2_add(tether->pos, tether_connection_offset), v2_add(pos, tether_connection_offset), 1.0f, col_tether);
-							break;
-						}
+			draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
+		}
+
+		// :tether connection preview
+		if (arch_id == ARCH_tether)
+		{
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* tether = &world->entities[i];
+				if (tether->is_valid && tether->last_frame.is_powered) {
+					if (v2_dist(tether->pos, pos) < tether_connection_radius) {
+						draw_line(v2_add(tether->pos, tether_connection_offset), v2_add(pos, tether_connection_offset), 1.0f, col_tether);
+						break;
 					}
 				}
 			}
-
-			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-				Entity* en = entity_create();
-				entity_setup(en, arch_id);
-				en->pos = pos;
-				en->right_click_remove = true;
-				world->ux_state = 0;
-			}
 		}
-		set_screen_space();
+
+		if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+			consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+			Entity* en = entity_create();
+			entity_setup(en, arch_id);
+			en->pos = pos;
+			en->right_click_remove = true;
+			world->ux_state = 0;
+		}
 	}
 
 	// :workbench ui
@@ -2093,6 +2110,7 @@ void do_ui_stuff() {
 
 		float x0 = screen_width * 0.5 - pane_size.x * 0.5;
 		float y0 = screen_height * 0.5 - pane_size.y * 0.5;
+		float x_left = x0;
 
 		draw_rect(v2(x0, y0), pane_size, bg_col);
 
@@ -2101,12 +2119,15 @@ void do_ui_stuff() {
 		float icon_length = 10.f;
 		y0 -= icon_length;
 		BuildingID selected = 0;
+		int count = 0;
 		for (int i = 1; i < BUILDING_MAX; i++) {
 			UnlockState unlock_state = world->building_unlocks[i];
 			BuildingData building_data = get_building_data(i);
-			if (is_fully_unlocked(unlock_state)) {
+			if (building_data.disable_building || is_fully_unlocked(unlock_state)) {
 				continue;
 			}
+
+			count += 1;
 
 			{
 				Range2f box = range2f_make_bottom_left(v2(x0, y0), v2(icon_length, icon_length));
@@ -2131,8 +2152,9 @@ void do_ui_stuff() {
 			x0 += icon_length;
 
 			// scuffed row advance
-			if (i % 5 == 0) {
+			if (count % 6 == 0) {
 				y0 -= icon_length;
+				x0 = x_left;
 			}
 		}
 
@@ -2210,7 +2232,9 @@ void do_ui_stuff() {
 	}
 
 	// :cursor item drawing
-	if (world->mouse_cursor_item.id) {
+	if (world->mouse_cursor_item.id)
+	defer_scope(push_z_layer(layer_ui + 2), pop_z_layer())
+	{
 		// Range2f rect = range2f_make_center_center(get_mouse_pos_in_world_space(), v2(10, 10));
 
 		Sprite* sprite = get_sprite(get_sprite_id_from_item(world->mouse_cursor_item.id));
@@ -2295,6 +2319,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_ice_tile] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/ice_tile.png"), get_heap_allocator())};
 		sprites[SPRITE_burner_drill] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/burner_drill.png"), get_heap_allocator())};
 		sprites[SPRITE_longboi_test] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/longboi_test.png"), get_heap_allocator())};
+		sprites[SPRITE_coal_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/coal_depo.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2315,6 +2340,7 @@ int entry(int argc, char **argv) {
 	// :building resource setup
 	{
 		buildings[BUILDING_longboi_test] = (BuildingData){
+			.disable_building=true,
 			.to_build=ARCH_longboi_test,
 			.icon=SPRITE_longboi_test,
 			.description=STR("Place on top of resources to mine."),
@@ -2326,8 +2352,8 @@ int entry(int argc, char **argv) {
 		buildings[BUILDING_burner_drill] = (BuildingData){
 			.to_build=ARCH_burner_drill,
 			.icon=SPRITE_burner_drill,
-			.description=STR("Destroys things in a 4 block radius"),
-			.exp_cost=500,
+			.description=STR("Burns coal to hit things"),
+			.exp_cost=400,
 			.ingredients_count=2,
 			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
 		};
@@ -2338,7 +2364,7 @@ int entry(int argc, char **argv) {
 			.description=STR("Extends oxygen range"),
 			.exp_cost=50,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_copper_ingot, 2}, {ITEM_fiber, 2} }
+			.ingredients={ {ITEM_copper_ingot, 1}, {ITEM_fiber, 4} }
 		};
 
 		buildings[BUILDING_furnace] = (BuildingData){
@@ -2369,9 +2395,9 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_teleporter1,
 			.icon=SPRITE_teleporter1,
 			.description=STR("A gateway to the next world."),
-			.exp_cost=1000,
+			.exp_cost=9999,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 100}, {ITEM_rock, 100} }
+			.ingredients={ {ITEM_pine_wood, 1000}, {ITEM_rock, 1000} }
 		};
 	}
 
@@ -2523,6 +2549,12 @@ int entry(int argc, char **argv) {
 			if (en->is_valid && en->arch == ARCH_player) {
 				world_frame.player = en;
 			}
+		}
+
+		// :input
+		if (is_key_just_pressed(KEY_F11)) {
+			consume_key_just_pressed(KEY_F11);
+			window.fullscreen = true;
 		}
 
 		// :player input axis
@@ -2689,6 +2721,200 @@ int entry(int argc, char **argv) {
 
 		if (world->interacting_with_entity && world->ux_state == 0) {
 			world->interacting_with_entity = 0;
+		}
+
+		// in-game :ui
+		if (world->ux_state == UX_entity_interaction && world->interacting_with_entity) {
+			push_z_layer(layer_ui);
+
+			// randy: I'm trying out making this UI be more diagetic and in the world.
+			// that way we can just communicate the inputs/outputs and have the bare minimum info.
+			// Instead of popping up a big ugly UI box.
+			// I think it's roughly the same amount of work to do it this way, if proven effective.
+			// :oxygenerator ui
+
+			Entity* en = world->interacting_with_entity;
+
+			if (en->arch == ARCH_oxygenerator) {
+
+				float x0 = en->pos.x;
+				float y0 = en->pos.y;
+				y0 += 6.f;
+
+				Vector2 size = v2(10, 10);
+				x0 -= size.x * 0.5;
+
+				bool do_tooltip = false;
+				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
+				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+					world_frame.hover_consumed = true;
+					
+					// interact with the slot
+					{
+						if (world->mouse_cursor_item.id) {
+							if (en->input0.id) {
+								if (en->input0.id == world->mouse_cursor_item.id) {
+									// attempt stack
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										en->input0.amount += world->mouse_cursor_item.amount;
+										world->mouse_cursor_item = (ItemAmount){0};
+									}
+								} else {
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										if (world->mouse_cursor_item.id == ITEM_o2_shard) {
+											// swap
+											ItemAmount temp = world->mouse_cursor_item;
+											world->mouse_cursor_item = en->input0;
+											en->input0 = temp;
+										} else {
+											play_sound("event:/error");
+										}
+									}
+								}
+							} else {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									if (world->mouse_cursor_item.id == ITEM_o2_shard) {
+										// place inside
+										en->input0 = world->mouse_cursor_item;
+										world->mouse_cursor_item = (ItemAmount){0};
+									} else {
+										play_sound("event:/error");
+									}
+								}
+							}
+						} else {
+							if (en->input0.id) {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									// take into hand
+									world->mouse_cursor_item = en->input0;
+									en->input0 = (ItemAmount){0};
+								}
+
+								do_tooltip = true;
+							}
+						}
+					}
+				}
+
+				draw_rect(rect.min, size, COLOR_GRAY);
+
+				if (en->input0.id) {
+					draw_item_amount_in_rect(en->input0, rect);
+				} else {
+					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
+					set_col_override(quad, v4(0,0,0, 0.8));
+				}
+
+				if (do_tooltip) {
+					item_tooltip(en->input0);
+				}
+			}
+
+			// :burner ux
+			if (en->arch == ARCH_burner_drill) {
+
+				ItemID desired_item = ITEM_coal;
+
+				Entity* en = world->interacting_with_entity;
+				float x0 = en->pos.x;
+				float y0 = en->pos.y;
+				y0 += 10.f;
+
+				Vector2 size = v2(10, 10);
+				x0 -= size.x * 0.5;
+
+				bool do_tooltip = false;
+				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
+				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+					
+					// interact with the slot
+					{
+						if (world->mouse_cursor_item.id) {
+							if (en->input0.id) {
+								if (en->input0.id == world->mouse_cursor_item.id) {
+									// attempt stack
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										en->input0.amount += world->mouse_cursor_item.amount;
+										world->mouse_cursor_item = (ItemAmount){0};
+									}
+								} else {
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										if (world->mouse_cursor_item.id == desired_item) {
+											// swap
+											ItemAmount temp = world->mouse_cursor_item;
+											world->mouse_cursor_item = en->input0;
+											en->input0 = temp;
+										} else {
+											play_sound("event:/error");
+										}
+									}
+								}
+							} else {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									if (world->mouse_cursor_item.id == desired_item) {
+										// place inside
+										en->input0 = world->mouse_cursor_item;
+										world->mouse_cursor_item = (ItemAmount){0};
+									} else {
+										play_sound("event:/error");
+									}
+								}
+							}
+						} else {
+							if (en->input0.id) {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									// take into hand
+									world->mouse_cursor_item = en->input0;
+									en->input0 = (ItemAmount){0};
+								}
+
+								do_tooltip = true;
+							}
+						}
+					}
+				}
+
+				draw_rect(rect.min, size, COLOR_GRAY);
+
+				if (en->input0.id) {
+					draw_item_amount_in_rect(en->input0, rect);
+				} else {
+					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
+
+					if (en->current_fuel == 0) {
+						set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
+					} else {
+						set_col_override(quad, v4(0,0,0, 0.8));
+					}
+				}
+
+				// fuel bar
+				{
+					x0 += size.x + 1.f;
+
+					Vector2 bar_size = v2(2, size.y);
+
+					draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+
+					float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
+
+					draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
+				}
+
+				if (do_tooltip) {
+					item_tooltip(en->input0);
+				}
+			}
+
+			pop_z_layer();
 		}
 
 		// select entity
@@ -3297,196 +3523,6 @@ int entry(int argc, char **argv) {
 						xform = m4_translate(xform, v3(-radius, -radius, 0));
 						draw_circle_xform(xform, v2(radius*2, radius*2), COLOR_BLACK);
 					}
-				}
-			}
-		}
-
-		// in-game :ui
-		if (world->ux_state == UX_entity_interaction && world->interacting_with_entity) {
-
-			// randy: I'm trying out making this UI be more diagetic and in the world.
-			// that way we can just communicate the inputs/outputs and have the bare minimum info.
-			// Instead of popping up a big ugly UI box.
-			// I think it's roughly the same amount of work to do it this way, if proven effective.
-			// :oxygenerator ui
-
-			Entity* en = world->interacting_with_entity;
-
-			if (en->arch == ARCH_oxygenerator) {
-
-				float x0 = en->pos.x;
-				float y0 = en->pos.y;
-				y0 += 6.f;
-
-				Vector2 size = v2(10, 10);
-				x0 -= size.x * 0.5;
-
-				bool do_tooltip = false;
-				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
-				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-					
-					// interact with the slot
-					{
-						if (world->mouse_cursor_item.id) {
-							if (en->input0.id) {
-								if (en->input0.id == world->mouse_cursor_item.id) {
-									// attempt stack
-									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-										en->input0.amount += world->mouse_cursor_item.amount;
-										world->mouse_cursor_item = (ItemAmount){0};
-									}
-								} else {
-									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-										if (world->mouse_cursor_item.id == ITEM_o2_shard) {
-											// swap
-											ItemAmount temp = world->mouse_cursor_item;
-											world->mouse_cursor_item = en->input0;
-											en->input0 = temp;
-										} else {
-											play_sound("event:/error");
-										}
-									}
-								}
-							} else {
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									if (world->mouse_cursor_item.id == ITEM_o2_shard) {
-										// place inside
-										en->input0 = world->mouse_cursor_item;
-										world->mouse_cursor_item = (ItemAmount){0};
-									} else {
-										play_sound("event:/error");
-									}
-								}
-							}
-						} else {
-							if (en->input0.id) {
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									// take into hand
-									world->mouse_cursor_item = en->input0;
-									en->input0 = (ItemAmount){0};
-								}
-
-								do_tooltip = true;
-							}
-						}
-					}
-				}
-
-				draw_rect(rect.min, size, COLOR_GRAY);
-
-				if (en->input0.id) {
-					draw_item_amount_in_rect(en->input0, rect);
-				} else {
-					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
-					set_col_override(quad, v4(0,0,0, 0.8));
-				}
-
-				if (do_tooltip) {
-					item_tooltip(en->input0);
-				}
-			}
-
-			// :burner ux
-			if (en->arch == ARCH_burner_drill) {
-
-				ItemID desired_item = ITEM_coal;
-
-				Entity* en = world->interacting_with_entity;
-				float x0 = en->pos.x;
-				float y0 = en->pos.y;
-				y0 += 10.f;
-
-				Vector2 size = v2(10, 10);
-				x0 -= size.x * 0.5;
-
-				bool do_tooltip = false;
-				Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
-				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-					
-					// interact with the slot
-					{
-						if (world->mouse_cursor_item.id) {
-							if (en->input0.id) {
-								if (en->input0.id == world->mouse_cursor_item.id) {
-									// attempt stack
-									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-										en->input0.amount += world->mouse_cursor_item.amount;
-										world->mouse_cursor_item = (ItemAmount){0};
-									}
-								} else {
-									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-										if (world->mouse_cursor_item.id == desired_item) {
-											// swap
-											ItemAmount temp = world->mouse_cursor_item;
-											world->mouse_cursor_item = en->input0;
-											en->input0 = temp;
-										} else {
-											play_sound("event:/error");
-										}
-									}
-								}
-							} else {
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									if (world->mouse_cursor_item.id == desired_item) {
-										// place inside
-										en->input0 = world->mouse_cursor_item;
-										world->mouse_cursor_item = (ItemAmount){0};
-									} else {
-										play_sound("event:/error");
-									}
-								}
-							}
-						} else {
-							if (en->input0.id) {
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									// take into hand
-									world->mouse_cursor_item = en->input0;
-									en->input0 = (ItemAmount){0};
-								}
-
-								do_tooltip = true;
-							}
-						}
-					}
-				}
-
-				draw_rect(rect.min, size, COLOR_GRAY);
-
-				if (en->input0.id) {
-					draw_item_amount_in_rect(en->input0, rect);
-				} else {
-					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
-
-					if (en->current_fuel == 0) {
-						set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
-					} else {
-						set_col_override(quad, v4(0,0,0, 0.8));
-					}
-				}
-
-				// fuel bar
-				{
-					x0 += size.x + 1.f;
-
-					Vector2 bar_size = v2(2, size.y);
-
-					draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
-
-					float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
-
-					draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
-				}
-
-				if (do_tooltip) {
-					item_tooltip(en->input0);
 				}
 			}
 		}

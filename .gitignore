@@ -1,6 +1,8 @@
 
-# I'm excluding this path because it's messy. Lmk if you'd like the fmod project files though.
-asset_workbench/game1_fmod/**
+# fmod cache stuff
+.cache/
+.unsaved/
+.user/
 
 # this path cannot be comitted because of licensing. Raw files from sample packs are used.
 asset_workbench/game1_reaper/**

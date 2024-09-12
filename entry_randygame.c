@@ -425,6 +425,8 @@ typedef struct Entity {
 	int anim_index;
 	float64 time_til_next_frame;
 	Vector2i last_move_dir;
+	float64 next_hit_end_time;
+	float radius;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -599,7 +601,9 @@ void init_biome_maps() {
 	}
 
 	for (BiomeID i = 0; i < BIOME_MAX; i++) {
-		assert(found_biomes[i], "Biome %i is unused", i);
+		if (!found_biomes[i]) {
+			log_warning("Biome %i is unused", i);
+		}
 	}
 }
 
@@ -708,6 +712,7 @@ void setup_burner_drill(Entity* en) {
 	en->pretty_name = STR("Burner Drill");
 	en->tile_size = v2i(2, 2);
 	en->sprite_id = SPRITE_burner_drill;
+	en->radius = tile_width * 4;
 }
 
 void setup_tile_resource(Entity* en) {
@@ -758,6 +763,7 @@ void setup_grass(Entity* en) {
 
 void setup_flint_depo(Entity* en) {
 	en->arch = ARCH_flint_depo;
+	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_flint_depo;
 	en->health = flint_depo_health;
 	en->max_health = en->health;
@@ -797,6 +803,7 @@ void setup_exp_vein(Entity* en) {
 
 void setup_furnace(Entity* en) {
 	en->arch = ARCH_furnace;
+	en->tile_size = v2i(2, 2);
 	en->pretty_name = STR("Furnace");
 	en->sprite_id = SPRITE_furnace;
 	en->workbench_thing = true;
@@ -813,6 +820,7 @@ void setup_workbench(Entity* en) {
 
 void setup_research_station(Entity* en) {
 	en->arch = ARCH_research_station;
+	en->tile_size = v2i(2, 1);
 	en->pretty_name = STR("Research Station");
 	en->sprite_id = SPRITE_research_station;
 	en->right_click_remove = true;
@@ -988,7 +996,43 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 	return draw_image(sprite->image, rect.min, range2f_size(rect), col);
 }
 
+inline float64 now() {
+	return world->time_elapsed;
+}
+
+float alpha_from_end_time(float64 end_time, float length) {
+	return float_alpha(now(), end_time-length, end_time);
+}
+
+bool has_reached_end_time(float64 end_time) {
+	return now() > end_time;
+}
+
 // :func dump
+
+void do_entity_drops(Entity* en) {
+	ItemID *drops;
+	// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
+	growing_array_init_reserve((void**)&drops, sizeof(ItemID), 2, get_temporary_allocator());
+
+	// drops from entity data
+	for (int i = 0; i < en->drops_count; i++) {
+		ItemAmount drop = en->drops[i];
+		for (int j = 0; j < drop.amount; j++) {
+			growing_array_add((void**)&drops, &drop.id);
+		}
+	}
+
+	// create all the item drops
+	for (int i = 0; i < growing_array_get_valid_count(drops); i++) {
+		ItemID drop_id = drops[i];
+		Entity* drop = entity_create();
+		setup_item(drop, drop_id);
+		drop->pos = en->pos;
+		drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
+		drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
+	}
+}
 
 Vector2 v2_tile_pos_to_entity_world_pos(Vector2i tile_pos, ArchetypeID id) {
 	Vector2 pos = v2_tile_pos_to_world_pos(tile_pos);
@@ -1069,18 +1113,6 @@ Entity* entity_at_tile(TileEntityCache* cache, Tile tile) {
 	}
 }
 
-inline float64 now() {
-	return world->time_elapsed;
-}
-
-float alpha_from_end_time(float64 end_time, float length) {
-	return float_alpha(now(), end_time-length, end_time);
-}
-
-bool has_reached_end_time(float64 end_time) {
-	return now() > end_time;
-}
-
 // :map init
 void world_setup()
 {
@@ -1110,6 +1142,7 @@ void world_setup()
 	}
 
 	// spawn biome :resources
+	if (false)
 	{
 		for (int y = 0; y < map.height; y++)
 		for (int x = 0; x < map.width; x++)
@@ -1723,8 +1756,10 @@ void do_ui_stuff() {
 			BuildingData building = get_building_data(world->placing_building);
 			Sprite* icon = get_sprite(building.icon);
 
+			ArchetypeID arch_id = building.to_build;
+
 			Vector2 pos = mouse_pos_world;
-			Vector2i tile_size = get_archetype_data(building.to_build).tile_size;
+			Vector2i tile_size = get_archetype_data(arch_id).tile_size;
 			{
 				if (tile_size.x % 2 == 0) {
 					pos.x = roundf(pos.x / (float)tile_width) * tile_width;
@@ -1741,15 +1776,26 @@ void do_ui_stuff() {
 				}
 			}
 
-			Matrix4 xform = m4_identity;
-			Vector2 sprite_size = get_sprite_size(icon);
-			xform = m4_translate(xform, v3(pos.x, pos.y, 0));
-			xform = m4_translate(xform, v3(sprite_size.x * -0.5, sprite_size.y * -0.5, 0));
+			// range preview
+			if (arch_id == ARCH_burner_drill)
+			{
+				float radius = get_archetype_data(arch_id).radius;
+				// #polish - make this an outline, copy custom shader example
+				draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.1));
+			}
 
-			draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
+			// draw preview
+			{
+				Matrix4 xform = m4_identity;
+				Vector2 sprite_size = get_sprite_size(icon);
+				xform = m4_translate(xform, v3(pos.x, pos.y, 0));
+				xform = m4_translate(xform, v3(sprite_size.x * -0.5, sprite_size.y * -0.5, 0));
+
+				draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
+			}
 
 			// :tether connection preview
-			if (building.to_build == ARCH_tether)
+			if (arch_id == ARCH_tether)
 			{
 				for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 					Entity* tether = &world->entities[i];
@@ -1765,7 +1811,7 @@ void do_ui_stuff() {
 			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 				Entity* en = entity_create();
-				entity_setup(en, building.to_build);
+				entity_setup(en, arch_id);
 				en->pos = pos;
 				world->ux_state = 0;
 			}
@@ -2684,9 +2730,36 @@ int entry(int argc, char **argv) {
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
-				// switch (en->arch) {
-					// ...
-				// }
+
+				// :burner update
+				if (en->arch == ARCH_burner_drill) {
+					if (en->next_hit_end_time == 0) {
+						en->next_hit_end_time = now() + 1.f;
+					}
+
+					if (has_reached_end_time(en->next_hit_end_time)) {
+						en->next_hit_end_time = 0;
+
+						play_sound("event:/hit_generic");
+						camera_shake(0.1);
+
+						// get all entities in radius
+						for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+							Entity* against = &world->entities[j];
+							if (against->destroyable_world_item && v2_dist(en->pos, against->pos) < en->radius) {
+
+								against->white_flash_current_alpha = 1.0;
+								particle_emit(against->pos, PFX_hit);
+								against->health -= 1;
+
+								if (against->health <= 0) {
+									do_entity_drops(against);
+									entity_destroy(against);
+								}
+							}
+						}
+					}
+				}
 
 				// :workbench update
 				if (en->workbench_thing) {
@@ -2987,28 +3060,7 @@ int entry(int argc, char **argv) {
 						camera_shake(0.1); // shake extra on death
 
 						// :drops
-
-						ItemID *drops;
-						// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
-						growing_array_init_reserve((void**)&drops, sizeof(ItemID), 2, get_temporary_allocator());
-
-						// drops from entity data
-						for (int i = 0; i < selected_en->drops_count; i++) {
-							ItemAmount drop = selected_en->drops[i];
-							for (int j = 0; j < drop.amount; j++) {
-								growing_array_add((void**)&drops, &drop.id);
-							}
-						}
-
-						// create all the item drops
-						for (int i = 0; i < growing_array_get_valid_count(drops); i++) {
-							ItemID drop_id = drops[i];
-							Entity* drop = entity_create();
-							setup_item(drop, drop_id);
-							drop->pos = selected_en->pos;
-							drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
-							drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
-						}
+						do_entity_drops(selected_en);
 
 						// exp orb drops
 						for (int i = 0; i < get_random_int_in_range(2, 3); i++) {
@@ -3021,7 +3073,6 @@ int entry(int argc, char **argv) {
 							orb->velocity = v2_mulf(orb->velocity, get_random_float32_in_range(100, 200));
 							orb->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.4, 0.6);
 						}
-
 
 						entity_destroy(selected_en);
 					}

@@ -271,6 +271,7 @@ typedef enum SpriteID {
 	SPRITE_player_idle,
 	SPRITE_ice_tile,
 	SPRITE_burner_drill,
+	SPRITE_longboi_test,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -339,6 +340,7 @@ typedef enum ArchetypeID {
 	ARCH_ice_vein = 17,
 	ARCH_tile_resource = 18,
 	ARCH_burner_drill = 19,
+	ARCH_longboi_test = 20,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -437,21 +439,6 @@ typedef struct Entity {
 } Entity;
 #define MAX_ENTITY_COUNT 1024
 
-Entity entity_archetype_data[ARCH_MAX] = {0};
-void entity_setup(Entity* en, ArchetypeID id); // forward decl
-void setup_entity_archetype_data_cache() {
-	for (ArchetypeID i = 1; i < ARCH_MAX; i++) {
-		entity_setup(&entity_archetype_data[i], i);
-	}
-}
-Entity get_archetype_data(ArchetypeID id) {
-	return entity_archetype_data[id];
-}
-string get_archetype_pretty_name(ArchetypeID id) {
-	return get_archetype_data(id).pretty_name;
-}
-
-
 // building resource
 // NOTE, a "resource" is a thing that we set up during startup, and is constant.
 //
@@ -464,6 +451,7 @@ typedef enum BuildingID {
 	BUILDING_teleporter1,
 	BUILDING_tether,
 	BUILDING_burner_drill,
+	BUILDING_longboi_test,
 	// :building resource
 	BUILDING_MAX,
 } BuildingID;
@@ -682,6 +670,10 @@ int get_max_oxygen() {
 	return o2_full_tank_deplete_length / (float)oxygen_deplete_tick_length;
 }
 
+void entity_apply_defaults(Entity* en) {
+	en->tile_size = v2i(1, 1);
+}
+
 Entity* entity_create() {
 	Entity* entity_found = 0;
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -693,6 +685,7 @@ Entity* entity_create() {
 	}
 	assert(entity_found, "No more free entities!");
 	entity_found->is_valid = true;
+	entity_apply_defaults(entity_found);
 
 	return entity_found;
 }
@@ -702,6 +695,13 @@ void entity_destroy(Entity* entity) {
 }
 
 // :setup things
+
+void setup_longboi_test(Entity* en) {
+	en->arch = ARCH_longboi_test;
+	en->pretty_name = STR("asdf");
+	en->tile_size = v2i(3, 1);
+	en->sprite_id = SPRITE_longboi_test;
+}
 
 void setup_burner_drill(Entity* en) {
 	en->arch = ARCH_burner_drill;
@@ -880,7 +880,24 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_ice_vein: setup_ice_vein(en); break;
 		case ARCH_tile_resource: setup_tile_resource(en); break;
 		case ARCH_burner_drill: setup_burner_drill(en); break;
+		case ARCH_longboi_test: setup_longboi_test(en); break;
+		// :setup
 	}
+}
+
+Entity entity_archetype_data[ARCH_MAX] = {0};
+void setup_entity_archetype_data_cache() {
+	for (ArchetypeID i = 1; i < ARCH_MAX; i++) {
+		Entity* en = &entity_archetype_data[i];
+		entity_apply_defaults(en);
+		entity_setup(en, i);
+	}
+}
+Entity get_archetype_data(ArchetypeID id) {
+	return entity_archetype_data[id];
+}
+string get_archetype_pretty_name(ArchetypeID id) {
+	return get_archetype_data(id).pretty_name;
 }
 
 Vector2 get_mouse_pos_in_ndc() {
@@ -972,6 +989,13 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 }
 
 // :func dump
+
+Vector2 v2_tile_pos_to_entity_world_pos(Vector2i tile_pos, ArchetypeID id) {
+	Vector2 pos = v2_tile_pos_to_world_pos(tile_pos);
+	pos.x += get_archetype_data(id).tile_size.x * tile_width * 0.5;
+	pos.y += get_archetype_data(id).tile_size.y * tile_width * 0.5;
+	return pos;
+}
 
 void draw_item_amount_in_rect(ItemAmount item_amount, Range2f rect) {
 	draw_sprite_in_rect(get_sprite_id_from_item(item_amount.id), rect, COLOR_WHITE, 0.1);
@@ -1073,6 +1097,7 @@ void world_setup()
 	world->building_unlocks[BUILDING_workbench].research_progress = 100;
 
 	// spawn ice depos nearby
+	if (false)
 	{
 		en = entity_create();
 		setup_ice_vein(en);
@@ -1084,7 +1109,7 @@ void world_setup()
 		// en->pos.y = 30.f;
 	}
 
-	// loop thru all resource biomes
+	// spawn biome :resources
 	{
 		for (int y = 0; y < map.height; y++)
 		for (int x = 0; x < map.width; x++)
@@ -1097,7 +1122,7 @@ void world_setup()
 					// spawn ice entity thingo
 					Entity* en = entity_create();
 					setup_tile_resource(en);
-					en->pos = v2_tile_pos_to_world_pos(tile);
+					en->pos = v2_tile_pos_to_entity_world_pos(tile, en->arch);
 				} break;
 
 				default: break;
@@ -1113,6 +1138,7 @@ void world_setup()
 		world->building_unlocks[BUILDING_tether].research_progress = 100;
 
 		world->inventory_items[ITEM_pine_wood].amount = 50;
+		world->inventory_items[ITEM_o2_shard].amount = 50;
 		world->inventory_items[ITEM_rock].amount = 1000;
 		world->inventory_items[ITEM_exp].amount = 100;
 		world->inventory_items[ITEM_flint_axe].amount = 1;
@@ -1698,17 +1724,27 @@ void do_ui_stuff() {
 			Sprite* icon = get_sprite(building.icon);
 
 			Vector2 pos = mouse_pos_world;
-			pos = round_v2_to_tile(pos);
+			Vector2i tile_size = get_archetype_data(building.to_build).tile_size;
+			{
+				if (tile_size.x % 2 == 0) {
+					pos.x = roundf(pos.x / (float)tile_width) * tile_width;
+				} else {
+					pos.x = floorf(pos.x / (float)tile_width) * tile_width;
+					pos.x += tile_width * 0.5;
+				}
 
-			// now we can just do this to get the tile size. Even though we have no entity setup.
-			get_archetype_data(building.to_build).tile_size;
+				if (tile_size.y % 2 == 0) {
+					pos.y = roundf(pos.y / (float)tile_width) * tile_width;
+				} else {
+					pos.y = floorf(pos.y / (float)tile_width) * tile_width;
+					pos.y += tile_width * 0.5;
+				}
+			}
 
 			Matrix4 xform = m4_identity;
+			Vector2 sprite_size = get_sprite_size(icon);
 			xform = m4_translate(xform, v3(pos.x, pos.y, 0));
-
-			// @volatile with entity rendering
-			xform = m4_translate(xform, v3(0, tile_width * -0.5, 0));
-			xform = m4_translate(xform, v3(get_sprite_size(icon).x * -0.5, 0.0, 0));
+			xform = m4_translate(xform, v3(sprite_size.x * -0.5, sprite_size.y * -0.5, 0));
 
 			draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
 
@@ -2186,6 +2222,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_player_idle] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/player_idle.png"), get_heap_allocator()), .frames=1};
 		sprites[SPRITE_ice_tile] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/ice_tile.png"), get_heap_allocator())};
 		sprites[SPRITE_burner_drill] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/burner_drill.png"), get_heap_allocator())};
+		sprites[SPRITE_longboi_test] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/longboi_test.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2205,6 +2242,15 @@ int entry(int argc, char **argv) {
 	
 	// :building resource setup
 	{
+		buildings[BUILDING_longboi_test] = (BuildingData){
+			.to_build=ARCH_longboi_test,
+			.icon=SPRITE_longboi_test,
+			.description=STR("Place on top of resources to mine."),
+			.exp_cost=10,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
+		};
+
 		buildings[BUILDING_burner_drill] = (BuildingData){
 			.to_build=ARCH_burner_drill,
 			.icon=SPRITE_burner_drill,
@@ -2530,7 +2576,8 @@ int entry(int argc, char **argv) {
 					// pick from a random spot
 					int count = growing_array_get_valid_count(potential_spawn_tiles);
 					Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
-					Vector2 spawn_pos = v2_tile_pos_to_world_pos(spawn_tile);
+
+					Vector2 spawn_pos = v2_tile_pos_to_entity_world_pos(spawn_tile, data.arch_id);
 
 					// is it close to any entities?
 					bool too_close = false;
@@ -2625,7 +2672,7 @@ int entry(int argc, char **argv) {
 					col = v4_lerp(col, biome_col_hex_to_rgba(biome_colors[biome]), 0.1f);
 					float x_pos = x * tile_width;
 					float y_pos = y * tile_width;
-					draw_rect(v2(x_pos + tile_width * -0.5, y_pos + tile_width * -0.5), v2(tile_width, tile_width), col);
+					draw_rect(v2(x_pos, y_pos), v2(tile_width, tile_width), col);
 				}
 			}
 
@@ -3050,10 +3097,15 @@ int entry(int argc, char **argv) {
 						if (en->arch == ARCH_item) {
 							xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
 						}
-						// @volatile with entity placement
-						xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));
-						xform         = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
-						xform         = m4_translate(xform, v3(get_sprite_size(sprite).x * -0.5, 0.0, 0));
+
+						// all entities have a center center position
+						// that way the ->pos is very easily used in other areas intuitively.
+						Vector2 draw_pos = en->pos;
+
+						// center the sprite
+						draw_pos.x -= get_sprite_size(sprite).x * 0.5;
+						draw_pos.y -= get_sprite_size(sprite).y * 0.5;
+						xform = m4_translate(xform, v3(draw_pos.x, draw_pos.y, 0));
 
 						Vector4 col = COLOR_WHITE;
 						if (world_frame.selected_entity == en) {

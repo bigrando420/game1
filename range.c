@@ -57,6 +57,10 @@ Range2f range2f_make_top_right(Vector2 pos, Vector2 size) {
   return (Range2f){v2_sub(pos, size), pos};
 }
 
+Range2f range2f_make_top_left(Vector2 pos, Vector2 size) {
+  return (Range2f){v2(pos.x, pos.y - size.y), v2(pos.x + size.x, pos.y)};
+}
+
 Range2f range2f_make_bottom_right(Vector2 pos, Vector2 size) {
   return (Range2f){v2(pos.x-size.x, pos.y), v2(pos.x, pos.y+size.y)};
 }

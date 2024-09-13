@@ -306,6 +306,12 @@ Vector2 get_sprite_size(Sprite* sprite) {
 	return (Vector2) { sprite->image->width, sprite->image->height };
 }
 
+// #refactor_idea_that_is_purely_aesthetic
+// could we merge itemid into archid? and just use a flag to represent it?
+// I remember trying this a while back. I got frustated with it being too overloaded I think.
+//
+// I guess probably not, because there's a distinction from an item on the ground, and the placed big chungus entity?
+//
 typedef enum ItemID {
 	ITEM_nil,
 	ITEM_rock,
@@ -322,6 +328,15 @@ typedef enum ItemID {
 	ITEM_o2_shard,
 	ITEM_raw_iron,
 	ITEM_iron_ingot,
+	ITEM_furnace,
+	ITEM_workbench,
+	ITEM_research_station,
+	ITEM_teleporter1,
+	ITEM_tether,
+	ITEM_burner_drill,
+	ITEM_longboi_test,
+	ITEM_wall,
+	ITEM_wall_gate,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -374,10 +389,16 @@ typedef struct ItemData {
 	int extra_pickaxe_dmg;
 	int extra_sickle_dmg;
 	ArchetypeID for_structure;
-	ItemAmount crafting_recipe[8];
-	int crafting_recipe_count;
 	float craft_length;
 	ItemID furnace_transform_into;
+
+	// merged in from building.
+	ArchetypeID to_build;
+	int exp_cost;
+	ItemAmount ingredients[8];
+	int ingredients_count;
+	bool disable_building;
+
 } ItemData;
 ItemData item_data[ITEM_MAX] = {0};
 ItemData get_item_data(ItemID id) {
@@ -468,39 +489,6 @@ typedef struct Entity {
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
-
-// building resource
-// NOTE, a "resource" is a thing that we set up during startup, and is constant.
-//
-// randy: I tried removing this enum ID and just have the system be nameless like the world resource spawning system. But it's too much of a mental backflip when thinking about things. Much easier to just type out the enum name again so we can sitll use it as a handle for everything.
-typedef enum BuildingID {
-	BUILDING_nil,
-	BUILDING_furnace,
-	BUILDING_workbench,
-	BUILDING_research_station,
-	BUILDING_teleporter1,
-	BUILDING_tether,
-	BUILDING_burner_drill,
-	BUILDING_longboi_test,
-	BUILDING_wall,
-	BUILDING_wall_gate,
-	// :building resource
-	BUILDING_MAX,
-} BuildingID;
-typedef struct BuildingData {
-	ArchetypeID to_build;
-	SpriteID icon;
-	int exp_cost;
-	string description;
-	ItemAmount ingredients[8];
-	int ingredients_count;
-	bool disable_building;
-} BuildingData;
-BuildingData buildings[BUILDING_MAX];
-BuildingData get_building_data(BuildingID id) {
-	// note, this isn't a pointer, because this is constant resource data, we don't want to modify
-	return buildings[id];
-}
 
 typedef enum UXState {
 	UX_nil,
@@ -675,10 +663,10 @@ typedef struct World {
 	float inventory_alpha_target;
 	float building_alpha;
 	float building_alpha_target;
-	BuildingID placing_building;
+	ItemID placing_building;
 	Entity* interacting_with_entity;
-	BuildingID selected_research_thing;
-	UnlockState building_unlocks[BUILDING_MAX];
+	ItemID selected_research_thing;
+	UnlockState item_unlocks[ITEM_MAX];
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	// todo #ship - figure out if we can legit just keep this as a pointer or not lol
 	Entity* oxygenerator;
@@ -1233,8 +1221,12 @@ void world_setup()
 	world->oxygenerator = en;
 	en->fuel_expire_end_time = now() + o2_fuel_length;
 
-	world->building_unlocks[BUILDING_research_station].research_progress = 100;
-	world->building_unlocks[BUILDING_workbench].research_progress = 100;
+	en = entity_create();
+	setup_workbench(en);
+	en->pos.x = 12;
+
+	world->item_unlocks[ITEM_research_station].research_progress = 100;
+	world->item_unlocks[ITEM_workbench].research_progress = 100;
 
 	// spawn ice depos nearby
 	if (false)
@@ -1276,7 +1268,7 @@ void world_setup()
 	{
 		player_en->exp_amount = 1000;
 		
-		world->building_unlocks[BUILDING_tether].research_progress = 100;
+		world->item_unlocks[ITEM_tether].research_progress = 100;
 
 		world->inventory_items[ITEM_iron_ingot].amount = 100;
 		world->inventory_items[ITEM_raw_copper].amount = 50;
@@ -1703,230 +1695,9 @@ void do_ui_stuff() {
 		}
 	}
 
-	// :building ui
-	// is now just shadowing the inventory
-	{
-		world->building_alpha_target = (world->ux_state == UX_inventory ? 1.0 : 0.0);
-		animate_f32_to_target(&world->building_alpha, world->building_alpha_target, delta_t, 15.0);
-		bool is_building_enabled = world->building_alpha_target == 1.0;
-
-		// draw a row of icons for buildable structures
-		if (world->building_alpha_target == 1.0) {
-			int building_count = BUILDING_MAX-1;
-
-			float icon_size = 12.0;
-			float total_box_width = building_count * icon_size;
-
-			float padding = 2.0;
-			total_box_width += padding * (building_count + 1);
-
-			BuildingID tooltip_id = 0;
-			for (BuildingID i = 1; i < BUILDING_MAX; i++) {
-				BuildingData* building = &buildings[i];
-				UnlockState unlock_state = world->building_unlocks[i];
-				bool is_unlocked = is_fully_unlocked(unlock_state);
-
-				Matrix4 xform = m4_identity;
-
-				float x0 = (screen_width * 0.5) - (total_box_width * 0.5);
-				x0 += (i-1) * icon_size;
-				x0 += padding * i;
-				xform = m4_translate(xform, v3(x0, 10, 0));
-
-				draw_rect_xform(xform, v2(icon_size, icon_size), v4(0, 0, 0, 0.2));
-
-				Sprite* icon = get_sprite(building->icon);
-				Vector4 col = COLOR_WHITE;
-				if (!is_unlocked) {
-					col = v4(0.0, 0.0, 0.0, 1.0);
-				}
-
-				Range2f box = range2f_make_bottom_left(v2(x0, 10), v2(icon_size, icon_size));
-				draw_sprite_in_rect(building->icon, box, col, 0.1);
-
-				if (is_unlocked && range2f_contains(box, get_mouse_pos_in_world_space())) {
-					world_frame.hover_consumed = true;
-					tooltip_id = i;
-
-					bool has_all_ingredients = true;
-					for (int j = 0; j < building->ingredients_count; j++) {
-						ItemAmount ing_amount = building->ingredients[j];
-						InventoryItemData inv_item = world->inventory_items[ing_amount.id];
-						if (inv_item.amount < ing_amount.amount) {
-							has_all_ingredients = false;
-							break;
-						}
-					}
-
-					// if click, go into place mode
-					if (has_all_ingredients && is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-						world->placing_building = i;
-						world->ux_state = UX_place_mode;
-
-						// consume ingredients
-						for (int j = 0; j < building->ingredients_count; j++) {
-							ItemAmount ing_amount = building->ingredients[j];
-							world->inventory_items[ing_amount.id].amount -= ing_amount.amount;
-							assert(world->inventory_items[ing_amount.id].amount >= 0, "removed too many items. the check above must have failed!");
-						}
-					}
-				}
-			}
-
-			// building tooltip
-			if (tooltip_id)
-			{
-				BuildingData* building = &buildings[tooltip_id];
-
-				Vector2 size = v2(40, 50);
-				Vector2 pos = get_mouse_pos_in_world_space();
-
-				draw_rect(pos, size, COLOR_BLACK);
-
-				float x0 = pos.x;
-				float y0 = pos.y;
-				float y_bottom = y0;
-				x0 = pos.x + size.x * 0.5;
-				y0 = pos.y + size.y;
-				y0 -= 2.f; // arbitrary padding
-
-				Gfx_Text_Metrics met = draw_text_with_pivot(font, get_archetype_pretty_name(building->to_build), font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-				y0 -= met.visual_size.y;
-				y0 -= 2.f;
-
-				// description
-				if (building->description.count)
-				{
-					float wrap_width = size.x;
-					string text = building->description;
-
-					string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
-					for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
-						string line = lines[i];
-						Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-						y0 -= metrics.visual_size.y;
-					}
-				}
-
-				y0 = y_bottom;
-				y0 += 2.f;
-
-				// ingredients list
-				for (int j = 0; j < building->ingredients_count; j++) {
-					ItemAmount ing_amount = building->ingredients[j];
-					// ItemData ing_data = get_item_data(ing_amount.id);
-
-					Vector2 element_size = v2(size.x * 0.8, 6.0);
-
-					x0 = pos.x + (size.x - element_size.x) * 0.5;
-
-					// bg box thing
-					draw_rect(v2(x0, y0), element_size, fill_col);
-
-					// icon
-					{
-						float item_icon_length = element_size.y * 0.8;
-
-						float x1 = pos.x + size.x * 0.5 - element_size.y;
-						float y1 = y0 + (item_icon_length - element_size.y) * -0.5;
-
-						Range2f rect = {v2(x1, y1), v2(x1 + item_icon_length, y1 + item_icon_length)};
-						draw_sprite_in_rect(get_sprite_id_from_item(ing_amount.id), rect, COLOR_WHITE, 0);
-					}
-
-					InventoryItemData inv_item = world->inventory_items[ing_amount.id];
-					Vector4 txt_col = COLOR_WHITE;
-					if (inv_item.amount < ing_amount.amount) {
-						txt_col = COLOR_RED;
-					}
-
-					string txt = tprint("%i/%i", inv_item.amount, ing_amount.amount);
-					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
-					float center_pos = pos.x + size.x * 0.5;
-					Vector2 draw_pos = v2(center_pos, y0 + element_size.y * 0.5);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0, 0.5)));
-					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), txt_col);
-					// y0 += metrics.visual_size.y;
-
-					y0 += element_size.y;
-					y0 += 2.0f; // padding @cleanup
-				}
-			}
-		}
-	}
-
 	// :placement mode
-	// TODO - alpha animation for place mode
-	if (world->ux_state == UX_place_mode)
-	defer_scope(set_world_space(), set_screen_space())
-	{
-		Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
-		BuildingData building = get_building_data(world->placing_building);
-		Sprite* icon = get_sprite(building.icon);
-
-		ArchetypeID arch_id = building.to_build;
-
-		Vector2 pos = mouse_pos_world;
-		Vector2i tile_size = get_archetype_data(arch_id).tile_size;
-		{
-			if (tile_size.x % 2 == 0) {
-				pos.x = roundf(pos.x / (float)tile_width) * tile_width;
-			} else {
-				pos.x = floorf(pos.x / (float)tile_width) * tile_width;
-				pos.x += tile_width * 0.5;
-			}
-
-			if (tile_size.y % 2 == 0) {
-				pos.y = roundf(pos.y / (float)tile_width) * tile_width;
-			} else {
-				pos.y = floorf(pos.y / (float)tile_width) * tile_width;
-				pos.y += tile_width * 0.5;
-			}
-		}
-
-		// range preview
-		if (arch_id == ARCH_burner_drill)
-		{
-			float radius = get_archetype_data(arch_id).radius;
-			// #polish - make this an outline, copy custom shader example
-			draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.1));
-		}
-
-		// draw preview
-		{
-			Matrix4 xform = m4_identity;
-			Vector2 sprite_size = get_sprite_size(icon);
-			xform = m4_translate(xform, v3(pos.x, pos.y, 0));
-			xform = m4_translate(xform, v3(sprite_size.x * -0.5, sprite_size.y * -0.5, 0));
-
-			draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
-		}
-
-		// :tether connection preview
-		if (arch_id == ARCH_tether)
-		{
-			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
-				Entity* tether = &world->entities[i];
-				if (tether->is_valid && tether->last_frame.is_powered) {
-					if (v2_dist(tether->pos, pos) < tether_connection_radius) {
-						draw_line(v2_add(tether->pos, tether_connection_offset), v2_add(pos, tether_connection_offset), 1.0f, col_tether);
-						break;
-					}
-				}
-			}
-		}
-
-		if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-			consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-			Entity* en = entity_create();
-			entity_setup(en, arch_id);
-			en->pos = pos;
-			en->right_click_remove = true;
-			world->ux_state = 0;
-		}
-	}
+	// #next
+	// TODO - new version of this
 
 	// :workbench
 	if (world->ux_state == UX_entity_interaction && world->interacting_with_entity->arch == ARCH_workbench) {
@@ -1949,11 +1720,11 @@ void do_ui_stuff() {
 		int count = 0;
 		for (ItemID i = 1; i < ITEM_MAX; i++) {
 			ItemData item_data  = get_item_data(i);
-			if (item_data.crafting_recipe_count == 0) {
+			UnlockState unlock_state = world->item_unlocks[i];
+			if (item_data.ingredients_count == 0) {
 				continue;
 			}
 
-			/*
 			count += 1;
 
 			{
@@ -1974,7 +1745,7 @@ void do_ui_stuff() {
 				xform = m4_translate(xform, v3(icon_length * -0.5, icon_length * -0.5, 1));
 				render_box = m4_transform_range2f(xform, render_box);
 
-				draw_sprite_in_rect(building_data.icon, render_box, COLOR_WHITE, 0.2);
+				draw_sprite_in_rect(item_data.icon, render_box, COLOR_WHITE, 0.2);
 			}
 			x0 += icon_length;
 
@@ -1983,57 +1754,81 @@ void do_ui_stuff() {
 				y0 -= icon_length;
 				x0 = x_left;
 			}
-			*/
 		}
 
-		/*
-		if (selected) {
-			UnlockState* unlock_state = &world->building_unlocks[selected];
-			BuildingData building_data = get_building_data(selected);
+		if (selected)
+		defer_scope(push_z_layer(layer_tooltip), pop_z_layer()) {
+			UnlockState* unlock_state = &world->item_unlocks[selected];
+			ItemData item_data = get_item_data(selected);
 
 			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-				if (get_player()->exp_amount >= building_data.exp_cost) {
-					get_player()->exp_amount -= building_data.exp_cost;
-					unlock_state->research_progress = 100;
-					play_sound("event:/research");
-				} else {
-					play_sound("event:/error");
-					exp_error_flash_alpha_target = 1.0f;
-				}
+				// do craft
 			}
 
-			Vector2 size = v2(40, 30);
+			float width = 40.f;
 
 			float x_left = get_mouse_pos_in_world_space().x;
 			float y_top = get_mouse_pos_in_world_space().y;
-			float x_middle = x_left + size.x * 0.5;
-			float y_bottom = y_top - size.y;
+
+			float x_middle = x_left + width * 0.5;
 
 			float x0 = x_left;
 			float y0 = y_top;
 
-			y0 = y_bottom;
-			draw_rect(v2(x0, y0), size, v4(0.2, 0.2, 0.2, 1.));
+			float padding = 2.f;
 
-			x0 = x_left + size.x * 0.5;
+			x0 = x_left + width * 0.5;
 			y0 = y_top;
-			y0 -= 2.f;
+			y0 -= padding;
 
 			// title
 			{
-				string txt = get_archetype_data(building_data.to_build).pretty_name;
+				string txt = get_archetype_data(item_data.to_build).pretty_name;
 				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-				y0 -= met.visual_size.y + 2.f;
+				y0 -= met.visual_size.y + padding;
 			}
+
+			x0 = x_left + padding;
+
+			{
+				Gfx_Text_Metrics met = draw_text_with_pivot(font, STR("Ingredients:"), font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_left);
+				y0 -= met.visual_size.y + padding;
+			}
+
+			x0 += 4.f;
+
+			float x_left_ingredient_list = x0;
+
+			// ingredient list
+			for (int i = 0; i < item_data.ingredients_count; i++) {
+				ItemAmount ing = item_data.ingredients[i];
+				ItemData ing_data = get_item_data(ing.id);
+
+				float height = font_height_body * text_scale.x;
+
+				x0 = x_left_ingredient_list;
+
+				{
+					Range2f rect = range2f_make_top_left(v2(x0, y0), v2(height, height));
+					draw_sprite_in_rect(ing_data.icon, rect, COLOR_WHITE, 0);
+					x0 += height + 1.f;
+				}
+
+				string txt = tprint("%ix %s", ing.amount, ing_data.pretty_name);
+				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_left);
+				y0 -= met.visual_size.y + padding;
+			}
+
+			y0 -= padding;
 
 			// description
 			{
 				x0 = x_middle;
 
-				float wrap_width = size.x;
-				string text = building_data.description;
+				float wrap_width = width;
+				string text = item_data.description;
 
 				string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
 				for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
@@ -2043,20 +1838,13 @@ void do_ui_stuff() {
 				}
 			}
 
-			y0 = y_bottom;
-			y0 += 4.f;
+			y0 -= padding;
 
-			// exp cost
-			{
-				Vector4 col = COLOR_WHITE;
-				if (exp_error_flash_alpha) {
-					col.xyz = v3_lerp(col.xyz, COLOR_RED.xyz, exp_error_flash_alpha);
-				}
-				string txt = tprint("Costs: %iml", building_data.exp_cost);
-				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, col, PIVOT_bottom_center);
-			}
+			float height = y0 - y_top;
+
+			Draw_Quad* quad = draw_rect(v2(x_left, y_top), v2(width, height), v4(0.2, 0.2, 0.2, 1.));
+			quad->z = layer_tooltip-1;
 		}
-		*/
 
 		world_frame.hover_consumed = true;
 	}
@@ -2078,12 +1866,12 @@ void do_ui_stuff() {
 
 		float icon_length = 10.f;
 		y0 -= icon_length;
-		BuildingID selected = 0;
+		ItemID selected = 0;
 		int count = 0;
-		for (int i = 1; i < BUILDING_MAX; i++) {
-			UnlockState unlock_state = world->building_unlocks[i];
-			BuildingData building_data = get_building_data(i);
-			if (building_data.disable_building || is_fully_unlocked(unlock_state)) {
+		for (int i = 1; i < ITEM_MAX; i++) {
+			UnlockState unlock_state = world->item_unlocks[i];
+			ItemData item_data = get_item_data(i);
+			if (item_data.ingredients_count == 0 || item_data.disable_building || is_fully_unlocked(unlock_state)) {
 				continue;
 			}
 
@@ -2107,7 +1895,7 @@ void do_ui_stuff() {
 				xform = m4_translate(xform, v3(icon_length * -0.5, icon_length * -0.5, 1));
 				render_box = m4_transform_range2f(xform, render_box);
 
-				draw_sprite_in_rect(building_data.icon, render_box, COLOR_WHITE, 0.2);
+				draw_sprite_in_rect(item_data.icon, render_box, COLOR_WHITE, 0.2);
 			}
 			x0 += icon_length;
 
@@ -2119,14 +1907,14 @@ void do_ui_stuff() {
 		}
 
 		if (selected) {
-			UnlockState* unlock_state = &world->building_unlocks[selected];
-			BuildingData building_data = get_building_data(selected);
+			UnlockState* unlock_state = &world->item_unlocks[selected];
+			ItemData item_data = get_item_data(selected);
 
 			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-				if (get_player()->exp_amount >= building_data.exp_cost) {
-					get_player()->exp_amount -= building_data.exp_cost;
+				if (get_player()->exp_amount >= item_data.exp_cost) {
+					get_player()->exp_amount -= item_data.exp_cost;
 					unlock_state->research_progress = 100;
 					play_sound("event:/research");
 				} else {
@@ -2154,7 +1942,7 @@ void do_ui_stuff() {
 
 			// title
 			{
-				string txt = get_archetype_data(building_data.to_build).pretty_name;
+				string txt = get_archetype_data(item_data.to_build).pretty_name;
 				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 				y0 -= met.visual_size.y + 2.f;
 			}
@@ -2164,7 +1952,7 @@ void do_ui_stuff() {
 				x0 = x_middle;
 
 				float wrap_width = size.x;
-				string text = building_data.description;
+				string text = item_data.description;
 
 				string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
 				for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
@@ -2183,7 +1971,7 @@ void do_ui_stuff() {
 				if (exp_error_flash_alpha) {
 					col.xyz = v3_lerp(col.xyz, COLOR_RED.xyz, exp_error_flash_alpha);
 				}
-				string txt = tprint("Costs: %iml", building_data.exp_cost);
+				string txt = tprint("Costs: %iml", item_data.exp_cost);
 				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, col, PIVOT_bottom_center);
 			}
 		}
@@ -2302,90 +2090,6 @@ int entry(int argc, char **argv) {
 
 	setup_entity_archetype_data_cache();
 	
-	// :building resource setup
-	{
-
-
-		// note, this should go into a "Buildings #1" grouped research unlock thingo
-		buildings[BUILDING_wall_gate] = (BuildingData){
-			.to_build=ARCH_wall_gate,
-			.icon=SPRITE_wall_gate,
-			.description=STR("Allows travel into a sealed room"),
-			.exp_cost=200,
-			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 1}, }
-		};
-		buildings[BUILDING_wall] = (BuildingData){
-			.to_build=ARCH_wall,
-			.icon=SPRITE_wall,
-			.description=STR("Can be used to build a sealed Oxygen room"),
-			.exp_cost=200,
-			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 1} }
-		};
-
-		buildings[BUILDING_longboi_test] = (BuildingData){
-			.disable_building=true,
-			.to_build=ARCH_longboi_test,
-			.icon=SPRITE_longboi_test,
-			.description=STR("Place on top of resources to mine."),
-			.exp_cost=10,
-			.ingredients_count=2,
-			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
-		};
-
-		buildings[BUILDING_burner_drill] = (BuildingData){
-			.to_build=ARCH_burner_drill,
-			.icon=SPRITE_burner_drill,
-			.description=STR("Burns coal to hit things"),
-			.exp_cost=400,
-			.ingredients_count=2,
-			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
-		};
-
-		buildings[BUILDING_tether] = (BuildingData){
-			.to_build=ARCH_tether,
-			.icon=SPRITE_tether,
-			.description=STR("Extends oxygen range"),
-			.exp_cost=50,
-			.ingredients_count=2,
-			.ingredients={ {ITEM_copper_ingot, 1}, {ITEM_fiber, 4} }
-		};
-
-		buildings[BUILDING_furnace] = (BuildingData){
-			.to_build=ARCH_furnace,
-			.icon=SPRITE_furnace,
-			.description=STR("Can burn stuff into something more useful."),
-			.exp_cost=30,
-			.ingredients_count=2,
-			.ingredients={ {ITEM_rock, 10}, {ITEM_flint, 2} }
-		};
-
-		buildings[BUILDING_workbench] = (BuildingData){
-			.to_build=ARCH_workbench,
-			.icon=SPRITE_workbench,
-			.description=STR("Crafts things."),
-			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 10}, {ITEM_fiber, 5} }
-		};
-
-		buildings[BUILDING_research_station] = (BuildingData){
-			.to_build=ARCH_research_station,
-			.icon=SPRITE_research_station,
-			.description=STR("Research recipes to unlock more buildings."),
-			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
-		};
-		buildings[BUILDING_teleporter1] = (BuildingData){
-			.to_build=ARCH_teleporter1,
-			.icon=SPRITE_teleporter1,
-			.description=STR("A gateway to the next world."),
-			.exp_cost=9999,
-			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 1000}, {ITEM_rock, 1000} }
-		};
-	}
-
 	// item data resource setup
 	{
 		// do defaults
@@ -2411,11 +2115,6 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_copper_ingot,
 			.craft_length=20,
 			.for_structure=ARCH_furnace,
-			.crafting_recipe_count=2,
-			.crafting_recipe={
-				{ITEM_raw_copper, 3},
-				{ITEM_coal, 3},
-			},
 		};
 
 		item_data[ITEM_coal] = (ItemData){
@@ -2424,10 +2123,6 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_coal,
 			.craft_length=5,
 			.for_structure=ARCH_furnace,
-			.crafting_recipe_count=1,
-			.crafting_recipe={
-				{ITEM_pine_wood, 1},
-			},
 		};
 
 		// NOTE
@@ -2440,8 +2135,8 @@ int entry(int argc, char **argv) {
 			.craft_length=10,
 			.extra_axe_dmg=1,
 			.for_structure=ARCH_workbench,
-			.crafting_recipe_count=3,
-			.crafting_recipe={
+			.ingredients_count=3,
+			.ingredients={
 				{ITEM_pine_wood, 10},
 				{ITEM_flint, 10},
 				{ITEM_fiber, 10},
@@ -2455,8 +2150,8 @@ int entry(int argc, char **argv) {
 			.craft_length=10,
 			.extra_pickaxe_dmg=1,
 			.for_structure=ARCH_workbench,
-			.crafting_recipe_count=3,
-			.crafting_recipe={
+			.ingredients_count=3,
+			.ingredients={
 				{ITEM_pine_wood, 10},
 				{ITEM_flint, 10},
 				{ITEM_fiber, 10},
@@ -2470,12 +2165,93 @@ int entry(int argc, char **argv) {
 			.craft_length=10,
 			.extra_sickle_dmg=1,
 			.for_structure=ARCH_workbench,
-			.crafting_recipe_count=3,
-			.crafting_recipe={
+			.ingredients_count=3,
+			.ingredients={
 				{ITEM_pine_wood, 10},
 				{ITEM_flint, 10},
 				{ITEM_fiber, 10},
 			},
+		};
+
+		// :item :buildings
+
+		// note, this should go into a "Shelter #1" grouped research unlock thingo
+		item_data[ITEM_wall_gate] = (ItemData){
+			.to_build=ARCH_wall_gate,
+			.icon=SPRITE_wall_gate,
+			.description=STR("Allows travel into a sealed room"),
+			.exp_cost=200,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 1}, }
+		};
+		item_data[ITEM_wall] = (ItemData){
+			.to_build=ARCH_wall,
+			.icon=SPRITE_wall,
+			.description=STR("Can be used to build a sealed Oxygen room"),
+			.exp_cost=200,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 1} }
+		};
+
+		item_data[ITEM_longboi_test] = (ItemData){
+			.disable_building=true,
+			.to_build=ARCH_longboi_test,
+			.icon=SPRITE_longboi_test,
+			.description=STR("Place on top of resources to mine."),
+			.exp_cost=10,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
+		};
+
+		item_data[ITEM_burner_drill] = (ItemData){
+			.to_build=ARCH_burner_drill,
+			.icon=SPRITE_burner_drill,
+			.description=STR("Burns coal to hit things"),
+			.exp_cost=400,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
+		};
+
+		item_data[ITEM_tether] = (ItemData){
+			.to_build=ARCH_tether,
+			.icon=SPRITE_tether,
+			.description=STR("Extends oxygen range"),
+			.exp_cost=50,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_copper_ingot, 1}, {ITEM_fiber, 4} }
+		};
+
+		item_data[ITEM_furnace] = (ItemData){
+			.to_build=ARCH_furnace,
+			.icon=SPRITE_furnace,
+			.description=STR("Can burn stuff into something more useful."),
+			.exp_cost=30,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_rock, 10}, {ITEM_flint, 2} }
+		};
+
+		item_data[ITEM_workbench] = (ItemData){
+			.to_build=ARCH_workbench,
+			.icon=SPRITE_workbench,
+			.description=STR("Crafts things."),
+			.ingredients_count=2,
+			.ingredients={ {ITEM_pine_wood, 10}, {ITEM_fiber, 5} }
+		};
+
+		item_data[ITEM_research_station] = (ItemData){
+			.to_build=ARCH_research_station,
+			.icon=SPRITE_research_station,
+			.description=STR("Research recipes to unlock more buildings."),
+			.ingredients_count=2,
+			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
+		};
+		item_data[ITEM_teleporter1] = (ItemData){
+			.to_build=ARCH_teleporter1,
+			.icon=SPRITE_teleporter1,
+			.description=STR("A gateway to the next world."),
+			.exp_cost=9999,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_pine_wood, 1000}, {ITEM_rock, 1000} }
 		};
 	}
 
@@ -3730,8 +3506,8 @@ int entry(int argc, char **argv) {
 			if (selected_en && selected_en->right_click_remove) {
 				if (is_key_just_pressed(MOUSE_BUTTON_RIGHT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_RIGHT);
-					for (int i = 1; i < BUILDING_MAX; i++) {
-						BuildingData data = buildings[i];
+					for (int i = 1; i < ITEM_MAX; i++) {
+						ItemData data = item_data[i];
 						if (data.to_build == selected_en->arch) {
 							for (int j = 0; j < data.ingredients_count; j++) {
 								ItemAmount amt = data.ingredients[j];

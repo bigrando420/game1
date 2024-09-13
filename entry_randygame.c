@@ -416,7 +416,6 @@ typedef struct Entity {
 	int health;
 	int max_health;
 	bool destroyable_world_item;
-	bool workbench_thing;
 	int current_crafting_amount;
 	float64 crafting_end_time;
 	ItemAmount drops[4];
@@ -893,7 +892,7 @@ void setup_workbench(Entity* en) {
 	en->arch = ARCH_workbench;
 	en->pretty_name = STR("Workbench");
 	en->sprite_id = SPRITE_workbench;
-	en->workbench_thing = true;
+	en->interactable_entity = true;
 }
 
 void setup_research_station(Entity* en) {
@@ -1929,242 +1928,135 @@ void do_ui_stuff() {
 		}
 	}
 
-	// :workbench ui
-	if (world->ux_state == UX_workbench && world->interacting_with_entity) {
-		Entity* workbench_en = world->interacting_with_entity;
+	// :workbench
+	if (world->ux_state == UX_entity_interaction && world->interacting_with_entity->arch == ARCH_workbench) {
+		Entity* entity = world->interacting_with_entity;
 
-		Vector2 section_size = v2(50.0, 70.0);
-		float gap_between_panels = 10.0;
+		Vector2 pane_size = v2(60.0, 70.0);
 		float text_height_pad = 4.0;
 
-		float ui_width_thing = section_size.x * 2.0 + gap_between_panels;
+		float x0 = screen_width * 0.5 - pane_size.x * 0.5;
+		float y0 = screen_height * 0.5 - pane_size.y * 0.5;
+		float x_left = x0;
 
-		float x0 = screen_width * 0.5 - ui_width_thing * 0.5;
-		float y0 = screen_height * 0.5 - section_size.y * 0.5;
-		// left pane
-		{
-			Matrix4 xform = m4_identity;
-			xform = m4_translate(xform, v3(x0, y0, 0));
-			draw_rect_xform(xform, section_size, bg_col);
+		draw_rect(v2(x0, y0), pane_size, bg_col);
+
+		y0 += pane_size.y;
+
+		float icon_length = 10.f;
+		y0 -= icon_length;
+		ItemID selected = 0;
+		int count = 0;
+		for (ItemID i = 1; i < ITEM_MAX; i++) {
+			ItemData item_data  = get_item_data(i);
+			if (item_data.crafting_recipe_count == 0) {
+				continue;
+			}
+
+			/*
+			count += 1;
+
+			{
+				Range2f box = range2f_make_bottom_left(v2(x0, y0), v2(icon_length, icon_length));
+
+				Matrix4 xform = m4_identity;
+
+				float scale = 1.f;
+				if (range2f_contains(box, get_mouse_pos_in_world_space())) {
+					scale = 1.2f;
+					selected = i;
+				}
+
+				Range2f render_box = range2f_make_bottom_left(v2(0, 0), v2(icon_length, icon_length));
+				xform = m4_translate(xform, v3(x0, y0, 1));
+				xform = m4_translate(xform, v3(icon_length * 0.5, icon_length * 0.5, 1));
+				xform = m4_scale(xform, v3(scale, scale, 1));
+				xform = m4_translate(xform, v3(icon_length * -0.5, icon_length * -0.5, 1));
+				render_box = m4_transform_range2f(xform, render_box);
+
+				draw_sprite_in_rect(building_data.icon, render_box, COLOR_WHITE, 0.2);
+			}
+			x0 += icon_length;
+
+			// scuffed row advance
+			if (count % 6 == 0) {
+				y0 -= icon_length;
+				x0 = x_left;
+			}
+			*/
+		}
+
+		/*
+		if (selected) {
+			UnlockState* unlock_state = &world->building_unlocks[selected];
+			BuildingData building_data = get_building_data(selected);
+
+			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+
+				if (get_player()->exp_amount >= building_data.exp_cost) {
+					get_player()->exp_amount -= building_data.exp_cost;
+					unlock_state->research_progress = 100;
+					play_sound("event:/research");
+				} else {
+					play_sound("event:/error");
+					exp_error_flash_alpha_target = 1.0f;
+				}
+			}
+
+			Vector2 size = v2(40, 30);
+
+			float x_left = get_mouse_pos_in_world_space().x;
+			float y_top = get_mouse_pos_in_world_space().y;
+			float x_middle = x_left + size.x * 0.5;
+			float y_bottom = y_top - size.y;
+
+			float x0 = x_left;
+			float y0 = y_top;
+
+			y0 = y_bottom;
+			draw_rect(v2(x0, y0), size, v4(0.2, 0.2, 0.2, 1.));
+
+			x0 = x_left + size.x * 0.5;
+			y0 = y_top;
+			y0 -= 2.f;
 
 			// title
-			float x1 = x0;
-			float y1 = y0 + section_size.y;
 			{
-				string title = get_archetype_pretty_name(workbench_en->arch);
-				Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
-
-				float center_pos = x0 + section_size.x * 0.5;
-				Vector2 draw_pos = v2(center_pos, y1);
-				draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-				draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
-				draw_pos.y -= text_height_pad;
-
-				draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-
-				y1 = draw_pos.y; // TODO - workie?
-				y1 -= text_height_pad;
-				// y1 -= 20.0;
+				string txt = get_archetype_data(building_data.to_build).pretty_name;
+				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+				y0 -= met.visual_size.y + 2.f;
 			}
 
-			Vector2 item_icon_size = v2(8, 8);
+			// description
+			{
+				x0 = x_middle;
 
-			y1 -= item_icon_size.y;
+				float wrap_width = size.x;
+				string text = building_data.description;
 
-			// draw all item recipes
-			for (int i = 1; i < ITEM_MAX; i++) {
-				ItemData data = get_item_data(i);
-				if (data.for_structure == workbench_en->arch && data.crafting_recipe_count) {
-					Matrix4 xform = m4_identity;
-					xform = m4_translate(xform, v3(x1, y1, 0));
-
-					Vector4 col = COLOR_WHITE;
-					if (workbench_en->selected_crafting_item == i) {
-						col = col_select;
-					}
-
-					Range2f rect = range2f_make_bottom_left(v2(x1, y1), item_icon_size);
-					draw_sprite_in_rect(get_sprite_id_from_item(i), rect, col, 0.1);
-					if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-						// ...
-						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							workbench_en->selected_crafting_item = i;
-						}
-					}
-					x1 += item_icon_size.x;
+				string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
+				for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
+					string line = lines[i];
+					Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+					y0 -= metrics.visual_size.y;
 				}
+			}
+
+			y0 = y_bottom;
+			y0 += 4.f;
+
+			// exp cost
+			{
+				Vector4 col = COLOR_WHITE;
+				if (exp_error_flash_alpha) {
+					col.xyz = v3_lerp(col.xyz, COLOR_RED.xyz, exp_error_flash_alpha);
+				}
+				string txt = tprint("Costs: %iml", building_data.exp_cost);
+				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, col, PIVOT_bottom_center);
 			}
 		}
-		
-		x0 += section_size.x;
-		x0 += gap_between_panels;
-		Vector2 bottom_left_right_pane = v2(x0, y0);
-		Vector2 top_left_right_pane = v2(x0, y0 + section_size.y);
-
-		// right pane
-		{
-			Matrix4 xform = m4_identity;
-			xform = m4_translate(xform, v3(x0, y0, 0));
-			draw_rect_xform(xform, section_size, bg_col);
-
-			if (workbench_en->selected_crafting_item) {
-				ItemData selected_item_data = get_item_data(workbench_en->selected_crafting_item);
-
-				// title of item
-				y0 += section_size.y;
-				{
-					string title = selected_item_data.pretty_name;
-					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
-
-					float center_pos = x0 + section_size.x * 0.5;
-					Vector2 draw_pos = v2(center_pos, y0);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_add(draw_pos, v2_mul(metrics.visual_size, v2(-0.5, -1.0))); // top center
-					draw_pos.y -= text_height_pad;
-
-					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-
-					y0 = draw_pos.y; // TODO - workie?
-					y0 -= text_height_pad;
-					// y1 -= 20.0;
-				}
-
-				// description
-				{
-					x0 += section_size.x * 0.5;
-
-					float wrap_width = section_size.x;
-					string text = selected_item_data.description;
-
-					string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
-					for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
-						string line = lines[i];
-						Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-						y0 -= metrics.visual_size.y;
-					}
-				}
-
-				y0 = bottom_left_right_pane.y + 30.0; // @cleanup
-
-				// list out the ingredients
-				for (int i = 0; i < selected_item_data.crafting_recipe_count; i++) {
-					ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
-					ItemData ingredient_item_data = get_item_data(ingredient_amount.id);
-
-					Vector2 element_size = v2(section_size.x * 0.8, 6.0);
-
-					x0 = bottom_left_right_pane.x + (section_size.x - element_size.x) * 0.5;
-
-					// bg box thing
-					draw_rect(v2(x0, y0), element_size, fill_col);
-
-					// icon
-					{
-						float item_icon_length = element_size.y * 0.8;
-
-						float x1 = bottom_left_right_pane.x + section_size.x * 0.5 - element_size.y;
-						float y1 = y0 + (item_icon_length - element_size.y) * -0.5;
-
-						Matrix4 xform = m4_identity;
-						xform = m4_translate(xform, v3(x1, y1, 0));
-						Draw_Quad* quad = draw_image_xform(get_sprite(get_sprite_id_from_item(ingredient_amount.id))->image, xform, v2(item_icon_length, item_icon_length), COLOR_WHITE);
-						Range2f icon_box = quad_to_range(*quad);
-						if (range2f_contains(icon_box, get_mouse_pos_in_ndc())) {
-							// ...
-						}
-					}
-
-					InventoryItemData inv_item = world->inventory_items[ingredient_amount.id];
-					Vector4 txt_col = COLOR_WHITE;
-					if (inv_item.amount < ingredient_amount.amount) {
-						txt_col = COLOR_RED;
-					}
-
-					string txt = tprint("%i/%i", inv_item.amount, ingredient_amount.amount);
-					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
-					float center_pos = bottom_left_right_pane.x + section_size.x * 0.5;
-					Vector2 draw_pos = v2(center_pos, y0 + element_size.y * 0.5);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0, 0.5)));
-					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), txt_col);
-					// y0 += metrics.visual_size.y;
-
-					y0 -= element_size.y;
-					y0 -= 2.0f; // padding @cleanup
-				}
-
-				// craft button
-				{
-					Vector2 size = v2(section_size.x * 0.8, 6.0);
-
-					x0 = bottom_left_right_pane.x + (section_size.x - size.x) * 0.5;
-					y0 = bottom_left_right_pane.y;
-					y0 += 5.0f; // padding from bottom @cleanup
-
-					// check for all ingredients met
-					bool has_enough_for_crafting = true;
-					for (int i = 0; i < selected_item_data.crafting_recipe_count; i++) {
-						ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
-						if (ingredient_amount.amount > world->inventory_items[ingredient_amount.id].amount) {
-							has_enough_for_crafting = false;
-							break;
-						}
-					}
-
-					// disable craft button when something is already crafing.
-					if (workbench_en->current_crafting_item && workbench_en->current_crafting_item != workbench_en->selected_crafting_item) {
-						has_enough_for_crafting = false;
-					}
-
-					Range2f btn_range = range2f_make_bottom_left(v2(x0, y0), size);
-					Vector4 col = fill_col;
-					if (has_enough_for_crafting && range2f_contains(btn_range, get_mouse_pos_in_world_space())) {
-						col = col_select;
-						world_frame.hover_consumed = true;
-						// TODO - where do we put the state for the animation of the button?
-						// Either just manually rip it via the App state, or some kind of hash string thing that's probably overcomplicated as shit.
-						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							// :craft!
-							workbench_en->current_crafting_item = workbench_en->selected_crafting_item;
-							workbench_en->current_crafting_amount += 1;
-							// remove ingredients from inventory
-							for (int i = 0; i < selected_item_data.crafting_recipe_count; i++) {
-								ItemAmount ingredient_amount = selected_item_data.crafting_recipe[i];
-								world->inventory_items[ingredient_amount.id].amount -= ingredient_amount.amount;
-								assert(world->inventory_items[ingredient_amount.id].amount >= 0, "removed too many items. the check above must have failed!");
-							}
-						}
-					}
-					// todo - disable button with has_enough_for_crafting
-					draw_rect(v2(x0, y0), size, col);
-
-					string txt = STR("CRAFT");
-					Gfx_Text_Metrics metrics = measure_text(font, txt, font_height, v2(0.1, 0.1));
-					float center_pos = bottom_left_right_pane.x + section_size.x * 0.5;
-					Vector2 draw_pos = v2(center_pos, y0 + size.y * 0.5);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
-
-					draw_text(font, txt, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-				}
-
-			} else {
-				// select item first text
-				y0 += section_size.y * 0.5;
-				{
-					string title = STR("Select Item to Craft");
-					Gfx_Text_Metrics metrics = measure_text(font, title, font_height, v2(0.1, 0.1));
-
-					Vector2 draw_pos = v2(x0 + section_size.x * 0.5, y0);
-					draw_pos = v2_sub(draw_pos, metrics.visual_pos_min);
-					draw_pos = v2_sub(draw_pos, v2_mul(metrics.visual_size, v2(0.5, 0.5)));
-
-					draw_text(font, title, font_height, draw_pos, v2(0.1, 0.1), COLOR_WHITE);
-				}
-			}
-		}
+		*/
 
 		world_frame.hover_consumed = true;
 	}
@@ -3389,6 +3281,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// :workbench update
+				/*
 				if (en->workbench_thing) {
 					if (en->current_crafting_item) {
 						float length = get_item_data(en->current_crafting_item).craft_length;
@@ -3415,6 +3308,7 @@ int entry(int argc, char **argv) {
 						}
 					}
 				}
+				*/
 
 				// :oxygenerator update
 				if (en->arch == ARCH_oxygenerator) {
@@ -3814,15 +3708,6 @@ int entry(int argc, char **argv) {
 				}
 			}
 
-			// :interact workbench
-			if (selected_en && selected_en->workbench_thing) {
-				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-					world->ux_state = UX_workbench;
-					world->interacting_with_entity = selected_en;
-				}
-			}
-
 			// interact research station
 			if (selected_en && selected_en->arch == ARCH_research_station) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
@@ -3953,6 +3838,7 @@ int entry(int argc, char **argv) {
 
 				// :workbench render
 				// craft progress thing
+				/*
 				if (en->current_crafting_item && en->workbench_thing) {
 					float radius = 4.0; 
 
@@ -3975,6 +3861,7 @@ int entry(int argc, char **argv) {
 						draw_circle_xform(xform, v2(radius*2, radius*2), COLOR_BLACK);
 					}
 				}
+				*/
 			}
 		}
 

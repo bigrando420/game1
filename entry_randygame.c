@@ -284,6 +284,8 @@ typedef enum SpriteID {
 	SPRITE_raw_iron,
 	SPRITE_iron_ingot,
 	SPRITE_iron_depo,
+	SPRITE_wall,
+	SPRITE_wall_gate,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -357,6 +359,8 @@ typedef enum ArchetypeID {
 	ARCH_longboi_test = 20,
 	ARCH_coal_depo = 21,
 	ARCH_iron_depo = 22,
+	ARCH_wall = 23,
+	ARCH_wall_gate = 24,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -447,10 +451,11 @@ typedef struct Entity {
 	int last_fuel_max;
 	int current_fuel;
 	bool offset_based_on_tile_height;
-
 	ItemID current_crafting_item;
 	int progress_on_crafting; // this goes up to 100
 	float64 next_crafting_progress_tick_end_time;
+	bool has_collision;
+	Range2f collision_bounds;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -478,6 +483,8 @@ typedef enum BuildingID {
 	BUILDING_tether,
 	BUILDING_burner_drill,
 	BUILDING_longboi_test,
+	BUILDING_wall,
+	BUILDING_wall_gate,
 	// :building resource
 	BUILDING_MAX,
 } BuildingID;
@@ -731,7 +738,22 @@ void entity_destroy(Entity* entity) {
 	memset(entity, 0, sizeof(Entity));
 }
 
-// :setup things
+// :arch setup things
+
+void setup_wall(Entity* en) {
+	en->arch = ARCH_wall;
+	en->pretty_name = STR("Wall");
+	en->tile_size = v2i(1, 1);
+	en->sprite_id = SPRITE_wall;
+	en->has_collision = true;
+	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
+}
+void setup_wall_gate(Entity* en) {
+	en->arch = ARCH_wall_gate;
+	en->pretty_name = STR("Wall Gate");
+	en->tile_size = v2i(1, 1);
+	en->sprite_id = SPRITE_wall_gate;
+}
 
 void setup_iron_depo(Entity* en) {
 	en->arch = ARCH_iron_depo;
@@ -887,6 +909,9 @@ void setup_player(Entity* en) {
 	en->health = 1;
 	en->max_health = en->health;
 	en->oxygen = get_max_oxygen();
+	en->has_physics = true;
+	en->friction = 20.f;
+	en->collision_bounds = range2f_make_center_center(v2(0,0), v2(6, 9));
 }
 
 void setup_rock(Entity* en) {
@@ -949,7 +974,9 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_longboi_test: setup_longboi_test(en); break;
 		case ARCH_coal_depo: setup_coal_depo(en); break;
 		case ARCH_iron_depo: setup_iron_depo(en); break;
-		// :setup
+		case ARCH_wall: setup_wall(en); break;
+		case ARCH_wall_gate: setup_wall_gate(en); break;
+		// :arch setup
 	}
 }
 
@@ -1252,6 +1279,7 @@ void world_setup()
 		
 		world->building_unlocks[BUILDING_tether].research_progress = 100;
 
+		world->inventory_items[ITEM_iron_ingot].amount = 100;
 		world->inventory_items[ITEM_raw_copper].amount = 50;
 		world->inventory_items[ITEM_pine_wood].amount = 50;
 		world->inventory_items[ITEM_coal].amount = 50;
@@ -2363,6 +2391,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_iron_ingot] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/iron_ingot.png"), get_heap_allocator())};
 		sprites[SPRITE_raw_iron] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/raw_iron.png"), get_heap_allocator())};
 		sprites[SPRITE_iron_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/iron_depo.png"), get_heap_allocator())};
+		sprites[SPRITE_wall] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/wall.png"), get_heap_allocator())};
+		sprites[SPRITE_wall_gate] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/wall_gate.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2382,6 +2412,26 @@ int entry(int argc, char **argv) {
 	
 	// :building resource setup
 	{
+
+
+		// note, this should go into a "Buildings #1" grouped research unlock thingo
+		buildings[BUILDING_wall_gate] = (BuildingData){
+			.to_build=ARCH_wall_gate,
+			.icon=SPRITE_wall_gate,
+			.description=STR("Allows travel into a sealed room"),
+			.exp_cost=200,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 1}, }
+		};
+		buildings[BUILDING_wall] = (BuildingData){
+			.to_build=ARCH_wall,
+			.icon=SPRITE_wall,
+			.description=STR("Can be used to build a sealed Oxygen room"),
+			.exp_cost=200,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 1} }
+		};
+
 		buildings[BUILDING_longboi_test] = (BuildingData){
 			.disable_building=true,
 			.to_build=ARCH_longboi_test,
@@ -3238,15 +3288,8 @@ int entry(int argc, char **argv) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
 
-				// consume input item
-				// begin progress towards smelting
-				// convert fuel into progress, at a certain rate
+				// :furnace update
 				if (en->arch == ARCH_furnace) {
-
-					// en->current_fuel;
-					// en->last_fuel_max;
-					// en->current_crafting_item;
-					// en->progress_on_crafting;
 
 					// fuel consume
 					if (en->current_fuel <= 0 && en->input0.id && en->input1.id) {
@@ -3453,6 +3496,16 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		// cache all entities that're collidable
+		Entity** collision_entities;
+		growing_array_init_reserve((void**)&collision_entities, sizeof(Entity*), 1, get_temporary_allocator());
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			if (en->is_valid && en->has_collision) {
+				growing_array_add((void**)&collision_entities, &en);
+			}
+		}
+
 		// :physics update
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
@@ -3460,20 +3513,114 @@ int entry(int argc, char **argv) {
 				continue;
 			}
 
-			// https://guide.handmadehero.org/code/day043
-			
-			// "friction"
-			if (!en->disable_friction) {
-				en->acceleration = v2_sub(en->acceleration, v2_mulf(en->velocity, en->friction));
+			// randy: I tried putting player thru the physics. But it feels worse because of the latency.
+			// Maybe we do want some kind of decel thou?
+			/*
+			if (en->arch == ARCH_player && !(en->frame.input_axis.x == 0 && en->frame.input_axis.y == 0)) {
+				float speed_target = 70.f;
+				float acceleration = 2600.f;
+
+				Vector2 vel_target = v2_mulf(en->frame.input_axis, speed_target);
+
+				// x
+				{
+					int sign = extract_sign(vel_target.x - en->velocity.x);
+					en->velocity.x += sign * acceleration * delta_t;
+
+					if (sign != extract_sign(vel_target.x - en->velocity.x)) {
+						en->velocity.x = vel_target.x;
+					}
+				}
+
+				// y
+				{
+					int sign = extract_sign(vel_target.y - en->velocity.y);
+					en->velocity.y += sign * acceleration * delta_t;
+
+					if (sign != extract_sign(vel_target.y - en->velocity.y)) {
+						en->velocity.y = vel_target.y;
+					}
+				}
+			}
+			*/
+
+			Vector2 next_pos = {0};
+			if (en->arch == ARCH_player) {
+				next_pos = v2_add(en->pos, v2_mulf(en->frame.input_axis, 70.0 * delta_t));
+			} else {
+				// https://guide.handmadehero.org/code/day043
+				
+				// "friction"
+				if (!en->disable_friction) {
+					en->acceleration = v2_sub(en->acceleration, v2_mulf(en->velocity, en->friction));
+				}
+				// integrate
+				en->velocity = v2_add(en->velocity, v2_mulf(en->acceleration, delta_t));
+				next_pos = v2_add(en->pos, v2_mulf(en->velocity, delta_t));
+				en->acceleration = (Vector2){0};
 			}
 
-			// integrate
-			en->velocity = v2_add(en->velocity, v2_mulf(en->acceleration, delta_t));
-			Vector2 next_pos = v2_add(en->pos, v2_mulf(en->velocity, delta_t));
-			en->acceleration = (Vector2){0};
+			// resolve collisions
+			// courtesy of chatgpt
+			Range2f our_bounds = range2f_shift(en->collision_bounds, en->pos);
+			for (int j = 0; j < growing_array_get_valid_count(collision_entities); j++) {
+				Entity* against = collision_entities[j];
+
+				// Skip self
+				if (against == en) {
+					continue;
+				}
+
+				// Get the collision bounds of the other entity
+				Range2f bounds = range2f_shift(against->collision_bounds, against->pos);
+
+				// Get our predicted bounds at next position
+				Range2f next_bounds = range2f_shift(en->collision_bounds, next_pos);
+
+				// Check for collision between next_bounds and bounds
+				bool overlap_x = next_bounds.min.x < bounds.max.x && next_bounds.max.x > bounds.min.x;
+				bool overlap_y = next_bounds.min.y < bounds.max.y && next_bounds.max.y > bounds.min.y;
+
+				if (overlap_x && overlap_y) {
+					// Collision detected, resolve it
+
+					// Calculate the penetration distances on both axes
+					float penetration_x1 = bounds.max.x - next_bounds.min.x; // Positive if overlapping from the left
+					float penetration_x2 = next_bounds.max.x - bounds.min.x; // Positive if overlapping from the right
+					float penetration_x = (penetration_x1 < penetration_x2) ? penetration_x1 : -penetration_x2;
+
+					float penetration_y1 = bounds.max.y - next_bounds.min.y; // Positive if overlapping from the bottom
+					float penetration_y2 = next_bounds.max.y - bounds.min.y; // Positive if overlapping from the top
+					float penetration_y = (penetration_y1 < penetration_y2) ? penetration_y1 : -penetration_y2;
+
+					// Resolve collision by moving next_pos out of collision along the axis of least penetration
+					if (fabsf(penetration_x) < fabsf(penetration_y)) {
+						// Resolve along X axis
+						next_pos.x += penetration_x;
+						en->velocity.x = 0;
+					} else {
+						// Resolve along Y axis
+						next_pos.y += penetration_y;
+						en->velocity.y = 0;
+					}
+				}
+			}
 
 			en->pos = next_pos;
 		}
+
+		#if defined(DRAW_BOUNDS)
+		{
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* en = &world->entities[i];
+				if (en->is_valid && !(range2f_size(en->collision_bounds).x == 0 && range2f_size(en->collision_bounds).y == 0)) {
+					Range2f rect = range2f_shift(en->collision_bounds, en->pos);
+					Draw_Quad* quad = draw_rect(rect.min, range2f_size(rect), v4(1, 0, 0, 0.3));
+					quad->z = 1000;
+				}
+			}
+		}
+		#endif
 
 		// :tether stuff
 		{
@@ -3830,9 +3977,6 @@ int entry(int argc, char **argv) {
 				}
 			}
 		}
-
-		// :player integrate (todo - move into physics)
-		player->pos = v2_add(player->pos, v2_mulf(player->frame.input_axis, 70.0 * delta_t));
 
 		// render :player
 		if (is_player_alive()) {

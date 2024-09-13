@@ -23,6 +23,9 @@ Range2f range2f_make_center_center(Vector2 pos, Vector2 size) {
 }
 
 // ?????
+// randy: okay, so I think this is the same as passing a pos as 0,0 ...
+// I just happened to not need the position in the case where I was setting this guy up.
+//
 Range2f range2f_make_bottom_center(Vector2 size) {
   Range2f range = {0};
   range.max = size;

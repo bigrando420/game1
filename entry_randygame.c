@@ -180,8 +180,14 @@ const int exp_vein_health = 10;
 const int copper_health = 10;
 const int rock_health = 10;
 const int tree_health = 10;
-const s32 layer_ui = 20;
-const s32 layer_world = 10;
+
+// :layers
+typedef enum Layers {
+	layer_world = 10,
+	layer_ui = 20,
+	layer_tooltip,
+	layer_cursor_item,
+} Layers;
 
 // global :app stuff
 // we could move this into an AppState struct.
@@ -357,11 +363,11 @@ typedef struct ItemData {
 	int extra_axe_dmg; // #extend_dmg_type_here
 	int extra_pickaxe_dmg;
 	int extra_sickle_dmg;
-	// :recipe crafting
 	ArchetypeID for_structure;
 	ItemAmount crafting_recipe[8];
 	int crafting_recipe_count;
 	float craft_length;
+	ItemID furnace_transform_into;
 } ItemData;
 ItemData item_data[ITEM_MAX] = {0};
 ItemData get_item_data(ItemID id) {
@@ -401,7 +407,6 @@ typedef struct Entity {
 	int max_health;
 	bool destroyable_world_item;
 	bool workbench_thing;
-	ItemID current_crafting_item;
 	int current_crafting_amount;
 	float64 crafting_end_time;
 	ItemAmount drops[4];
@@ -425,6 +430,7 @@ typedef struct Entity {
 	float white_flash_current_alpha;
 	int exp_amount;
 	ItemAmount input0;
+	ItemAmount input1;
 	float64 fuel_expire_end_time;
 	int anim_index;
 	float64 time_til_next_frame;
@@ -435,6 +441,10 @@ typedef struct Entity {
 	int last_fuel_max;
 	int current_fuel;
 	bool offset_based_on_tile_height;
+
+	ItemID current_crafting_item;
+	int progress_on_crafting; // this goes up to 100
+	float64 next_crafting_progress_tick_end_time;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -832,7 +842,7 @@ void setup_furnace(Entity* en) {
 	en->tile_size = v2i(2, 2);
 	en->pretty_name = STR("Furnace");
 	en->sprite_id = SPRITE_furnace;
-	en->workbench_thing = true;
+	en->interactable_entity = true;
 }
 
 void setup_workbench(Entity* en) {
@@ -1052,6 +1062,10 @@ Vector2 get_offset_for_rendering(Entity* en) {
 	return offset;
 }
 
+Range2f get_entity_range(Entity* en) {
+	Vector2 bottom_left = v2_add(en->pos, get_offset_for_rendering(en));
+	return (Range2f){ bottom_left, v2_add(bottom_left, get_sprite_size(get_sprite(en->sprite_id))) };
+}
 
 void do_entity_drops(Entity* en) {
 	ItemID *drops;
@@ -1098,6 +1112,7 @@ void draw_item_amount_in_rect(ItemAmount item_amount, Range2f rect) {
 }
 
 void item_tooltip(ItemAmount item_amount) {
+	push_z_layer(layer_tooltip);
 
 	Vector2 text_scale = v2(0.1, 0.1);
 	ItemData item_data = get_item_data(item_amount.id);
@@ -1114,6 +1129,7 @@ void item_tooltip(ItemAmount item_amount) {
 
 	Gfx_Text_Metrics met = draw_text_with_pivot(font, item_data.pretty_name, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 
+	pop_z_layer();
 }
 
 void camera_shake(float amount) {
@@ -1213,6 +1229,7 @@ void world_setup()
 		
 		world->building_unlocks[BUILDING_tether].research_progress = 100;
 
+		world->inventory_items[ITEM_raw_copper].amount = 50;
 		world->inventory_items[ITEM_pine_wood].amount = 50;
 		world->inventory_items[ITEM_coal].amount = 50;
 		world->inventory_items[ITEM_o2_shard].amount = 50;
@@ -2413,8 +2430,8 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_o2_shard] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_o2_shard};
 		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Old Rock Thing"), .icon=SPRITE_exp};
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock };
-		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood };
-		item_data[ITEM_raw_copper] = (ItemData){ .pretty_name=STR("Raw Copper"), .icon=SPRITE_raw_copper };
+		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood, .furnace_transform_into=ITEM_coal };
+		item_data[ITEM_raw_copper] = (ItemData){ .pretty_name=STR("Raw Copper"), .icon=SPRITE_raw_copper, .furnace_transform_into=ITEM_copper_ingot };
 		item_data[ITEM_fiber] = (ItemData){ .pretty_name=STR("Fiber"), .icon=SPRITE_fiber };
 		item_data[ITEM_flint] = (ItemData){ .pretty_name=STR("Flint"), .icon=SPRITE_flint };
 
@@ -2914,6 +2931,211 @@ int entry(int argc, char **argv) {
 				}
 			}
 
+			// :furance ux
+			if (en->arch == ARCH_furnace) {
+
+				Entity* en = world->interacting_with_entity;
+				float x0 = en->pos.x;
+				float y0 = en->pos.y;
+
+				// fuel input
+				Vector2 slot_size = v2(10, 10);
+				x0 -= slot_size.x * 0.5;
+				y0 += get_offset_for_rendering(en).y;
+				y0 -= slot_size.x + 1.f;
+				{
+					ItemID desired_item = ITEM_coal;
+
+					Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
+					if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+						
+						// interact with the slot
+						{
+							if (world->mouse_cursor_item.id) {
+								if (en->input0.id) {
+									if (en->input0.id == world->mouse_cursor_item.id) {
+										// attempt stack
+										if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+											consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+											en->input0.amount += world->mouse_cursor_item.amount;
+											world->mouse_cursor_item = (ItemAmount){0};
+										}
+									} else {
+										if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+											consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+											if (world->mouse_cursor_item.id == desired_item) {
+												// swap
+												ItemAmount temp = world->mouse_cursor_item;
+												world->mouse_cursor_item = en->input0;
+												en->input0 = temp;
+											} else {
+												play_sound("event:/error");
+											}
+										}
+									}
+								} else {
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										if (world->mouse_cursor_item.id == desired_item) {
+											// place inside
+											en->input0 = world->mouse_cursor_item;
+											world->mouse_cursor_item = (ItemAmount){0};
+										} else {
+											play_sound("event:/error");
+										}
+									}
+								}
+							} else {
+								if (en->input0.id) {
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										// take into hand
+										world->mouse_cursor_item = en->input0;
+										en->input0 = (ItemAmount){0};
+									}
+
+									item_tooltip(en->input0);
+								}
+							}
+						}
+					}
+
+					draw_rect(rect.min, slot_size, COLOR_GRAY);
+
+					if (en->input0.id) {
+						draw_item_amount_in_rect(en->input0, rect);
+					} else {
+						Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
+
+						if (en->current_fuel == 0) {
+							set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
+						} else {
+							set_col_override(quad, v4(0,0,0, 0.8));
+						}
+					}
+
+					// fuel bar
+					{
+						x0 += slot_size.x + 1.f;
+
+						Vector2 bar_size = v2(2, slot_size.y);
+
+						draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+
+						float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
+
+						draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
+					}
+				}
+
+				// item input
+				{
+					x0 = en->pos.x;
+					y0 = en->pos.y;
+
+					x0 -= slot_size.x * 0.5;
+					y0 = get_entity_range(en).max.y;
+					y0 += 1.f;
+
+					ItemAmount* slot = &en->input1;
+
+					ItemID* desired_items;
+					growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
+					for (ItemID i = 0; i < ITEM_MAX; i++) {
+						ItemData item_data = get_item_data(i);
+						if (item_data.furnace_transform_into) {
+							growing_array_add((void**)&desired_items, &i);
+						}
+					}
+
+					//
+
+					Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
+					if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+						
+						// interact with the slot
+						{
+
+							bool has_desired_item_in_hand = false;
+							for (int i = 0; i < growing_array_get_valid_count(desired_items); i++) {
+								ItemID desired_item = desired_items[i];
+								if (world->mouse_cursor_item.id == desired_item) {
+									has_desired_item_in_hand = true;
+									break;
+								}
+							}
+
+							if (world->mouse_cursor_item.id) {
+								if (slot->id) {
+									if (slot->id == world->mouse_cursor_item.id) {
+										// attempt stack
+										if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+											consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+											slot->amount += world->mouse_cursor_item.amount;
+											world->mouse_cursor_item = (ItemAmount){0};
+										}
+									} else {
+										if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+											consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+											if (has_desired_item_in_hand) {
+												// swap
+												ItemAmount temp = world->mouse_cursor_item;
+												world->mouse_cursor_item = *slot;
+												*slot = temp;
+											} else {
+												play_sound("event:/error");
+											}
+										}
+									}
+								} else {
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										if (has_desired_item_in_hand) {
+											// place inside
+											*slot = world->mouse_cursor_item;
+											world->mouse_cursor_item = (ItemAmount){0};
+										} else {
+											play_sound("event:/error");
+										}
+									}
+								}
+							} else {
+								if (slot->id) {
+									if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+										consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+										// take into hand
+										world->mouse_cursor_item = *slot;
+										*slot = (ItemAmount){0};
+									}
+
+									item_tooltip(*slot);
+								}
+							}
+						}
+					}
+
+					draw_rect(rect.min, slot_size, COLOR_GRAY);
+
+					if (slot->id) {
+						draw_item_amount_in_rect(*slot, rect);
+					}
+
+					// craft progress bar
+					{
+						y0 += slot_size.x + 1.f;
+
+						Vector2 bar_size = v2(slot_size.y, 2);
+
+						draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+
+						float alpha = float_alpha(en->progress_on_crafting, 0, 100);
+
+						draw_rect(v2(x0, y0), v2(bar_size.x * alpha, bar_size.y), col_oxygen);
+					}
+				}
+
+			}
+
 			pop_z_layer();
 		}
 
@@ -2987,6 +3209,60 @@ int entry(int argc, char **argv) {
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
+
+				// consume input item
+				// begin progress towards smelting
+				// convert fuel into progress, at a certain rate
+				if (en->arch == ARCH_furnace) {
+
+					// en->current_fuel;
+					// en->last_fuel_max;
+					// en->current_crafting_item;
+					// en->progress_on_crafting;
+
+					// fuel consume
+					if (en->current_fuel <= 0 && en->input0.id && en->input1.id) {
+						en->last_fuel_max = 200;
+						en->current_fuel = 200;
+
+						en->input0.amount -= 1;
+						if (en->input0.amount <= 0) {
+							en->input0 = (ItemAmount){0};
+						}
+					}
+
+					// consume crafting item to start
+					if (!en->current_crafting_item && en->current_fuel && en->input1.id) {
+						en->current_crafting_item = en->input1.id;
+
+						en->input1.amount -= 1;
+						if (en->input1.amount <= 0) {
+							en->input1 = (ItemAmount){0};
+						}
+					}
+
+					// progress the crafting
+					if (has_reached_end_time(en->next_crafting_progress_tick_end_time) && en->current_crafting_item && en->current_fuel > 0) {
+						en->progress_on_crafting += 1;
+						en->current_fuel -= 1;
+						en->next_crafting_progress_tick_end_time = now() + 0.1;
+						if (en->progress_on_crafting >= 100) {
+
+							ItemData item_data = get_item_data(en->current_crafting_item);
+
+							// :CRAFT!
+							Entity* drop = entity_create();
+							setup_item(drop, item_data.furnace_transform_into);
+							drop->pos = en->pos;
+							drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
+							drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
+
+							en->current_crafting_item = 0;
+							en->progress_on_crafting = 0;
+						}
+					}
+
+				}
 
 				// :burner update
 				if (en->arch == ARCH_burner_drill) {

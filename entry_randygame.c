@@ -281,6 +281,9 @@ typedef enum SpriteID {
 	SPRITE_burner_drill,
 	SPRITE_longboi_test,
 	SPRITE_coal_depo,
+	SPRITE_raw_iron,
+	SPRITE_iron_ingot,
+	SPRITE_iron_depo,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -315,6 +318,8 @@ typedef enum ItemID {
 	ITEM_flint_scythe,
 	ITEM_coal,
 	ITEM_o2_shard,
+	ITEM_raw_iron,
+	ITEM_iron_ingot,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -351,6 +356,7 @@ typedef enum ArchetypeID {
 	ARCH_burner_drill = 19,
 	ARCH_longboi_test = 20,
 	ARCH_coal_depo = 21,
+	ARCH_iron_depo = 22,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -526,6 +532,7 @@ typedef enum BiomeID {
 	BIOME_copper_heavy,
 	BIOME_ice,
 	BIOME_ice_heavy,
+	BIOME_iron,
 	// :biome #volatile
 	BIOME_MAX,
 } BiomeID;
@@ -550,6 +557,8 @@ WorldResourceData world_resources[] = {
 	{ BIOME_copper_heavy, ARCH_rock, 10 },
 
 	{ BIOME_ice, ARCH_ice_vein, 10 },
+
+	{ BIOME_iron, ARCH_iron_depo, 10 },
 	// :spawn_res system
 };
 
@@ -569,6 +578,7 @@ u32 biome_colors[BIOME_MAX] = {
 	0xa54b18, // copper heavy
 	0x70d6cd, // ice
 	0x26c9bc, // ice heavy
+	0xe49f9f, // iron
 	// :biome #volatile
 };
 
@@ -722,6 +732,18 @@ void entity_destroy(Entity* entity) {
 }
 
 // :setup things
+
+void setup_iron_depo(Entity* en) {
+	en->arch = ARCH_iron_depo;
+	en->tile_size = v2i(2, 1);
+	en->sprite_id = SPRITE_iron_depo;
+	en->health = 10;
+	en->max_health = en->health;
+	en->destroyable_world_item = true;
+	en->drops_count = 1;
+	en->drops[0] = (ItemAmount){.id=ITEM_raw_iron, .amount=1};
+	en->dmg_type = DMG_pickaxe;
+}
 
 void setup_coal_depo(Entity* en) {
 	en->arch = ARCH_coal_depo;
@@ -926,6 +948,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_burner_drill: setup_burner_drill(en); break;
 		case ARCH_longboi_test: setup_longboi_test(en); break;
 		case ARCH_coal_depo: setup_coal_depo(en); break;
+		case ARCH_iron_depo: setup_iron_depo(en); break;
 		// :setup
 	}
 }
@@ -2337,6 +2360,9 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_burner_drill] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/burner_drill.png"), get_heap_allocator())};
 		sprites[SPRITE_longboi_test] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/longboi_test.png"), get_heap_allocator())};
 		sprites[SPRITE_coal_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/coal_depo.png"), get_heap_allocator())};
+		sprites[SPRITE_iron_ingot] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/iron_ingot.png"), get_heap_allocator())};
+		sprites[SPRITE_raw_iron] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/raw_iron.png"), get_heap_allocator())};
+		sprites[SPRITE_iron_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/iron_depo.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2427,6 +2453,8 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item
+		item_data[ITEM_iron_ingot] = (ItemData){ .pretty_name=STR("Iron Ingot"), .icon=SPRITE_iron_ingot};
+		item_data[ITEM_raw_iron] = (ItemData){ .pretty_name=STR("Raw Iron"), .icon=SPRITE_raw_iron, .furnace_transform_into=ITEM_iron_ingot};
 		item_data[ITEM_o2_shard] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_o2_shard};
 		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Old Rock Thing"), .icon=SPRITE_exp};
 		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock };
@@ -2676,7 +2704,7 @@ int entry(int argc, char **argv) {
 			tiles_for_biome[biome] = tiles;
 		}
 
-		// :spawn_res in world
+		// spawn_res in world
 		{
 			for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 				WorldResourceData data = world_resources[i];

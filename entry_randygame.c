@@ -160,7 +160,6 @@ Vector4 col_exp;
 
 // :tweaks
 float o2_fuel_length = 30.f;
-Vector2 tether_connection_offset = {0, 4};
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
 float selection_reach_radius = 30.0f;
@@ -452,6 +451,7 @@ typedef struct Entity {
 	float64 oxygen_deplete_end_time;
 	float64 oxygen_regen_end_time;
 	bool is_oxygen_tether;
+	Vector2 tether_connection_offset;
 	bool isnt_a_tile;
 	bool right_click_remove;
 	float health_bar_current_alpha; // note how caveman it feels to store this here lol. OOGA BOOGA
@@ -734,7 +734,8 @@ void entity_destroy(Entity* entity) {
 
 void setup_o2_emitter(Entity* en) {
 	en->arch = ARCH_o2_emitter;
-	en->pretty_name = STR("Oxygen Emitter");
+	en->pretty_name = STR("Oxygen Feeder");
+	en->is_oxygen_tether = true;
 	en->tile_size = v2i(1, 1);
 	en->sprite_id = SPRITE_o2_emitter;
 	en->has_collision = true;
@@ -826,6 +827,7 @@ void setup_tether(Entity* en) {
 	en->pretty_name = STR("Tether");
 	en->sprite_id = SPRITE_tether;
 	en->is_oxygen_tether = true;
+	en->tether_connection_offset.y = 4;
 }
 
 void setup_oxygenerator(Entity* en) {
@@ -2117,6 +2119,7 @@ void do_ui_stuff() {
 
 			Sprite* icon = get_sprite(item_data.icon);
 			ArchetypeID arch_id = item_data.to_build;
+			Entity arch_data = get_archetype_data(arch_id);
 
 			Vector2 pos = get_mouse_pos_in_world_space();
 			pos = snap_position_to_nearest_tile_based_on_arch(pos, arch_id);
@@ -2140,13 +2143,13 @@ void do_ui_stuff() {
 			}
 
 			// :tether connection preview
-			if (arch_id == ARCH_tether)
+			if (arch_data.is_oxygen_tether)
 			{
 				for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 					Entity* tether = &world->entities[i];
 					if (tether->is_valid && tether->last_frame.is_powered) {
 						if (v2_dist(tether->pos, pos) < tether_connection_radius) {
-							draw_line(v2_add(tether->pos, tether_connection_offset), v2_add(pos, tether_connection_offset), 1.0f, col_tether);
+							draw_line(v2_add(tether->pos, tether->tether_connection_offset), v2_add(pos, arch_data.tether_connection_offset), 1.0f, col_tether);
 							break;
 						}
 					}
@@ -2363,7 +2366,7 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_o2_emitter] = (ItemData){
 			.to_build=ARCH_o2_emitter,
 			.icon=SPRITE_o2_emitter,
-			.description=STR("Emits oxygen inside a room"),
+			.description=STR("Feed oxygen into surrounding blocks"),
 			.exp_cost=200,
 			.ingredients_count=2,
 			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_copper_ingot, 2} }
@@ -3497,7 +3500,7 @@ int entry(int argc, char **argv) {
 						if (!connected_tether->frame.is_powered) {
 							growing_array_add((void**)&connection_stack, &connected_tether);
 							connected_tether->frame.is_powered = true;
-							draw_line(v2_add(connected_tether->pos, tether_connection_offset), v2_add(current->pos, tether_connection_offset), 1.0f, col_tether);
+							draw_line(v2_add(connected_tether->pos, connected_tether->tether_connection_offset), v2_add(current->pos, current->tether_connection_offset), 1.0f, col_tether);
 						}
 					}
 				}
@@ -3527,7 +3530,9 @@ int entry(int argc, char **argv) {
 			if (!is_losing_o2) {
 				player->oxygen_deplete_end_time = 0; // reset so it's a clean timer
 
-				draw_line(v2_add(closest_tether->pos, tether_connection_offset), player->pos, 1.0f, col_tether);
+				// player tether line
+				draw_line(v2_add(closest_tether->pos, closest_tether->tether_connection_offset), player->pos, 1.0f, col_tether);
+
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
 				}
@@ -3768,7 +3773,9 @@ int entry(int argc, char **argv) {
 
 				// :tether draw blue thingy
 				if (en->arch != ARCH_oxygenerator && en->frame.is_powered) {
-					draw_rect(v2_add(en->pos, v2(-1, 3)), v2(2, 2), col_oxygen);
+					Vector2 draw_pos = v2_add(en->pos, v2(-1, -1));
+					draw_pos = v2_add(draw_pos, en->tether_connection_offset);
+					draw_rect(draw_pos, v2(2, 2), col_oxygen);
 				}
 			}
 		}

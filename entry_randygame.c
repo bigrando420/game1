@@ -1032,8 +1032,7 @@ void set_world_space() {
 	draw_frame.camera_xform = world_frame.world_view;
 }
 
-// pad_pct just shrinks the rect by a % of itself ... 0.2 is a nice default
-Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, float pad_pct) {
+Draw_Quad* draw_sprite_in_rect_with_xform(SpriteID sprite_id, Range2f rect, Vector4 col, float pad_pct, Matrix4 xform) {
 	Sprite* sprite = get_sprite(sprite_id);
 	Vector2 sprite_size = get_sprite_size(sprite);
 
@@ -1091,7 +1090,15 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 		rect = range2f_shift(rect, v2((range_size.x - new_width) * 0.5, 0));
 	}
 
+	// apply xform
+	rect = m4_transform_range2f(xform, rect);
+
 	return draw_image(sprite->image, rect.min, range2f_size(rect), col);
+}
+
+// pad_pct just shrinks the rect by a % of itself ... 0.2 is a nice default
+Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, float pad_pct) {
+	return draw_sprite_in_rect_with_xform(sprite_id, rect, col, pad_pct, m4_identity);
 }
 
 inline float64 now() {
@@ -1770,14 +1777,14 @@ void do_ui_stuff() {
 					selected = i;
 				}
 
-				Range2f render_box = range2f_make_bottom_left(v2(0, 0), v2(icon_length, icon_length));
 				xform = m4_translate(xform, v3(x0, y0, 1));
 				xform = m4_translate(xform, v3(icon_length * 0.5, icon_length * 0.5, 1));
 				xform = m4_scale(xform, v3(scale, scale, 1));
 				xform = m4_translate(xform, v3(icon_length * -0.5, icon_length * -0.5, 1));
-				render_box = m4_transform_range2f(xform, render_box);
 
-				draw_sprite_in_rect(item_data.icon, render_box, COLOR_WHITE, 0.2);
+				Range2f render_box = range2f_make_bottom_left(v2(0, 0), v2(icon_length, icon_length));
+
+				draw_sprite_in_rect_with_xform(item_data.icon, render_box, COLOR_WHITE, 0.2, xform);
 			}
 			x0 += icon_length;
 
@@ -2034,6 +2041,16 @@ void do_ui_stuff() {
 				string txt = tprint("Costs: %iml", item_data.exp_cost);
 				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, col, PIVOT_bottom_center);
 			}
+		}
+	}
+
+
+	// cursor 'Q' quit
+	if (world->mouse_cursor_item.id) {
+		if (is_key_just_pressed('Q')) {
+			consume_key_just_pressed('Q');
+			world->inventory_items[world->mouse_cursor_item.id].amount += world->mouse_cursor_item.amount;
+			world->mouse_cursor_item = (ItemAmount){0};
 		}
 	}
 

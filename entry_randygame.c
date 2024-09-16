@@ -481,6 +481,7 @@ typedef struct Entity {
 	float64 next_crafting_progress_tick_end_time;
 	bool has_collision;
 	Range2f collision_bounds;
+	bool ignore_collision;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -912,7 +913,7 @@ void setup_workbench(Entity* en) {
 
 void setup_research_station(Entity* en) {
 	en->arch = ARCH_research_station;
-	en->tile_size = v2i(2, 2);
+	en->tile_size = v2i(2, 1);
 	en->pretty_name = STR("Research Station");
 	en->sprite_id = SPRITE_research_station;
 	en->interactable_entity = true;
@@ -963,6 +964,7 @@ void setup_item(Entity* en, ItemID item_id) {
 	en->item_id = item_id;
 	en->item_amount = 1;
 	en->isnt_a_tile = true;
+	en->ignore_collision = true;
 }
 
 void entity_setup(Entity* en, ArchetypeID id) {
@@ -1973,10 +1975,21 @@ void do_ui_stuff() {
 		float x0 = screen_width * 0.5 - pane_size.x * 0.5;
 		float y0 = screen_height * 0.5 - pane_size.y * 0.5;
 		float x_left = x0;
+		float x_middle = x0 + pane_size.x * 0.5;
 
 		draw_rect(v2(x0, y0), pane_size, bg_col);
 
 		y0 += pane_size.y;
+
+		// title
+		{
+			y0 -= 2.f;
+			x0 = x_middle;
+			string txt = get_archetype_data(entity->arch).pretty_name;
+			Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+			y0 -= met.visual_size.y + 2.f;
+			x0 = x_left;
+		}
 
 		float icon_length = 10.f;
 		y0 -= icon_length;
@@ -3398,50 +3411,52 @@ int entry(int argc, char **argv) {
 				en->acceleration = (Vector2){0};
 			}
 
-			Range2f our_bounds = get_entity_collision_bounds(en);
-			our_bounds = range2f_shift(our_bounds, en->pos);
+			if (!en->ignore_collision) {
+				Range2f our_bounds = get_entity_collision_bounds(en);
+				our_bounds = range2f_shift(our_bounds, en->pos);
 
-			// resolve collisions
-			// courtesy of chatgpt
-			for (int j = 0; j < growing_array_get_valid_count(collision_entities); j++) {
-				Entity* against = collision_entities[j];
+				// resolve collisions
+				// courtesy of chatgpt
+				for (int j = 0; j < growing_array_get_valid_count(collision_entities); j++) {
+					Entity* against = collision_entities[j];
 
-				// Skip self
-				if (against == en) {
-					continue;
-				}
+					// Skip self
+					if (against == en) {
+						continue;
+					}
 
-				// Get the collision bounds of the other entity
-				Range2f bounds = range2f_shift(get_entity_collision_bounds(against), against->pos);
+					// Get the collision bounds of the other entity
+					Range2f bounds = range2f_shift(get_entity_collision_bounds(against), against->pos);
 
-				// Get our predicted bounds at next position
-				Range2f next_bounds = range2f_shift(get_entity_collision_bounds(en), next_pos);
+					// Get our predicted bounds at next position
+					Range2f next_bounds = range2f_shift(get_entity_collision_bounds(en), next_pos);
 
-				// Check for collision between next_bounds and bounds
-				bool overlap_x = next_bounds.min.x < bounds.max.x && next_bounds.max.x > bounds.min.x;
-				bool overlap_y = next_bounds.min.y < bounds.max.y && next_bounds.max.y > bounds.min.y;
+					// Check for collision between next_bounds and bounds
+					bool overlap_x = next_bounds.min.x < bounds.max.x && next_bounds.max.x > bounds.min.x;
+					bool overlap_y = next_bounds.min.y < bounds.max.y && next_bounds.max.y > bounds.min.y;
 
-				if (overlap_x && overlap_y) {
-					// Collision detected, resolve it
+					if (overlap_x && overlap_y) {
+						// Collision detected, resolve it
 
-					// Calculate the penetration distances on both axes
-					float penetration_x1 = bounds.max.x - next_bounds.min.x; // Positive if overlapping from the left
-					float penetration_x2 = next_bounds.max.x - bounds.min.x; // Positive if overlapping from the right
-					float penetration_x = (penetration_x1 < penetration_x2) ? penetration_x1 : -penetration_x2;
+						// Calculate the penetration distances on both axes
+						float penetration_x1 = bounds.max.x - next_bounds.min.x; // Positive if overlapping from the left
+						float penetration_x2 = next_bounds.max.x - bounds.min.x; // Positive if overlapping from the right
+						float penetration_x = (penetration_x1 < penetration_x2) ? penetration_x1 : -penetration_x2;
 
-					float penetration_y1 = bounds.max.y - next_bounds.min.y; // Positive if overlapping from the bottom
-					float penetration_y2 = next_bounds.max.y - bounds.min.y; // Positive if overlapping from the top
-					float penetration_y = (penetration_y1 < penetration_y2) ? penetration_y1 : -penetration_y2;
+						float penetration_y1 = bounds.max.y - next_bounds.min.y; // Positive if overlapping from the bottom
+						float penetration_y2 = next_bounds.max.y - bounds.min.y; // Positive if overlapping from the top
+						float penetration_y = (penetration_y1 < penetration_y2) ? penetration_y1 : -penetration_y2;
 
-					// Resolve collision by moving next_pos out of collision along the axis of least penetration
-					if (fabsf(penetration_x) < fabsf(penetration_y)) {
-						// Resolve along X axis
-						next_pos.x += penetration_x;
-						en->velocity.x = 0;
-					} else {
-						// Resolve along Y axis
-						next_pos.y += penetration_y;
-						en->velocity.y = 0;
+						// Resolve collision by moving next_pos out of collision along the axis of least penetration
+						if (fabsf(penetration_x) < fabsf(penetration_y)) {
+							// Resolve along X axis
+							next_pos.x += penetration_x;
+							en->velocity.x = 0;
+						} else {
+							// Resolve along Y axis
+							next_pos.y += penetration_y;
+							en->velocity.y = 0;
+						}
 					}
 				}
 			}

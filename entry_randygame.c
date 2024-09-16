@@ -288,6 +288,8 @@ typedef enum SpriteID {
 	SPRITE_iron_depo,
 	SPRITE_wall,
 	SPRITE_wall_gate,
+	SPRITE_fabricator,
+	SPRITE_o2_emitter,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -339,6 +341,7 @@ typedef enum ItemID {
 	ITEM_longboi_test,
 	ITEM_wall,
 	ITEM_wall_gate,
+	ITEM_o2_emitter,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -378,6 +381,7 @@ typedef enum ArchetypeID {
 	ARCH_iron_depo = 22,
 	ARCH_wall = 23,
 	ARCH_wall_gate = 24,
+	ARCH_o2_emitter = 25,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -393,13 +397,12 @@ typedef struct ItemData {
 	ArchetypeID for_structure;
 	float craft_length;
 	ItemID furnace_transform_into;
-
+	bool disabled;
 	// merged in from building.
 	ArchetypeID to_build;
 	int exp_cost;
 	ItemAmount ingredients[8];
 	int ingredients_count;
-	bool disable_building;
 
 } ItemData;
 ItemData item_data[ITEM_MAX] = {0};
@@ -727,7 +730,16 @@ void entity_destroy(Entity* entity) {
 	memset(entity, 0, sizeof(Entity));
 }
 
-// :arch setup things
+// :arch :setup things
+
+void setup_o2_emitter(Entity* en) {
+	en->arch = ARCH_o2_emitter;
+	en->pretty_name = STR("Oxygen Emitter");
+	en->tile_size = v2i(1, 1);
+	en->sprite_id = SPRITE_o2_emitter;
+	en->has_collision = true;
+	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
+}
 
 void setup_wall(Entity* en) {
 	en->arch = ARCH_wall;
@@ -754,6 +766,7 @@ void setup_iron_depo(Entity* en) {
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_raw_iron, .amount=1};
 	en->dmg_type = DMG_pickaxe;
+	en->has_collision = true;
 }
 
 void setup_coal_depo(Entity* en) {
@@ -766,6 +779,7 @@ void setup_coal_depo(Entity* en) {
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_coal, .amount=1};
 	en->dmg_type = DMG_pickaxe;
+	en->has_collision = true;
 }
 
 void setup_longboi_test(Entity* en) {
@@ -782,6 +796,7 @@ void setup_burner_drill(Entity* en) {
 	en->sprite_id = SPRITE_burner_drill;
 	en->radius = tile_width * 4;
 	en->interactable_entity = true;
+	en->has_collision = true;
 }
 
 void setup_tile_resource(Entity* en) {
@@ -798,6 +813,7 @@ void setup_ice_vein(Entity* en) {
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_o2_shard, .amount=1};
 	en->dmg_type = DMG_pickaxe;
+	en->has_collision = true;
 }
 
 void setup_exp_orb(Entity* en) {
@@ -817,6 +833,8 @@ void setup_oxygenerator(Entity* en) {
 	en->sprite_id = SPRITE_oxygenerator;
 	en->is_oxygen_tether = true;
 	en->interactable_entity = true;
+	en->has_collision = true;
+	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
 }
 
 void setup_grass(Entity* en) {
@@ -840,6 +858,7 @@ void setup_flint_depo(Entity* en) {
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_pickaxe;
+	en->has_collision = true;
 }
 
 void setup_copper_depo(Entity* en) {
@@ -851,6 +870,7 @@ void setup_copper_depo(Entity* en) {
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_pickaxe;
+	en->has_collision = true;
 }
 
 void setup_teleporter1(Entity* en) {
@@ -876,13 +896,16 @@ void setup_furnace(Entity* en) {
 	en->pretty_name = STR("Furnace");
 	en->sprite_id = SPRITE_furnace;
 	en->interactable_entity = true;
+	en->has_collision = true;
 }
 
 void setup_workbench(Entity* en) {
 	en->arch = ARCH_workbench;
-	en->pretty_name = STR("Workbench");
-	en->sprite_id = SPRITE_workbench;
+	en->pretty_name = STR("Fabricator");
+	en->sprite_id = SPRITE_fabricator;
 	en->interactable_entity = true;
+	en->tile_size = v2i(2,2);
+	en->has_collision = true;
 }
 
 void setup_research_station(Entity* en) {
@@ -891,6 +914,7 @@ void setup_research_station(Entity* en) {
 	en->pretty_name = STR("Research Station");
 	en->sprite_id = SPRITE_research_station;
 	en->interactable_entity = true;
+	en->has_collision = true;
 }
 
 void setup_player(Entity* en) {
@@ -926,6 +950,9 @@ void setup_tree(Entity* en) {
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_pine_wood, .amount=1};
 	en->dmg_type = DMG_axe;
+	en->has_collision = true;
+	en->collision_bounds = range2f_make_bottom_center(v2(4, 4));
+	en->collision_bounds = range2f_shift(en->collision_bounds, v2(0, -tile_width));
 }
 
 void setup_item(Entity* en, ItemID item_id) {
@@ -965,6 +992,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_iron_depo: setup_iron_depo(en); break;
 		case ARCH_wall: setup_wall(en); break;
 		case ARCH_wall_gate: setup_wall_gate(en); break;
+		case ARCH_o2_emitter: setup_o2_emitter(en); break;
 		// :arch setup
 	}
 }
@@ -1115,6 +1143,35 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+Range2f get_entity_collision_bounds(Entity* en) {
+	Range2f bounds = en->collision_bounds;
+	if (almost_equals(range2f_size(bounds).x, 0, 0.1) || almost_equals(range2f_size(bounds).y, 0, 0.1)) {
+		// auto-gen bounds from sprite size
+		bounds = range2f_make_center_center(v2(0,0), get_sprite_size(get_sprite(en->sprite_id)));
+	}
+	return bounds;
+}
+
+Vector2 snap_position_to_nearest_tile_based_on_arch(Vector2 pos, ArchetypeID id) {
+	Vector2i tile_size = get_archetype_data(id).tile_size;
+
+	if (tile_size.x % 2 == 0) {
+		pos.x = roundf(pos.x / (float)tile_width) * tile_width;
+	} else {
+		pos.x = floorf(pos.x / (float)tile_width) * tile_width;
+		pos.x += tile_width * 0.5;
+	}
+
+	if (tile_size.y % 2 == 0) {
+		pos.y = roundf(pos.y / (float)tile_width) * tile_width;
+	} else {
+		pos.y = floorf(pos.y / (float)tile_width) * tile_width;
+		pos.y += tile_width * 0.5;
+	}
+
+	return pos;
+}
+
 Vector2 get_offset_for_rendering(Entity* en) {
 	Sprite* sprite = get_sprite(en->sprite_id);
 
@@ -1251,48 +1308,14 @@ void world_setup()
 	setup_oxygenerator(en);
 	world->oxygenerator = en;
 	en->fuel_expire_end_time = now() + o2_fuel_length;
+	en->pos = snap_position_to_nearest_tile_based_on_arch(v2(0, 0), en->arch);
 
 	en = entity_create();
 	setup_workbench(en);
-	en->pos.x = 12;
+	en->pos = snap_position_to_nearest_tile_based_on_arch(v2(-tile_width, tile_width), en->arch);
 
 	world->item_unlocks[ITEM_research_station].research_progress = 100;
 	world->item_unlocks[ITEM_workbench].research_progress = 100;
-
-	// spawn ice depos nearby
-	if (false)
-	{
-		en = entity_create();
-		setup_ice_vein(en);
-		en->pos.x = 50.f;
-
-		// en = entity_create();
-		// setup_ice_vein(en);
-		// en->pos.x = -10.f;
-		// en->pos.y = 30.f;
-	}
-
-	// spawn biome :resources
-	if (false)
-	{
-		for (int y = 0; y < map.height; y++)
-		for (int x = 0; x < map.width; x++)
-		{
-			BiomeID biome_at_tile = map.tiles[y * map.width + x];
-			Tile tile = local_map_to_world_tile(v2i(x, y));
-
-			switch (biome_at_tile) {
-				case BIOME_ice_heavy: {
-					// spawn ice entity thingo
-					Entity* en = entity_create();
-					setup_tile_resource(en);
-					en->pos = v2_tile_pos_to_entity_world_pos(tile, en->arch);
-				} break;
-
-				default: break;
-			}
-		}
-	}
 
 	// :test stuff
 	#if defined(DEV_TESTING)
@@ -1313,13 +1336,13 @@ void world_setup()
 		world->inventory_items[ITEM_fiber].amount = 100;
 		world->inventory_items[ITEM_copper_ingot].amount = 100;
 
-		en = entity_create();
-		setup_furnace(en);
-		en->pos.y = 20.0;
+		// en = entity_create();
+		// setup_furnace(en);
+		// en->pos.y = 20.0;
 
-		en = entity_create();
-		setup_research_station(en);
-		en->pos.x = -20.0;
+		// en = entity_create();
+		// setup_research_station(en);
+		// en->pos.x = -20.0;
 	}
 	#endif
 }
@@ -1743,6 +1766,7 @@ void do_ui_stuff() {
 		float x0 = screen_width * 0.5 - pane_size.x * 0.5;
 		float y0 = screen_height * 0.5 - pane_size.y * 0.5;
 		float x_left = x0;
+		float x_middle = x0 + pane_size.x * 0.5;
 
 		Range2f rect = range2f_make_bottom_left(v2(x0, y0), pane_size);
 		if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
@@ -1753,14 +1777,24 @@ void do_ui_stuff() {
 
 		y0 += pane_size.y;
 
+		{
+			y0 -= 2.f;
+			x0 = x_middle;
+			string txt = get_archetype_data(ARCH_workbench).pretty_name;
+			Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+			y0 -= met.visual_size.y + 2.f;
+		}
+
+		x0 = x_left;
+
 		float icon_length = 10.f;
 		y0 -= icon_length;
 		ItemID selected = 0;
 		int count = 0;
 		for (ItemID i = 1; i < ITEM_MAX; i++) {
 			ItemData item_data  = get_item_data(i);
-			UnlockState unlock_state = world->item_unlocks[i];
-			if (item_data.ingredients_count == 0) {
+			bool unlocked = is_fully_unlocked(world->item_unlocks[i]);
+			if (item_data.ingredients_count == 0 || item_data.disabled) {
 				continue;
 			}
 
@@ -1772,7 +1806,7 @@ void do_ui_stuff() {
 				Matrix4 xform = m4_identity;
 
 				float scale = 1.f;
-				if (range2f_contains(box, get_mouse_pos_in_world_space())) {
+				if (unlocked && range2f_contains(box, get_mouse_pos_in_world_space())) {
 					scale = 1.2f;
 					selected = i;
 				}
@@ -1784,7 +1818,10 @@ void do_ui_stuff() {
 
 				Range2f render_box = range2f_make_bottom_left(v2(0, 0), v2(icon_length, icon_length));
 
-				draw_sprite_in_rect_with_xform(item_data.icon, render_box, COLOR_WHITE, 0.2, xform);
+				Draw_Quad* quad = draw_sprite_in_rect_with_xform(item_data.icon, render_box, COLOR_WHITE, 0.2, xform);
+				if (!unlocked) {
+					set_col_override(quad, v4(0.2, 0.2, 0.2, 1.0));
+				}
 			}
 			x0 += icon_length;
 
@@ -1797,122 +1834,130 @@ void do_ui_stuff() {
 
 		if (selected)
 		defer_scope(push_z_layer(layer_tooltip), pop_z_layer()) {
-			UnlockState* unlock_state = &world->item_unlocks[selected];
+			UnlockState unlock_state = world->item_unlocks[selected];
 			ItemData item_data = get_item_data(selected);
 
-			bool has_enough_for_recipe = true;
-			for (int i = 0; i < item_data.ingredients_count; i++) {
-				ItemAmount ing = item_data.ingredients[i];
-				ItemData ing_data = get_item_data(ing.id);
-				if (world->inventory_items[ing.id].amount < ing.amount) {
-					has_enough_for_recipe = false;
+			if (is_fully_unlocked(unlock_state)) {
+				bool has_enough_for_recipe = true;
+				for (int i = 0; i < item_data.ingredients_count; i++) {
+					ItemAmount ing = item_data.ingredients[i];
+					ItemData ing_data = get_item_data(ing.id);
+					if (world->inventory_items[ing.id].amount < ing.amount) {
+						has_enough_for_recipe = false;
+					}
 				}
-			}
 
-			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+				// craft
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-				if (has_enough_for_recipe) {
-					// insta craft straight into cursor
-					// #future, we'll wanna make this craft queue so we can lean into automated crafting
-					if (!world->mouse_cursor_item.id || world->mouse_cursor_item.id == selected) {
-						world->mouse_cursor_item.id = selected;
-						world->mouse_cursor_item.amount += 1;
+					if (has_enough_for_recipe) {
+						// insta craft straight into cursor
+						// #future, we'll wanna make this craft queue so we can lean into automated crafting
+						if (!world->mouse_cursor_item.id || world->mouse_cursor_item.id == selected) {
+							world->mouse_cursor_item.id = selected;
+							world->mouse_cursor_item.amount += 1;
 
-						for (int i = 0; i < item_data.ingredients_count; i++) {
-							ItemAmount ing = item_data.ingredients[i];
-							ItemData ing_data = get_item_data(ing.id);
-							world->inventory_items[ing.id].amount -= ing.amount;
+							for (int i = 0; i < item_data.ingredients_count; i++) {
+								ItemAmount ing = item_data.ingredients[i];
+								ItemData ing_data = get_item_data(ing.id);
+								world->inventory_items[ing.id].amount -= ing.amount;
+							}
+						}
+
+						play_sound("event:/craft");
+					} else {
+						play_sound("event:/error");
+					}
+
+				}
+
+				// tooltip
+				{
+					float width = 40.f;
+
+					float x_left = get_mouse_pos_in_world_space().x;
+					float y_top = get_mouse_pos_in_world_space().y;
+
+					float x_middle = x_left + width * 0.5;
+
+					float x0 = x_left;
+					float y0 = y_top;
+
+					float padding = 2.f;
+
+					x0 = x_left + width * 0.5;
+					y0 = y_top;
+					y0 -= padding;
+
+					// title
+					{
+						string txt = get_archetype_data(item_data.to_build).pretty_name;
+						Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+						y0 -= met.visual_size.y + padding;
+					}
+
+					x0 = x_left + padding;
+
+					{
+						Gfx_Text_Metrics met = draw_text_with_pivot(font, STR("Ingredients:"), font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_left);
+						y0 -= met.visual_size.y + padding;
+					}
+
+					x0 += 4.f;
+
+					float x_left_ingredient_list = x0;
+
+					// ingredient list
+					for (int i = 0; i < item_data.ingredients_count; i++) {
+						ItemAmount ing = item_data.ingredients[i];
+						ItemData ing_data = get_item_data(ing.id);
+
+						float height = font_height_body * text_scale.x;
+
+						x0 = x_left_ingredient_list;
+
+						Vector4 col = COLOR_WHITE;
+						if (world->inventory_items[ing.id].amount < ing.amount) {
+							col = COLOR_RED;
+						}
+
+						{
+							Range2f rect = range2f_make_top_left(v2(x0, y0), v2(height, height));
+							draw_sprite_in_rect(ing_data.icon, rect, COLOR_WHITE, 0);
+							x0 += height + 1.f;
+						}
+
+						string txt = tprint("%ix %s", ing.amount, ing_data.pretty_name);
+						Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height_body, v2(x0, y0), text_scale, col, PIVOT_top_left);
+						y0 -= met.visual_size.y + padding;
+					}
+
+					y0 -= padding;
+
+					// description
+					{
+						x0 = x_middle;
+
+						float wrap_width = width;
+						string text = item_data.description;
+
+						string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
+						for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
+							string line = lines[i];
+							Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+							y0 -= metrics.visual_size.y;
 						}
 					}
-				} else {
-					play_sound("event:/error");
-				}
 
-			}
+					y0 -= padding;
 
-			float width = 40.f;
+					float height = y0 - y_top;
 
-			float x_left = get_mouse_pos_in_world_space().x;
-			float y_top = get_mouse_pos_in_world_space().y;
-
-			float x_middle = x_left + width * 0.5;
-
-			float x0 = x_left;
-			float y0 = y_top;
-
-			float padding = 2.f;
-
-			x0 = x_left + width * 0.5;
-			y0 = y_top;
-			y0 -= padding;
-
-			// title
-			{
-				string txt = get_archetype_data(item_data.to_build).pretty_name;
-				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-				y0 -= met.visual_size.y + padding;
-			}
-
-			x0 = x_left + padding;
-
-			{
-				Gfx_Text_Metrics met = draw_text_with_pivot(font, STR("Ingredients:"), font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_left);
-				y0 -= met.visual_size.y + padding;
-			}
-
-			x0 += 4.f;
-
-			float x_left_ingredient_list = x0;
-
-			// ingredient list
-			for (int i = 0; i < item_data.ingredients_count; i++) {
-				ItemAmount ing = item_data.ingredients[i];
-				ItemData ing_data = get_item_data(ing.id);
-
-				float height = font_height_body * text_scale.x;
-
-				x0 = x_left_ingredient_list;
-
-				Vector4 col = COLOR_WHITE;
-				if (world->inventory_items[ing.id].amount < ing.amount) {
-					col = COLOR_RED;
-				}
-
-				{
-					Range2f rect = range2f_make_top_left(v2(x0, y0), v2(height, height));
-					draw_sprite_in_rect(ing_data.icon, rect, COLOR_WHITE, 0);
-					x0 += height + 1.f;
-				}
-
-				string txt = tprint("%ix %s", ing.amount, ing_data.pretty_name);
-				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height_body, v2(x0, y0), text_scale, col, PIVOT_top_left);
-				y0 -= met.visual_size.y + padding;
-			}
-
-			y0 -= padding;
-
-			// description
-			{
-				x0 = x_middle;
-
-				float wrap_width = width;
-				string text = item_data.description;
-
-				string* lines = split_text_to_lines_with_wrapping(text, wrap_width, font, font_height_body, text_scale, true);
-				for (int i = 0; i < growing_array_get_valid_count(lines); i++) {
-					string line = lines[i];
-					Gfx_Text_Metrics metrics = draw_text_with_pivot(font, line, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
-					y0 -= metrics.visual_size.y;
+					Draw_Quad* quad = draw_rect(v2(x_left, y_top), v2(width, height), v4(0.2, 0.2, 0.2, 1.));
+					quad->z = layer_tooltip-1;
 				}
 			}
-
-			y0 -= padding;
-
-			float height = y0 - y_top;
-
-			Draw_Quad* quad = draw_rect(v2(x_left, y_top), v2(width, height), v4(0.2, 0.2, 0.2, 1.));
-			quad->z = layer_tooltip-1;
 		}
 	}
 
@@ -1938,7 +1983,7 @@ void do_ui_stuff() {
 		for (int i = 1; i < ITEM_MAX; i++) {
 			UnlockState unlock_state = world->item_unlocks[i];
 			ItemData item_data = get_item_data(i);
-			if (item_data.ingredients_count == 0 || item_data.disable_building || is_fully_unlocked(unlock_state)) {
+			if (item_data.ingredients_count == 0 || item_data.disabled || is_fully_unlocked(unlock_state)) {
 				continue;
 			}
 
@@ -1960,9 +2005,8 @@ void do_ui_stuff() {
 				xform = m4_translate(xform, v3(icon_length * 0.5, icon_length * 0.5, 1));
 				xform = m4_scale(xform, v3(scale, scale, 1));
 				xform = m4_translate(xform, v3(icon_length * -0.5, icon_length * -0.5, 1));
-				render_box = m4_transform_range2f(xform, render_box);
 
-				draw_sprite_in_rect(item_data.icon, render_box, COLOR_WHITE, 0.2);
+				draw_sprite_in_rect_with_xform(item_data.icon, render_box, COLOR_WHITE, 0.2, xform);
 			}
 			x0 += icon_length;
 
@@ -2069,27 +2113,13 @@ void do_ui_stuff() {
 			defer_scope(push_z_layer(layer_buildings), pop_z_layer())
 		{
 			// :place building
+			world_frame.hover_consumed = true;
 
 			Sprite* icon = get_sprite(item_data.icon);
 			ArchetypeID arch_id = item_data.to_build;
 
 			Vector2 pos = get_mouse_pos_in_world_space();
-			Vector2i tile_size = get_archetype_data(arch_id).tile_size;
-			{
-				if (tile_size.x % 2 == 0) {
-					pos.x = roundf(pos.x / (float)tile_width) * tile_width;
-				} else {
-					pos.x = floorf(pos.x / (float)tile_width) * tile_width;
-					pos.x += tile_width * 0.5;
-				}
-
-				if (tile_size.y % 2 == 0) {
-					pos.y = roundf(pos.y / (float)tile_width) * tile_width;
-				} else {
-					pos.y = floorf(pos.y / (float)tile_width) * tile_width;
-					pos.y += tile_width * 0.5;
-				}
-			}
+			pos = snap_position_to_nearest_tile_based_on_arch(pos, arch_id);
 
 			// range preview
 			if (arch_id == ARCH_burner_drill)
@@ -2226,6 +2256,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_iron_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/iron_depo.png"), get_heap_allocator())};
 		sprites[SPRITE_wall] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/wall.png"), get_heap_allocator())};
 		sprites[SPRITE_wall_gate] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/wall_gate.png"), get_heap_allocator())};
+		sprites[SPRITE_fabricator] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/fabricator.png"), get_heap_allocator())};
+		sprites[SPRITE_o2_emitter] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/o2_emitter.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2282,12 +2314,12 @@ int entry(int argc, char **argv) {
 		// maybe we move some of these guys into the first round of item researching??
 		//
 		item_data[ITEM_flint_axe] = (ItemData){
+			.disabled=true,
 			.pretty_name=STR("Flint Axe"),
 			.description=STR("+1 damage to trees"),
 			.icon=SPRITE_flint_axe,
 			.craft_length=10,
 			.extra_axe_dmg=1,
-			.for_structure=ARCH_workbench,
 			.ingredients_count=3,
 			.ingredients={
 				{ITEM_pine_wood, 10},
@@ -2297,12 +2329,12 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_flint_pickaxe] = (ItemData){
+			.disabled=true,
 			.pretty_name=STR("Flint Pickaxe"),
 			.description=STR("+1 damage to rocks"), // todo - make this functional from the extra dmg state
 			.icon=SPRITE_flint_pickaxe,
 			.craft_length=10,
 			.extra_pickaxe_dmg=1,
-			.for_structure=ARCH_workbench,
 			.ingredients_count=3,
 			.ingredients={
 				{ITEM_pine_wood, 10},
@@ -2312,12 +2344,12 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_flint_scythe] = (ItemData){
+			.disabled=true,
 			.pretty_name=STR("Flint Scythe"),
 			.description=STR("+1 damage to grass"),
 			.icon=SPRITE_flint_scythe,
 			.craft_length=10,
 			.extra_sickle_dmg=1,
-			.for_structure=ARCH_workbench,
 			.ingredients_count=3,
 			.ingredients={
 				{ITEM_pine_wood, 10},
@@ -2327,6 +2359,15 @@ int entry(int argc, char **argv) {
 		};
 
 		// :item :buildings
+
+		item_data[ITEM_o2_emitter] = (ItemData){
+			.to_build=ARCH_o2_emitter,
+			.icon=SPRITE_o2_emitter,
+			.description=STR("Emits oxygen inside a room"),
+			.exp_cost=200,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_copper_ingot, 2} }
+		};
 
 		// note, this should go into a "Shelter #1" grouped research unlock thingo
 		item_data[ITEM_wall_gate] = (ItemData){
@@ -2347,7 +2388,7 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_longboi_test] = (ItemData){
-			.disable_building=true,
+			.disabled=true,
 			.to_build=ARCH_longboi_test,
 			.icon=SPRITE_longboi_test,
 			.description=STR("Place on top of resources to mine."),
@@ -2384,8 +2425,9 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_workbench] = (ItemData){
+			.disabled=true,
 			.to_build=ARCH_workbench,
-			.icon=SPRITE_workbench,
+			.icon=SPRITE_fabricator,
 			.description=STR("Crafts things."),
 			.ingredients_count=2,
 			.ingredients={ {ITEM_pine_wood, 10}, {ITEM_fiber, 5} }
@@ -2396,7 +2438,7 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_research_station,
 			.description=STR("Research recipes to unlock more buildings."),
 			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 5}, {ITEM_rock, 1} }
+			.ingredients={ {ITEM_pine_wood, 2}, {ITEM_rock, 5} }
 		};
 		item_data[ITEM_teleporter1] = (ItemData){
 			.to_build=ARCH_teleporter1,
@@ -2470,7 +2512,7 @@ int entry(int argc, char **argv) {
 		// :input
 		if (is_key_just_pressed(KEY_F11)) {
 			consume_key_just_pressed(KEY_F11);
-			window.fullscreen = true;
+			window.fullscreen = !window.fullscreen;
 		}
 
 		// :player input axis
@@ -3353,9 +3395,11 @@ int entry(int argc, char **argv) {
 				en->acceleration = (Vector2){0};
 			}
 
+			Range2f our_bounds = get_entity_collision_bounds(en);
+			our_bounds = range2f_shift(our_bounds, en->pos);
+
 			// resolve collisions
 			// courtesy of chatgpt
-			Range2f our_bounds = range2f_shift(en->collision_bounds, en->pos);
 			for (int j = 0; j < growing_array_get_valid_count(collision_entities); j++) {
 				Entity* against = collision_entities[j];
 
@@ -3365,10 +3409,10 @@ int entry(int argc, char **argv) {
 				}
 
 				// Get the collision bounds of the other entity
-				Range2f bounds = range2f_shift(against->collision_bounds, against->pos);
+				Range2f bounds = range2f_shift(get_entity_collision_bounds(against), against->pos);
 
 				// Get our predicted bounds at next position
-				Range2f next_bounds = range2f_shift(en->collision_bounds, next_pos);
+				Range2f next_bounds = range2f_shift(get_entity_collision_bounds(en), next_pos);
 
 				// Check for collision between next_bounds and bounds
 				bool overlap_x = next_bounds.min.x < bounds.max.x && next_bounds.max.x > bounds.min.x;
@@ -3406,8 +3450,8 @@ int entry(int argc, char **argv) {
 		{
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
-				if (en->is_valid && !(range2f_size(en->collision_bounds).x == 0 && range2f_size(en->collision_bounds).y == 0)) {
-					Range2f rect = range2f_shift(en->collision_bounds, en->pos);
+				if (en->is_valid && en->has_collision || en->arch == ARCH_player) {
+					Range2f rect = range2f_shift(get_entity_collision_bounds(en), en->pos);
 					Draw_Quad* quad = draw_rect(rect.min, range2f_size(rect), v4(1, 0, 0, 0.3));
 					quad->z = 1000;
 				}

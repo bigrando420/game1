@@ -11,6 +11,8 @@
 // got this from ryan fleury's codebase, https://www.rfleury.com/ (originally called DeferLoop)
 #define defer_scope(start, end) for(int _i_ = ((start), 0); _i_ == 0; _i_ += 1, (end))
 
+#define scope_z_layer(Z) defer_scope(push_z_layer(Z), pop_z_layer())
+
 inline int extract_sign(float a) {
 	return a == 0 ? 0 : (a < 0 ? -1 : 1);
 }
@@ -222,7 +224,7 @@ void set_col_override(Draw_Quad* q, Vector4 col_override) {
 }
 
 int world_pos_to_tile_pos(float world_pos) {
-	return roundf(world_pos / (float)tile_width);
+	return floorf(world_pos / (float)tile_width);
 }
 
 float tile_pos_to_world_pos(int tile_pos) {
@@ -482,6 +484,7 @@ typedef struct Entity {
 	bool has_collision;
 	Range2f collision_bounds;
 	bool ignore_collision;
+	bool wall_seal;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -741,6 +744,7 @@ void setup_o2_emitter(Entity* en) {
 	en->sprite_id = SPRITE_o2_emitter;
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
+	en->wall_seal = true;
 }
 
 void setup_wall(Entity* en) {
@@ -750,12 +754,14 @@ void setup_wall(Entity* en) {
 	en->sprite_id = SPRITE_wall;
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
+	en->wall_seal = true;
 }
 void setup_wall_gate(Entity* en) {
 	en->arch = ARCH_wall_gate;
 	en->pretty_name = STR("Wall Gate");
 	en->tile_size = v2i(1, 1);
 	en->sprite_id = SPRITE_wall_gate;
+	en->wall_seal = true;
 }
 
 void setup_iron_depo(Entity* en) {
@@ -2610,8 +2616,9 @@ int entry(int argc, char **argv) {
 			world->time_elapsed += delta_t;
 		}
 
-		TileEntityCache* cache = create_tile_entity_pair_cache();
+		TileEntityCache* tile_entity_cache = create_tile_entity_pair_cache();
 
+		// create an array of tiles for each biome
 		TileData* tiles_for_biome[BIOME_MAX] = {0};
 		for (BiomeID biome = 1; biome < BIOME_MAX; biome++)
 		{
@@ -2625,7 +2632,7 @@ int entry(int argc, char **argv) {
 				if (biome_at_tile == biome) {
 					TileData tdata = {0};
 					tdata.tile = local_map_to_world_tile(v2i(x, y));
-					tdata.entity_at_tile = entity_at_tile(cache, tdata.tile);
+					tdata.entity_at_tile = entity_at_tile(tile_entity_cache, tdata.tile);
 					growing_array_add((void**)&tiles, &tdata);
 				}
 			}
@@ -3364,37 +3371,6 @@ int entry(int argc, char **argv) {
 				continue;
 			}
 
-			// randy: I tried putting player thru the physics. But it feels worse because of the latency.
-			// Maybe we do want some kind of decel thou?
-			/*
-			if (en->arch == ARCH_player && !(en->frame.input_axis.x == 0 && en->frame.input_axis.y == 0)) {
-				float speed_target = 70.f;
-				float acceleration = 2600.f;
-
-				Vector2 vel_target = v2_mulf(en->frame.input_axis, speed_target);
-
-				// x
-				{
-					int sign = extract_sign(vel_target.x - en->velocity.x);
-					en->velocity.x += sign * acceleration * delta_t;
-
-					if (sign != extract_sign(vel_target.x - en->velocity.x)) {
-						en->velocity.x = vel_target.x;
-					}
-				}
-
-				// y
-				{
-					int sign = extract_sign(vel_target.y - en->velocity.y);
-					en->velocity.y += sign * acceleration * delta_t;
-
-					if (sign != extract_sign(vel_target.y - en->velocity.y)) {
-						en->velocity.y = vel_target.y;
-					}
-				}
-			}
-			*/
-
 			Vector2 next_pos = {0};
 			if (en->arch == ARCH_player) {
 				next_pos = v2_add(en->pos, v2_mulf(en->frame.input_axis, 70.0 * delta_t));
@@ -3464,6 +3440,7 @@ int entry(int argc, char **argv) {
 			en->pos = next_pos;
 		}
 
+		// debug draw collision bounds
 		#if defined(DRAW_BOUNDS)
 		{
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -3521,6 +3498,61 @@ int entry(int argc, char **argv) {
 				}
 			}
 		}
+
+		#if defined(MOUSE_COORDS_DEBUG)
+		{
+			Vector2 mp = get_mouse_pos_in_world_space();
+			Tile mp_tile = v2_world_pos_to_tile_pos(mp);
+			Vector2i local = world_tile_to_local_map(mp_tile);
+			scope_z_layer(10000)
+			{
+				draw_text(font, tprint("%i, %i", mp_tile.x, mp_tile.y), font_height, mp, v2(0.1, 0.1), COLOR_RED);
+				draw_text(font, tprint("%f, %f", mp.x, mp.y), font_height, v2_add(mp, v2(0, -10)), v2(0.1, 0.1), COLOR_RED);
+				draw_text(font, tprint("%i, %i", local.x, local.y), font_height, v2_add(mp, v2(0, -20)), v2(0.1, 0.1), COLOR_RED);
+			}
+		}
+		#endif
+
+		// for each o2 emitter, run through neighboring wall seals, making them powered
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			if (en->is_valid && en->arch == ARCH_o2_emitter) {
+
+				Entity** stack;
+				growing_array_init_reserve((void**)&stack, sizeof(Entity*), 1, get_temporary_allocator());
+				growing_array_add((void**)&stack, &en);
+
+				while (growing_array_get_valid_count(stack)) {
+					Entity* current = stack[growing_array_get_valid_count(stack)-1];
+					growing_array_pop((void**)&stack);
+
+					current->frame.is_powered = true;
+					Tile current_tile = v2_world_pos_to_tile_pos(current->pos);
+
+					Entity* left = entity_at_tile(tile_entity_cache, v2i_add(v2i(-1, 0), current_tile));
+					if (left && left->wall_seal && !left->frame.is_powered) {
+						growing_array_add((void**)&stack, &left);
+					}
+
+					Entity* right = entity_at_tile(tile_entity_cache, v2i_add(v2i(1, 0), current_tile));
+					if (right && right->wall_seal && !right->frame.is_powered) {
+						growing_array_add((void**)&stack, &right);
+					}
+
+					Entity* top = entity_at_tile(tile_entity_cache, v2i_add(v2i(0, 1), current_tile));
+					if (top && top->wall_seal && !top->frame.is_powered) {
+						growing_array_add((void**)&stack, &top);
+					}
+
+					Entity* bottom = entity_at_tile(tile_entity_cache, v2i_add(v2i(0, -1), current_tile));
+					if (bottom && bottom->wall_seal && !bottom->frame.is_powered) {
+						growing_array_add((void**)&stack, &bottom);
+					}
+				}
+			}
+		}
+
+		// todo - figure out if in sealed env
 
 		// :player specific caveman update
 		{
@@ -3732,6 +3764,10 @@ int entry(int argc, char **argv) {
 						Vector4 col = COLOR_WHITE;
 						if (world_frame.selected_entity == en) {
 							col = col_select;
+						}
+
+						if (en->wall_seal && en->frame.is_powered) {
+							col = v4_mul(col, col_oxygen);
 						}
 
 						if (en->white_flash_current_alpha != 0) {

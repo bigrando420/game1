@@ -436,6 +436,7 @@ typedef struct EntityFrame {
 
 typedef struct Entity {
 	bool is_valid;
+	int id;
 	ArchetypeID arch;
 	ItemID item_id;
 	int item_amount;
@@ -500,6 +501,11 @@ typedef struct Entity {
 	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
+
+typedef struct EntityHandle {
+	int id;
+	int index;
+} EntityHandle;
 
 typedef enum UXState {
 	UX_nil,
@@ -673,6 +679,7 @@ BiomeID biome_at_tile(Tile tile) {
 }
 
 typedef struct World {
+	int id_count;
 	float64 time_elapsed;
 	Entity entities[MAX_ENTITY_COUNT];
 	InventoryItemData inventory_items[ITEM_MAX];
@@ -682,12 +689,11 @@ typedef struct World {
 	float building_alpha;
 	float building_alpha_target;
 	ItemID placing_building;
-	Entity* interacting_with_entity;
+	EntityHandle interacting_with_entity;
 	ItemID selected_research_thing;
 	UnlockState item_unlocks[ITEM_MAX];
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
-	// todo #ship - figure out if we can legit just keep this as a pointer or not lol
-	Entity* oxygenerator;
+	EntityHandle oxygenerator;
 	ItemAmount mouse_cursor_item;
 	// :world :state
 } World;
@@ -707,6 +713,26 @@ typedef struct WorldFrame {
 } WorldFrame;
 WorldFrame world_frame;
 
+inline Entity* get_nil_entity() {
+	return &world->entities[0];
+}
+bool is_nil(Entity* en) {
+	return en == get_nil_entity();
+}
+
+EntityHandle handle_from_entity(Entity* en) {
+	s64 index = en - world->entities;
+	return (EntityHandle){ en->id, index };
+}
+Entity* entity_from_handle(EntityHandle handle) {
+	Entity* en = &world->entities[handle.index];
+	if (en->id == handle.id) {
+		return en;
+	} else {
+		return get_nil_entity();
+	}
+}
+
 Entity* get_player() {
 	return world_frame.player;
 }
@@ -724,7 +750,7 @@ void entity_apply_defaults(Entity* en) {
 
 Entity* entity_create() {
 	Entity* entity_found = 0;
-	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+	for (int i = 1; i < MAX_ENTITY_COUNT; i++) {
 		Entity* existing_entity = &world->entities[i];
 		if (!existing_entity->is_valid) {
 			entity_found = existing_entity;
@@ -734,6 +760,9 @@ Entity* entity_create() {
 	assert(entity_found, "No more free entities!");
 	entity_found->is_valid = true;
 	entity_apply_defaults(entity_found);
+
+	world->id_count += 1;
+	entity_found->id = world->id_count;
 
 	return entity_found;
 }
@@ -1377,7 +1406,7 @@ void world_setup()
 
 	Entity* en = entity_create();
 	setup_oxygenerator(en);
-	world->oxygenerator = en;
+	world->oxygenerator = handle_from_entity(en);
 	en->pos = snap_position_to_nearest_tile_based_on_arch(v2(0, 0), en->arch);
 
 	en = entity_create();
@@ -1549,6 +1578,19 @@ bool world_attempt_load_from_disk() {
 	}
 
 	memcpy(world, result.data, result.count);
+
+	// copy across "constants"
+	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+		Entity* en = &world->entities[i];
+		if (en->is_valid) {
+			Entity* arch_data = &entity_archetype_data[en->arch];
+
+			// :const entity data 
+			en->pretty_name = arch_data->pretty_name;
+			en->sprite_id = arch_data->sprite_id;
+		}
+	}
+
 	return true;
 }
 
@@ -1562,6 +1604,8 @@ void do_ui_stuff() {
 	Vector4 bg_col = v4(0, 0, 0, 0.90);
 	Vector4 fill_col = v4(0.5, 0.5, 0.5, 1.0);
 	Vector4 accent_col = hex_to_rgba(0x44c3daff);
+
+	Entity* interacting_with_entity = entity_from_handle(world->interacting_with_entity);
 
 	// :exp amount
 	{
@@ -1586,52 +1630,6 @@ void do_ui_stuff() {
 
 		draw_text_with_pivot(font, txt, font_height_beeg, pos, text_scale, col, PIVOT_top_left);
 	}
-
-	// oxygenerator ui
-	// first attempt
-	/*
-	if (world->ux_state == UX_oxygenerator && world->interacting_with_entity)
-	{
-		world_frame.hover_consumed = true;
-		Vector2 bg_size = {60, 60};
-
-		float x_left = screen_width * 0.5 - bg_size.x * 0.5;
-		float y_top = screen_height * 0.5 + bg_size.y * 0.5;
-		float x_middle = x_left + bg_size.x * 0.5;
-		float y_bottom = y_top - bg_size.y;
-
-		float x0 = x_left;
-		float y0 = y_bottom;
-
-		draw_rect(v2(x0, y0), bg_size, bg_col);
-
-		// slot in center, can input shards into it
-		{
-			x0 = x_middle;
-			y0 = y_bottom + bg_size.y * 0.5;
-
-			Vector2 slot_size = { 10, 10 };
-			x0 -= slot_size.x * 0.5;
-			y0 -= slot_size.y * 0.5;
-
-			Range2f slot = range2f_make_bottom_left(v2(x0, y0), slot_size);
-
-			draw_rect(slot.min, slot_size, COLOR_GRAY);
-		}
-
-		// progress meter of how much fuel is left
-		{
-			x0 = x_middle;
-			y0 -= 4.f;
-
-			Vector2 size = { bg_size.x * 0.8, 4.f };
-			x0 -= size.x * 0.5;
-			y0 -= size.y;
-
-			draw_rect(v2(x0, y0), size, COLOR_WHITE);
-		}
-	}
-	*/
 
 	// :respawn ui
 	if (world->ux_state == UX_respawn) {
@@ -1827,8 +1825,8 @@ void do_ui_stuff() {
 	}
 
 	// :workbench
-	if (world->ux_state == UX_entity_interaction && world->interacting_with_entity->arch == ARCH_workbench) {
-		Entity* entity = world->interacting_with_entity;
+	if (world->ux_state == UX_entity_interaction && interacting_with_entity->arch == ARCH_workbench) {
+		Entity* entity = interacting_with_entity;
 
 		Vector2 pane_size = v2(60.0, 70.0);
 		float text_height_pad = 4.0;
@@ -2033,7 +2031,7 @@ void do_ui_stuff() {
 
 	// :research ui
 	if (world->ux_state == UX_research) {
-		Entity* entity = world->interacting_with_entity;
+		Entity* entity = interacting_with_entity;
 
 		Vector2 pane_size = v2(60.0, 70.0);
 		float text_height_pad = 4.0;
@@ -2786,12 +2784,12 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		if (world->interacting_with_entity && world->ux_state == 0) {
-			world->interacting_with_entity = 0;
+		if (!is_nil(entity_from_handle(world->interacting_with_entity)) && world->ux_state == 0) {
+			world->interacting_with_entity = (EntityHandle){0};
 		}
 
 		// in-game :ui
-		if (world->ux_state == UX_entity_interaction && world->interacting_with_entity) {
+		if (world->ux_state == UX_entity_interaction && !is_nil(entity_from_handle(world->interacting_with_entity))) {
 			push_z_layer(layer_ui);
 
 			// randy: I'm trying out making this UI be more diagetic and in the world.
@@ -2800,7 +2798,7 @@ int entry(int argc, char **argv) {
 			// I think it's roughly the same amount of work to do it this way, if proven effective.
 			// :oxygenerator ui
 
-			Entity* en = world->interacting_with_entity;
+			Entity* en = entity_from_handle(world->interacting_with_entity);
 
 			if (en->arch == ARCH_oxygenerator) {
 
@@ -2891,7 +2889,6 @@ int entry(int argc, char **argv) {
 
 				ItemID desired_item = ITEM_coal;
 
-				Entity* en = world->interacting_with_entity;
 				float x0 = en->pos.x;
 				float y0 = en->pos.y;
 				y0 += 10.f;
@@ -2989,7 +2986,6 @@ int entry(int argc, char **argv) {
 			// :furance ux
 			if (en->arch == ARCH_furnace) {
 
-				Entity* en = world->interacting_with_entity;
 				float x0 = en->pos.x;
 				float y0 = en->pos.y;
 
@@ -3205,12 +3201,12 @@ int entry(int argc, char **argv) {
 					|| en->right_click_remove;
 				// add extra :interact cases here ^^
 
-				if (en->interactable_entity && world->interacting_with_entity == en) {
+				if (en->interactable_entity && entity_from_handle(world->interacting_with_entity) == en) {
 					continue;
 				}
 
 				float dist_to_player = v2_dist(en->pos, get_player()->pos);
-				if (en->is_valid && has_interaction && dist_to_player < selection_reach_radius) {
+				if (en->is_valid && has_interaction) {
 					Sprite* sprite = get_sprite(en->sprite_id);
 
 					int entity_tile_x = world_pos_to_tile_pos(en->pos.x);
@@ -3547,11 +3543,12 @@ int entry(int argc, char **argv) {
 			}
 
 			// run through connections recursively, starting at the core tether
-			if (world->oxygenerator->oxygen > 0)
+			Entity* oxygenerator = entity_from_handle(world->oxygenerator);
+			if (oxygenerator->oxygen > 0)
 			{
 				Entity** connection_stack;
 				growing_array_init_reserve((void**)&connection_stack, sizeof(Entity*), 1, get_temporary_allocator());
-				growing_array_add((void**)&connection_stack, &world->oxygenerator);
+				growing_array_add((void**)&connection_stack, &oxygenerator);
 
 				while (growing_array_get_valid_count(connection_stack)) {
 					Entity* current = connection_stack[growing_array_get_valid_count(connection_stack)-1];
@@ -3668,7 +3665,7 @@ int entry(int argc, char **argv) {
 
 		// :player specific caveman update
 		{
-			Entity* oxygenerator = world->oxygenerator;
+			Entity* oxygenerator = entity_from_handle(world->oxygenerator);
 
 			Entity* closest_tether = 0;
 			float closest_dist = 99999;
@@ -3850,16 +3847,16 @@ int entry(int argc, char **argv) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 					world->ux_state = UX_research;
-					world->interacting_with_entity = selected_en;
+					world->interacting_with_entity = handle_from_entity(selected_en);
 				}
 			}
 
 			// generic interact entity
-			if (selected_en && world->interacting_with_entity != selected_en && selected_en->interactable_entity) {
+			if (selected_en && entity_from_handle(world->interacting_with_entity) != selected_en && selected_en->interactable_entity) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 					world->ux_state = UX_entity_interaction;
-					world->interacting_with_entity = selected_en;
+					world->interacting_with_entity = handle_from_entity(selected_en);
 				}
 			}
 

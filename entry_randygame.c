@@ -557,6 +557,7 @@ typedef struct WorldResourceData {
 WorldResourceData world_resources[] = {
 	{ BIOME_forest, ARCH_tree, 5 },
 	{ BIOME_forest, ARCH_grass, 3 },
+	{ BIOME_forest, ARCH_flint_depo, 20 },
 
 	{ BIOME_barren, ARCH_rock, 10 },
 	{ BIOME_barren, ARCH_coal_depo, 20 },
@@ -569,7 +570,7 @@ WorldResourceData world_resources[] = {
 
 	{ BIOME_ice, ARCH_ice_vein, 10 },
 
-	{ BIOME_iron, ARCH_iron_depo, 10 },
+	{ BIOME_iron, ARCH_iron_depo, 6 },
 	// :spawn_res system
 };
 
@@ -841,7 +842,7 @@ void setup_burner_drill(Entity* en) {
 	en->pretty_name = STR("Thumper");
 	en->tile_size = v2i(2, 2);
 	en->sprite_id = SPRITE_burner_drill;
-	en->radius = tile_width * 4;
+	en->radius = tile_width * 6;
 	en->interactable_entity = true;
 	en->has_collision = true;
 }
@@ -927,7 +928,7 @@ void setup_copper_depo(Entity* en) {
 	en->max_health = en->health;
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=get_random_int_in_range(1, 2)};
+	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1588,8 +1589,9 @@ bool world_attempt_load_from_disk() {
 
 			// :const entity data 
 			en->pretty_name = arch_data->pretty_name;
-			en->sprite_id = arch_data->sprite_id;
 			en->max_health = arch_data->max_health;
+			// this can't be set because items need to infer it dynamically.
+			// en->sprite_id = arch_data->sprite_id;
 		}
 	}
 
@@ -2470,10 +2472,10 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_o2_emitter] = (ItemData){
 			.to_build=ARCH_o2_emitter,
 			.icon=SPRITE_o2_emitter,
-			.description=STR("Feed oxygen into surrounding blocks"),
-			.exp_cost=200,
+			.description=STR("Feed oxygen into a sealed room with 3x more efficency"),
+			.exp_cost=100,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_copper_ingot, 2} }
+			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_copper_ingot, 2}, {ITEM_o2_shard, 10} }
 		};
 
 		// note, this should go into a "Shelter #1" grouped research unlock thingo
@@ -2481,7 +2483,7 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_wall_gate,
 			.icon=SPRITE_wall_gate,
 			.description=STR("Allows travel into a sealed room"),
-			.exp_cost=200,
+			.exp_cost=50,
 			.ingredients_count=1,
 			.ingredients={ {ITEM_iron_ingot, 1}, }
 		};
@@ -2489,7 +2491,7 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_wall,
 			.icon=SPRITE_wall,
 			.description=STR("Can be used to build a sealed Oxygen room"),
-			.exp_cost=200,
+			.exp_cost=50,
 			.ingredients_count=1,
 			.ingredients={ {ITEM_iron_ingot, 1} }
 		};
@@ -2508,9 +2510,9 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_burner_drill,
 			.icon=SPRITE_burner_drill,
 			.description=STR("Burns coal to hit things"),
-			.exp_cost=400,
+			.exp_cost=200,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
+			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 6} }
 		};
 
 		item_data[ITEM_tether] = (ItemData){
@@ -3300,8 +3302,8 @@ int entry(int argc, char **argv) {
 					if (en->current_fuel <= 0) {
 						// attempt fuel consume
 						if (en->input0.id) {
-							en->last_fuel_max = 20;
-							en->current_fuel = 20;
+							en->last_fuel_max = 30;
+							en->current_fuel = 30;
 
 							en->input0.amount -= 1;
 							if (en->input0.amount <= 0) {
@@ -3324,7 +3326,6 @@ int entry(int argc, char **argv) {
 								Entity* against = &world->entities[j];
 								if (against->destroyable_world_item && v2_dist(en->pos, against->pos) < en->radius) {
 									did_hit_something = true;
-									en->current_fuel -= 1;
 
 									against->white_flash_current_alpha = 1.0;
 									particle_emit(against->pos, PFX_hit);
@@ -3341,6 +3342,7 @@ int entry(int argc, char **argv) {
 
 							if (did_hit_something) {
 								camera_shake(0.1);
+								en->current_fuel -= 1;
 							}
 						}
 					}

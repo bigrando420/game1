@@ -3612,8 +3612,12 @@ int entry(int argc, char **argv) {
 			// player consumes o2 on tick
 			#if !defined(DISABLE_O2)
 			{
+				float deplete_length_mult = 1.f;
+				if (is_inside) {
+					deplete_length_mult = 5.f;
+				}
 				if (player->oxygen_deplete_end_time == 0) {
-					player->oxygen_deplete_end_time = now() + oxygen_deplete_tick_length;
+					player->oxygen_deplete_end_time = now() + oxygen_deplete_tick_length * deplete_length_mult;
 				}
 				if (has_reached_end_time(player->oxygen_deplete_end_time)) {
 

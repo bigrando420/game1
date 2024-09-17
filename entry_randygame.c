@@ -49,10 +49,12 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
 		case PIVOT_bottom_center: pivot_mul = v2(0.5, 0.0); break;
 		case PIVOT_bottom_right: pivot_mul = v2(1.0, 0.0); break;
-		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
 		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
+		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
+		case PIVOT_center_right: pivot_mul = v2(1.0, 0.5); break;
 		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
 		case PIVOT_top_left: pivot_mul = v2(0.0, 1.0); break;
+		case PIVOT_top_right: pivot_mul = v2(1.0, 1.0); break;
 		default:
 		log_error("pivot not supported yet. fill in case at draw_text_with_pivot");
 		break;
@@ -772,6 +774,7 @@ void setup_wall_gate(Entity* en) {
 
 void setup_iron_depo(Entity* en) {
 	en->arch = ARCH_iron_depo;
+	en->pretty_name = STR("Iron Deposit");
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_iron_depo;
 	en->health = 10;
@@ -785,6 +788,7 @@ void setup_iron_depo(Entity* en) {
 
 void setup_coal_depo(Entity* en) {
 	en->arch = ARCH_coal_depo;
+	en->pretty_name = STR("Coal Deposit");
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_coal_depo;
 	en->health = 10;
@@ -819,6 +823,7 @@ void setup_tile_resource(Entity* en) {
 }
 
 void setup_ice_vein(Entity* en) {
+	en->pretty_name = STR("Oxygen Vein");
 	en->arch = ARCH_ice_vein;
 	en->sprite_id = SPRITE_ice_vein;
 	en->health = ice_vein_health;
@@ -845,6 +850,7 @@ void setup_tether(Entity* en) {
 
 void setup_oxygenerator(Entity* en) {
 	en->arch = ARCH_oxygenerator;
+	en->pretty_name = STR("Emergency Oxygenerator");
 	en->sprite_id = SPRITE_oxygenerator;
 	en->is_oxygen_tether = true;
 	en->interactable_entity = true;
@@ -858,6 +864,7 @@ bool do_oxygenerator_error(Entity* en) {
 }
 
 void setup_grass(Entity* en) {
+	en->pretty_name = STR("Grass");
 	en->arch = ARCH_grass;
 	en->sprite_id = SPRITE_grass;
 	en->health = grass_health;
@@ -869,6 +876,7 @@ void setup_grass(Entity* en) {
 }
 
 void setup_flint_depo(Entity* en) {
+	en->pretty_name = STR("Flint Deposit");
 	en->arch = ARCH_flint_depo;
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_flint_depo;
@@ -882,6 +890,7 @@ void setup_flint_depo(Entity* en) {
 }
 
 void setup_copper_depo(Entity* en) {
+	en->pretty_name = STR("Copper Deposit");
 	en->arch = ARCH_copper_depo;
 	en->sprite_id = SPRITE_copper_depo;
 	en->health = copper_health;
@@ -949,6 +958,7 @@ void setup_player(Entity* en) {
 }
 
 void setup_rock(Entity* en) {
+	en->pretty_name = STR("Rock");
 	en->arch = ARCH_rock;
 	en->sprite_id = SPRITE_rock0;
 	en->health = rock_health;
@@ -961,6 +971,7 @@ void setup_rock(Entity* en) {
 
 void setup_tree(Entity* en) {
 	en->arch = ARCH_tree;
+	en->pretty_name = STR("Pine Tree");
 	en->tile_size = v2i(2, 2);
 	en->offset_based_on_tile_height = true;
 	en->sprite_id = SPRITE_tree1;
@@ -3183,12 +3194,9 @@ int entry(int argc, char **argv) {
 			pop_z_layer();
 		}
 
-		// select entity
+		// :select entity
 		if (!world_frame.hover_consumed)
 		{
-			// log("%f, %f", mouse_pos_world.x, mouse_pos_world.y);
-			// draw_text(font, sprint(temp, STR("%f %f"), mouse_pos_world.x, mouse_pos_world.y), font_height, mouse_pos_world, v2(0.1, 0.1), COLOR_RED);
-
 			float smallest_dist = 99999;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
@@ -3216,6 +3224,25 @@ int entry(int argc, char **argv) {
 						}
 					}
 				}
+			}
+
+			// :select entity UI
+			if (world_frame.selected_entity) {
+				Entity* en = world_frame.selected_entity;
+
+				// draw basic tooltip in top right
+				defer_scope(set_screen_space(), set_world_space())
+				{
+					float x0 = screen_width * 0.5;
+					float y0 = screen_height;
+					y0 -= 2.f;
+
+					string txt = en->pretty_name;
+					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
+				}
+
+				// todo - draw selection corners like factorio
+				// Range2f range = get_entity_range(en);
 			}
 		}
 		

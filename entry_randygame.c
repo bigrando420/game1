@@ -166,7 +166,7 @@ Vector4 col_exp;
 float o2_fuel_length = 30.f;
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
-float selection_reach_radius = 30.0f;
+float player_reach_radius = 30.0f;
 float tether_connection_radius = 50.0;
 float o2_full_tank_deplete_length = 16.0f; // #volatile length of oxygen riser sfx
 float oxygen_regen_tick_length = 0.01;
@@ -174,7 +174,7 @@ float oxygen_deplete_tick_length = 1.f;
 float teleporter_radius = 8.0f;
 const int tile_width = 8;
 const float world_half_length = tile_width * 10;
-const float entity_selection_radius = 16.0f;
+const float cursor_selection_slop_radius = 16.0f;
 const float player_pickup_radius = 32.0f;
 const int ice_vein_health = 10;
 const int grass_health = 3;
@@ -431,6 +431,7 @@ typedef struct EntityFrame {
 	bool is_powered;
 	Vector2 input_axis;
 	SpriteID functional_sprite_id;
+	bool can_interact;
 	// :frame
 } EntityFrame;
 
@@ -512,7 +513,6 @@ typedef enum UXState {
 	UX_inventory,
 	UX_place_mode,
 	UX_workbench,
-	UX_research,
 	UX_respawn,
 	UX_entity_interaction,
 	// :ux
@@ -867,6 +867,7 @@ void setup_ice_vein(Entity* en) {
 void setup_exp_orb(Entity* en) {
 	en->arch = ARCH_exp_orb;
 	en->exp_amount = 1;
+	en->ignore_collision = true;
 }
 
 void setup_tether(Entity* en) {
@@ -1588,6 +1589,7 @@ bool world_attempt_load_from_disk() {
 			// :const entity data 
 			en->pretty_name = arch_data->pretty_name;
 			en->sprite_id = arch_data->sprite_id;
+			en->max_health = arch_data->max_health;
 		}
 	}
 
@@ -2030,7 +2032,7 @@ void do_ui_stuff() {
 	}
 
 	// :research ui
-	if (world->ux_state == UX_research) {
+	if (world->ux_state == UX_entity_interaction && interacting_with_entity->arch == ARCH_research_station) {
 		Entity* entity = interacting_with_entity;
 
 		Vector2 pane_size = v2(60.0, 70.0);
@@ -3201,10 +3203,6 @@ int entry(int argc, char **argv) {
 					|| en->right_click_remove;
 				// add extra :interact cases here ^^
 
-				if (en->interactable_entity && entity_from_handle(world->interacting_with_entity) == en) {
-					continue;
-				}
-
 				float dist_to_player = v2_dist(en->pos, get_player()->pos);
 				if (en->is_valid && has_interaction) {
 					Sprite* sprite = get_sprite(en->sprite_id);
@@ -3213,7 +3211,7 @@ int entry(int argc, char **argv) {
 					int entity_tile_y = world_pos_to_tile_pos(en->pos.y);
 
 					float dist = fabsf(v2_dist(en->pos, mouse_pos_world));
-					if (dist < entity_selection_radius) {
+					if (dist < cursor_selection_slop_radius) {
 						if (!world_frame.selected_entity || (dist < smallest_dist)) {
 							world_frame.selected_entity = en;
 							smallest_dist = dist;
@@ -3786,90 +3784,105 @@ int entry(int argc, char **argv) {
 		if (is_player_alive())
 		{
 			Entity* selected_en = world_frame.selected_entity;
+			if (selected_en) {
+				bool is_in_range = v2_dist(selected_en->pos, get_player()->pos) < player_reach_radius;
 
-			// :click destroy
-			if (selected_en && selected_en->destroyable_world_item) {
-				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+				// :click destroy
+				if (selected_en->destroyable_world_item) {
+					if (is_in_range) {
+						selected_en->frame.can_interact = true;
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-					play_sound_at_pos("event:/hit_generic", selected_en->pos);
-					selected_en->white_flash_current_alpha = 1.0;
-					camera_shake(0.1);
-					particle_emit(selected_en->pos, PFX_hit);
+							play_sound_at_pos("event:/hit_generic", selected_en->pos);
+							selected_en->white_flash_current_alpha = 1.0;
+							camera_shake(0.1);
+							particle_emit(selected_en->pos, PFX_hit);
 
-					int damage_amount = 1;
-					if (selected_en->dmg_type == DMG_axe) {
-						for (int i = 0; i < ITEM_MAX; i++) {
-							if (world->inventory_items[i].amount) {
-								damage_amount += get_item_data(i).extra_axe_dmg;
+							int damage_amount = 1;
+							if (selected_en->dmg_type == DMG_axe) {
+								for (int i = 0; i < ITEM_MAX; i++) {
+									if (world->inventory_items[i].amount) {
+										damage_amount += get_item_data(i).extra_axe_dmg;
+									}
+								}
+							} else if (selected_en->dmg_type == DMG_pickaxe) {
+								for (int i = 0; i < ITEM_MAX; i++) {
+									if (world->inventory_items[i].amount) {
+										damage_amount += get_item_data(i).extra_pickaxe_dmg;
+									}
+								}
+							} else if (selected_en->dmg_type == DMG_sickle) {
+								for (int i = 0; i < ITEM_MAX; i++) {
+									if (world->inventory_items[i].amount) {
+										damage_amount += get_item_data(i).extra_sickle_dmg;
+									}
+								}
+							} // #extend_dmg_type_here
+
+							selected_en->health -= damage_amount;
+							if (selected_en->health <= 0) {
+								camera_shake(0.1); // shake extra on death
+
+								// :drops
+								do_entity_drops(selected_en);
+
+								// exp orb drops
+								for (int i = 0; i < get_random_int_in_range(2, 3); i++) {
+									Entity* orb = entity_create();
+									setup_exp_orb(orb);
+									orb->pos = selected_en->pos;
+									orb->has_physics = true;
+									orb->friction = 20.f;
+									orb->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
+									orb->velocity = v2_mulf(orb->velocity, get_random_float32_in_range(100, 200));
+									orb->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.4, 0.6);
+								}
+
+								entity_destroy(selected_en);
 							}
 						}
-					} else if (selected_en->dmg_type == DMG_pickaxe) {
-						for (int i = 0; i < ITEM_MAX; i++) {
-							if (world->inventory_items[i].amount) {
-								damage_amount += get_item_data(i).extra_pickaxe_dmg;
-							}
+					} else {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							play_sound("event:/error");
 						}
-					} else if (selected_en->dmg_type == DMG_sickle) {
-						for (int i = 0; i < ITEM_MAX; i++) {
-							if (world->inventory_items[i].amount) {
-								damage_amount += get_item_data(i).extra_sickle_dmg;
-							}
+					}
+
+				}
+
+				// generic interact entity
+				if (entity_from_handle(world->interacting_with_entity) != selected_en && selected_en->interactable_entity) {
+					if (is_in_range) {
+						selected_en->frame.can_interact = true;
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							world->ux_state = UX_entity_interaction;
+							world->interacting_with_entity = handle_from_entity(selected_en);
 						}
-					} // #extend_dmg_type_here
-
-					selected_en->health -= damage_amount;
-					if (selected_en->health <= 0) {
-						camera_shake(0.1); // shake extra on death
-
-						// :drops
-						do_entity_drops(selected_en);
-
-						// exp orb drops
-						for (int i = 0; i < get_random_int_in_range(2, 3); i++) {
-							Entity* orb = entity_create();
-							setup_exp_orb(orb);
-							orb->pos = selected_en->pos;
-							orb->has_physics = true;
-							orb->friction = 20.f;
-							orb->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
-							orb->velocity = v2_mulf(orb->velocity, get_random_float32_in_range(100, 200));
-							orb->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.4, 0.6);
+					} else {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							play_sound("event:/error");
 						}
-
-						entity_destroy(selected_en);
 					}
 				}
-			}
 
-			// interact research station
-			if (selected_en && selected_en->arch == ARCH_research_station) {
-				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-					world->ux_state = UX_research;
-					world->interacting_with_entity = handle_from_entity(selected_en);
-				}
-			}
+				// right click remove
+				if (selected_en->right_click_remove) {
+					if (is_key_just_pressed(MOUSE_BUTTON_RIGHT)) {
+						consume_key_just_pressed(MOUSE_BUTTON_RIGHT);
 
-			// generic interact entity
-			if (selected_en && entity_from_handle(world->interacting_with_entity) != selected_en && selected_en->interactable_entity) {
-				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-					world->ux_state = UX_entity_interaction;
-					world->interacting_with_entity = handle_from_entity(selected_en);
-				}
-			}
+						if (is_in_range) {
+							Entity* drop = entity_create();
+							setup_item(drop, selected_en->item_id);
+							drop->pos = selected_en->pos;
 
-			// right click remove
-			if (selected_en && selected_en->right_click_remove) {
-				if (is_key_just_pressed(MOUSE_BUTTON_RIGHT)) {
-					consume_key_just_pressed(MOUSE_BUTTON_RIGHT);
-
-					Entity* drop = entity_create();
-					setup_item(drop, selected_en->item_id);
-					drop->pos = selected_en->pos;
-
-					entity_destroy(selected_en);
+							entity_destroy(selected_en);
+						} else {
+							play_sound("event:/error");
+						}
+					}
 				}
 			}
 		}
@@ -3902,7 +3915,11 @@ int entry(int argc, char **argv) {
 
 						Vector4 col = COLOR_WHITE;
 						if (world_frame.selected_entity == en) {
-							col = col_select;
+							if (en->frame.can_interact) {
+								col = col_select;
+							} else {
+								col = v4(0.5, 0.5, 0.5, 1);
+							}
 						}
 
 						if (en->wall_seal && en->frame.is_powered) {
@@ -3919,7 +3936,7 @@ int entry(int argc, char **argv) {
 						// :error flash
 						bool do_error_flash = false;
 						// :burner drill
-						if (en->arch == ARCH_burner_drill && en->last_fuel_max && en->current_fuel == 0) {
+						if (en->arch == ARCH_burner_drill && en->current_fuel == 0) {
 							do_error_flash = true;
 						}
 						// :oxygenerator

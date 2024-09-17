@@ -650,7 +650,14 @@ Tile local_map_to_world_tile(Vector2i local) {
 Vector2i world_tile_to_local_map(Tile world) {
 	int x_index = world.x + floor((float)map.width * 0.5);
 	int y_index = world.y + floor((float)map.height * 0.5);
+	x_index = clamp(x_index, 0, map.width-1);
+	y_index = clamp(y_index, 0, map.height-1);
 	return (Vector2i){x_index, y_index};
+}
+
+int local_map_pos_to_index(Vector2i local_map) {
+	int index = local_map.y * map.width + local_map.x;
+	return index;
 }
 
 BiomeID biome_at_tile(Tile tile) {
@@ -1274,6 +1281,7 @@ void camera_shake(float amount) {
 typedef struct TileCache {
 	Entity* entity;
 	// BiomeID biome;
+	bool visited;
 } TileCache;
 typedef struct TileEntityCache {
 	TileCache* tiles;
@@ -1295,6 +1303,16 @@ TileEntityCache* create_tile_entity_pair_cache() {
 	}
 
 	return cache;
+}
+
+TileCache* tile_cache_at_tile(TileEntityCache* cache, Tile tile) {
+	Vector2i local_tile = world_tile_to_local_map(tile);
+	int index = local_tile.y * map.width + local_tile.x;
+	if (index < 0 || index > cache->tile_count) {
+		return 0;
+	} else {
+		return &cache->tiles[index];
+	}
 }
 
 Entity* entity_at_tile(TileEntityCache* cache, Tile tile) {
@@ -3138,35 +3156,6 @@ int entry(int argc, char **argv) {
 				}
 			}
 		}
-
-		// :tile :rendering
-		{
-			int player_tile_x = world_pos_to_tile_pos(get_player()->pos.x);
-			int player_tile_y = world_pos_to_tile_pos(get_player()->pos.y);
-			int tile_radius_x = 40;
-			int tile_radius_y = 30;
-			for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
-				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
-
-					BiomeID biome = biome_at_tile(v2i(x, y));
-					if (biome == 0) {
-						continue;
-					}
-
-					// checkerboard pattern
-					Vector4 col = color_0;
-					if ((x + (y % 2 == 0) ) % 2 == 0) {
-						col.a = 0.9;
-					}
-					col = v4_lerp(col, biome_col_hex_to_rgba(biome_colors[biome]), 0.1f);
-					float x_pos = x * tile_width;
-					float y_pos = y * tile_width;
-					draw_rect(v2(x_pos, y_pos), v2(tile_width, tile_width), col);
-				}
-			}
-
-			// draw_rect(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y) + tile_width * -0.5), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5));
-		}
 		
 		// :update entities
 		Entity* player = get_player();
@@ -3516,7 +3505,7 @@ int entry(int argc, char **argv) {
 		// for each o2 emitter, run through neighboring wall seals, making them powered
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
-			if (en->is_valid && en->arch == ARCH_o2_emitter) {
+			if (en->is_valid && en->arch == ARCH_o2_emitter && en->frame.is_powered) {
 
 				Entity** stack;
 				growing_array_init_reserve((void**)&stack, sizeof(Entity*), 1, get_temporary_allocator());
@@ -3552,7 +3541,51 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// todo - figure out if in sealed env
+		// figure out if the player is inside
+		bool is_inside = true;
+		{
+			tile_entity_cache = create_tile_entity_pair_cache();
+		
+			Vector2i* stack;
+			growing_array_init_reserve((void**)&stack, sizeof(Vector2i), map.width*map.height, get_temporary_allocator());
+
+			Vector2i start_tile = v2_world_pos_to_tile_pos(player->pos);
+			growing_array_add((void**)&stack, &start_tile);
+
+			while (growing_array_get_valid_count(stack)) {
+				Vector2i self = stack[growing_array_get_valid_count(stack)-1];
+				growing_array_pop((void**)&stack);
+
+				TileCache* self_tc = tile_cache_at_tile(tile_entity_cache, self);
+				self_tc->visited = true;
+
+				for (int i = 0; i < 4; i++) {
+					Vector2i tile = self;
+					if (i == 0) {
+						tile = v2i_add(tile, v2i(-1, 0));
+					} else if (i == 1) {
+						tile = v2i_add(tile, v2i(1, 0));
+					} else if (i == 2) {
+						tile = v2i_add(tile, v2i(0, 1));
+					} else if (i == 3) {
+						tile = v2i_add(tile, v2i(0, -1));
+					}
+
+					Vector2i dist = v2i_sub(tile, start_tile);
+					float length = v2i_length(dist);
+					if (length > 40) {
+						is_inside = false;
+						continue;
+					}
+
+					TileCache* tile_cache = tile_cache_at_tile(tile_entity_cache, tile);
+					bool is_wall_seal = tile_cache->entity && tile_cache->entity->wall_seal && tile_cache->entity->frame.is_powered;
+					if (!tile_cache->visited && !is_wall_seal) {
+						growing_array_add((void**)&stack, &tile);
+					}
+				}
+			}
+		}
 
 		// :player specific caveman update
 		{
@@ -3560,7 +3593,7 @@ int entry(int argc, char **argv) {
 			float closest_dist = 99999;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* tether = &world->entities[i];
-				if (tether->is_valid && tether->is_oxygen_tether && tether->frame.is_powered) {
+				if (tether->is_valid && tether->is_oxygen_tether && tether->frame.is_powered && tether->arch != ARCH_o2_emitter) {
 					float dist = v2_dist(tether->pos, player->pos);
 					if (dist < tether_connection_radius) {
 						if (!closest_tether || dist < closest_dist) {
@@ -3571,14 +3604,16 @@ int entry(int argc, char **argv) {
 				}
 			}
 
-			bool is_losing_o2 = closest_tether == null;
+			bool is_losing_o2 = closest_tether == null && !is_inside;
 			app_frame.losing_o2 = is_losing_o2;
 
 			if (!is_losing_o2) {
 				player->oxygen_deplete_end_time = 0; // reset so it's a clean timer
 
 				// player tether line
-				draw_line(v2_add(closest_tether->pos, closest_tether->tether_connection_offset), player->pos, 1.0f, col_tether);
+				if (!is_inside) {
+					draw_line(v2_add(closest_tether->pos, closest_tether->tether_connection_offset), player->pos, 1.0f, col_tether);
+				}
 
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
@@ -3875,6 +3910,42 @@ int entry(int argc, char **argv) {
 			quad->uv.y1 = (float32)(anim_sheet_pos_y)/(float32)sprite->image->height;
 			quad->uv.x2 = (float32)(anim_sheet_pos_x+size.x) /(float32)sprite->image->width;
 			quad->uv.y2 = (float32)(anim_sheet_pos_y+size.y)/(float32)sprite->image->height;
+		}
+
+		// :tile :rendering
+		scope_z_layer(layer_background)
+		{
+			int player_tile_x = world_pos_to_tile_pos(get_player()->pos.x);
+			int player_tile_y = world_pos_to_tile_pos(get_player()->pos.y);
+			int tile_radius_x = 40;
+			int tile_radius_y = 30;
+			for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
+				for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
+
+					BiomeID biome = biome_at_tile(v2i(x, y));
+					if (biome == 0) {
+						continue;
+					}
+
+
+					// checkerboard pattern
+					Vector4 col = color_0;
+					if ((x + (y % 2 == 0) ) % 2 == 0) {
+						col.a = 0.9;
+					}
+					col = v4_lerp(col, biome_col_hex_to_rgba(biome_colors[biome]), 0.1f);
+					float x_pos = x * tile_width;
+					float y_pos = y * tile_width;
+					Draw_Quad* quad = draw_rect(v2(x_pos, y_pos), v2(tile_width, tile_width), col);
+
+					TileCache* tc = tile_cache_at_tile(tile_entity_cache, v2i(x, y));
+					if (tc->visited) {
+						set_col_override(quad, v4(1, 0, 0, 0.2));
+					}
+				}
+			}
+
+			// draw_rect(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y) + tile_width * -0.5), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5));
 		}
 
 		particle_update();

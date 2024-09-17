@@ -9,7 +9,7 @@
 
   #define DEV_TESTING
   // #define LOOP_SOUND
-  // #define DISABLE_O2
+  #define DISABLE_O2
   // #define DRAW_BOUNDS
   // #define MOUSE_COORDS_DEBUG
 

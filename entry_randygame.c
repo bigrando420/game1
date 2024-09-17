@@ -168,7 +168,7 @@ float selection_reach_radius = 30.0f;
 float tether_connection_radius = 50.0;
 float o2_full_tank_deplete_length = 16.0f; // #volatile length of oxygen riser sfx
 float oxygen_regen_tick_length = 0.01;
-float oxygen_deplete_tick_length = 0.5f;
+float oxygen_deplete_tick_length = 1.f;
 float teleporter_radius = 8.0f;
 const int tile_width = 8;
 const float world_half_length = tile_width * 10;
@@ -207,7 +207,7 @@ u32 font_height = 48;
 u32 font_height_body = 36;
 
 typedef struct AppFrame {
-	bool losing_o2;
+	bool connected_to_tether;
 } AppFrame;
 AppFrame app_frame = {0};
 AppFrame last_app_frame = {0};
@@ -450,6 +450,7 @@ typedef struct Entity {
 	DamageType dmg_type;
 	ItemID selected_crafting_item;
 	int oxygen;
+	int oxygen_max;
 	float64 oxygen_deplete_end_time;
 	float64 oxygen_regen_end_time;
 	bool is_oxygen_tether;
@@ -468,7 +469,6 @@ typedef struct Entity {
 	int exp_amount;
 	ItemAmount input0;
 	ItemAmount input1;
-	float64 fuel_expire_end_time;
 	int anim_index;
 	float64 time_til_next_frame;
 	Vector2i last_move_dir;
@@ -713,10 +713,6 @@ bool is_player_alive() {
 	return get_player()->health > 0;
 }
 
-int get_max_oxygen() {
-	return o2_full_tank_deplete_length / (float)oxygen_deplete_tick_length;
-}
-
 void entity_apply_defaults(Entity* en) {
 	en->tile_size = v2i(1, 1);
 }
@@ -851,6 +847,11 @@ void setup_oxygenerator(Entity* en) {
 	en->interactable_entity = true;
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
+	en->oxygen_max = 40;
+	en->oxygen = en->oxygen_max;
+}
+bool do_oxygenerator_error(Entity* en) {
+	return en->oxygen < en->oxygen_max * 0.5 && en->input0.amount <= 0;
 }
 
 void setup_grass(Entity* en) {
@@ -937,7 +938,8 @@ void setup_player(Entity* en) {
 	en->arch = ARCH_player;
 	en->health = 1;
 	en->max_health = en->health;
-	en->oxygen = get_max_oxygen();
+	en->oxygen_max = 17;
+	en->oxygen = en->oxygen_max;
 	en->has_physics = true;
 	en->friction = 20.f;
 	en->collision_bounds = range2f_make_center_center(v2(0,0), v2(6, 9));
@@ -1335,7 +1337,6 @@ void world_setup()
 	Entity* en = entity_create();
 	setup_oxygenerator(en);
 	world->oxygenerator = en;
-	en->fuel_expire_end_time = now() + o2_fuel_length;
 	en->pos = snap_position_to_nearest_tile_based_on_arch(v2(0, 0), en->arch);
 
 	en = entity_create();
@@ -1611,7 +1612,7 @@ void do_ui_stuff() {
 			world->ux_state = UX_nil;
 			Entity* player = get_player();
 			player->health = 1;
-			player->oxygen = get_max_oxygen();
+			player->oxygen = player->oxygen_max;
 			player->pos = v2(10, 0);
 		}
 	}
@@ -2805,7 +2806,12 @@ int entry(int argc, char **argv) {
 					draw_item_amount_in_rect(en->input0, rect);
 				} else {
 					Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
-					set_col_override(quad, v4(0,0,0, 0.8));
+
+					if (do_oxygenerator_error(en)) {
+						set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
+					} else {
+						set_col_override(quad, v4(0,0,0, 0.8));
+					}
 				}
 
 				if (do_tooltip) {
@@ -3266,24 +3272,16 @@ int entry(int argc, char **argv) {
 				// :oxygenerator update
 				if (en->arch == ARCH_oxygenerator) {
 
-					if (has_reached_end_time(en->fuel_expire_end_time)) {
-						if (en->fuel_expire_end_time != 0 && !en->input0.id) {
-							play_sound_at_pos("event:/shutdown", en->pos);
-						}
-						en->fuel_expire_end_time = 0;
-					}
-
-					// check for fuel expire.
-					if (en->fuel_expire_end_time == 0 && en->input0.id) {
+					if (en->oxygen == 0 && en->input0.id) {
 						// consume fuel
 						en->input0.amount -= 1;
 						if (en->input0.amount <= 0) {
 							en->input0 = (ItemAmount){0};
 						}
-						en->fuel_expire_end_time = now() + o2_fuel_length;
+						en->oxygen = en->oxygen_max;
 					}
 
-					if (en->fuel_expire_end_time != 0) {
+					if (en->oxygen > 0) {
 						en->frame.is_powered = true;
 					}
 				}
@@ -3466,7 +3464,7 @@ int entry(int argc, char **argv) {
 			}
 
 			// run through connections recursively, starting at the core tether
-			if (world->oxygenerator->fuel_expire_end_time != 0)
+			if (world->oxygenerator->oxygen > 0)
 			{
 				Entity** connection_stack;
 				growing_array_init_reserve((void**)&connection_stack, sizeof(Entity*), 1, get_temporary_allocator());
@@ -3589,6 +3587,8 @@ int entry(int argc, char **argv) {
 
 		// :player specific caveman update
 		{
+			Entity* oxygenerator = world->oxygenerator;
+
 			Entity* closest_tether = 0;
 			float closest_dist = 99999;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -3604,49 +3604,70 @@ int entry(int argc, char **argv) {
 				}
 			}
 
-			bool is_losing_o2 = closest_tether == null && !is_inside;
-			app_frame.losing_o2 = is_losing_o2;
+			bool connected_to_tether = closest_tether || is_inside;
+			app_frame.connected_to_tether = connected_to_tether;
 
-			if (!is_losing_o2) {
-				player->oxygen_deplete_end_time = 0; // reset so it's a clean timer
+			int start_oxygenerator_o2 = oxygenerator->oxygen;
 
-				// player tether line
-				if (!is_inside) {
-					draw_line(v2_add(closest_tether->pos, closest_tether->tether_connection_offset), player->pos, 1.0f, col_tether);
+			// player consumes o2 on tick
+			#if !defined(DISABLE_O2)
+			{
+				if (player->oxygen_deplete_end_time == 0) {
+					player->oxygen_deplete_end_time = now() + oxygen_deplete_tick_length;
 				}
+				if (has_reached_end_time(player->oxygen_deplete_end_time)) {
 
+					player->oxygen_deplete_end_time = 0;
+					player->oxygen -= 1;
+
+					// consume directly from the o2 network
+					if (connected_to_tether && oxygenerator->oxygen > 0) {
+						player->oxygen += 1;
+						oxygenerator->oxygen -= 1;
+						assert(oxygenerator->oxygen >= 0);
+					}
+				}
+			}
+			#endif
+
+			// o2 -> player pssssssst 
+			if (connected_to_tether && oxygenerator->oxygen > 0 && player->oxygen < player->oxygen_max)
+			{
 				if (player->oxygen_regen_end_time == 0) {
 					player->oxygen_regen_end_time = now() + oxygen_regen_tick_length;
 				}
 				if (has_reached_end_time(player->oxygen_regen_end_time)) {
 					player->oxygen_regen_end_time = 0;
 					player->oxygen += 1;
-				}
-			} else {
-				if (player->oxygen_deplete_end_time == 0) {
-					player->oxygen_deplete_end_time = now() + oxygen_deplete_tick_length;
-				}
-				if (has_reached_end_time(player->oxygen_deplete_end_time)) {
-					player->oxygen_deplete_end_time = 0;
-					#if !defined(DISABLE_O2)
-					player->oxygen -= 1;
-					#endif
+					oxygenerator->oxygen -= 1;
 				}
 			}
 
-			player->oxygen = clamp(player->oxygen, 0, get_max_oxygen());
+			// shutdown sfx when run out
+			if (start_oxygenerator_o2 == 1 && oxygenerator->oxygen == 0 && oxygenerator->input0.amount == 0) {
+				play_sound_at_pos("event:/shutdown", oxygenerator->pos);
+			}
+
+			// player tether line
+			if (connected_to_tether && !is_inside) {
+				if (!is_inside) {
+					draw_line(v2_add(closest_tether->pos, closest_tether->tether_connection_offset), player->pos, 1.0f, col_tether);
+				}
+			}
+
+			player->oxygen = clamp(player->oxygen, 0, player->oxygen_max);
 
 			{
 				local_persist FMOD_STUDIO_EVENTINSTANCE* o2_riser = 0;
 
-				if (is_losing_o2 && !last_app_frame.losing_o2) {
+				if (!connected_to_tether && last_app_frame.connected_to_tether) {
 					// just left tether
 					#if !defined(DISABLE_O2)
 					o2_riser = play_sound("event:/o2_riser");
 					#endif
 				}
 
-				if (!is_losing_o2 && last_app_frame.losing_o2) {
+				if (connected_to_tether && !last_app_frame.connected_to_tether) {
 					// just got back to tether
 					play_sound("event:/o2_hiss");
 					if (o2_riser) {
@@ -3812,8 +3833,18 @@ int entry(int argc, char **argv) {
 						Draw_Quad* q = draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
 						set_col_override(q, v4(1, 1, 1, en->white_flash_current_alpha));
 
-						// :burner fuel error flash
+						// :error flash
+						bool do_error_flash = false;
+						// :burner drill
 						if (en->arch == ARCH_burner_drill && en->last_fuel_max && en->current_fuel == 0) {
+							do_error_flash = true;
+						}
+						// :oxygenerator
+						if (en->arch == ARCH_oxygenerator && do_oxygenerator_error(en)) {
+							do_error_flash = true;
+						}
+
+						if (do_error_flash) {
 							set_col_override(q, v4(1, 0, 0, 0.8 * sin_breathe(os_get_elapsed_seconds(), 6.f)));
 						}
 
@@ -3826,12 +3857,12 @@ int entry(int argc, char **argv) {
 
 				// :oxygenerator render
 				if (en->arch == ARCH_oxygenerator) {
-					Vector2 size = {1, 5};
+					Vector2 size = {2, 5};
 					Vector2 draw_pos = en->pos;
-					draw_pos.x -= 0.5;
+					draw_pos.x -= size.x * 0.5;
 					draw_pos.y -= 3;
 
-					size.y = size.y * (1.0-alpha_from_end_time(en->fuel_expire_end_time, o2_fuel_length));
+					size.y = size.y * ((float)en->oxygen / (float)en->oxygen_max);
 
 					draw_rect(draw_pos, v2(size.x, size.y), col_oxygen);
 				}
@@ -3963,7 +3994,7 @@ int entry(int argc, char **argv) {
 				draw_pos.x -= size.x * 0.5;
 				draw_pos.y -= 6.0;
 				draw_rect(draw_pos, size, COLOR_BLACK);
-				float alpha = (float)player->oxygen / (float)get_max_oxygen();
+				float alpha = (float)player->oxygen / (float)player->oxygen_max;
 				draw_rect(draw_pos, v2(size.x * alpha, size.y), col_oxygen);
 			}
 		}

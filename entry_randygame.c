@@ -2185,7 +2185,7 @@ void do_ui_stuff() {
 			{
 				for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 					Entity* tether = &world->entities[i];
-					if (tether->is_valid && tether->last_frame.is_powered) {
+					if (tether->is_valid && tether->is_oxygen_tether && tether->last_frame.is_powered) {
 						if (v2_dist(tether->pos, pos) < tether_connection_radius) {
 							draw_line(v2_add(tether->pos, tether->tether_connection_offset), v2_add(pos, arch_data.tether_connection_offset), 1.0f, col_tether);
 							break;
@@ -3666,6 +3666,7 @@ int entry(int argc, char **argv) {
 
 				if (!connected_to_tether && last_app_frame.connected_to_tether) {
 					// just left tether
+					play_sound("event:/o2_disconnect");
 					#if !defined(DISABLE_O2)
 					o2_riser = play_sound("event:/o2_riser");
 					#endif
@@ -3893,7 +3894,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// :tether draw blue thingy
-				if (en->arch != ARCH_oxygenerator && en->frame.is_powered) {
+				if (en->arch != ARCH_oxygenerator && en->is_oxygen_tether && en->frame.is_powered) {
 					Vector2 draw_pos = v2_add(en->pos, v2(-1, -1));
 					draw_pos = v2_add(draw_pos, en->tether_connection_offset);
 					draw_rect(draw_pos, v2(2, 2), col_oxygen);
@@ -3962,7 +3963,6 @@ int entry(int argc, char **argv) {
 						continue;
 					}
 
-
 					// checkerboard pattern
 					Vector4 col = color_0;
 					if ((x + (y % 2 == 0) ) % 2 == 0) {
@@ -3973,10 +3973,10 @@ int entry(int argc, char **argv) {
 					float y_pos = y * tile_width;
 					Draw_Quad* quad = draw_rect(v2(x_pos, y_pos), v2(tile_width, tile_width), col);
 
-					TileCache* tc = tile_cache_at_tile(tile_entity_cache, v2i(x, y));
-					if (tc->visited) {
-						set_col_override(quad, v4(1, 0, 0, 0.2));
-					}
+					// TileCache* tc = tile_cache_at_tile(tile_entity_cache, v2i(x, y));
+					// if (tc->visited) {
+					// 	set_col_override(quad, v4(1, 0, 0, 0.2));
+					// }
 				}
 			}
 
@@ -4016,6 +4016,7 @@ int entry(int argc, char **argv) {
 		// load/save commands
 		// these are at the bottom, because we'll want to have a clean spot to do this to avoid any mid-way operation bugs.
 		#if CONFIGURATION == DEBUG
+		if (is_key_down(KEY_ALT))
 		{
 			if (is_key_just_pressed('F')) {
 				world_save_to_disk();

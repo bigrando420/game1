@@ -13,6 +13,11 @@
 
 #define scope_z_layer(Z) defer_scope(push_z_layer(Z), pop_z_layer())
 
+inline float64 fmod_cycling(float64 x, float64 y) {
+	float remainder = x - (floorf(x/y) * y);
+	return remainder;
+}
+
 inline int extract_sign(float a) {
 	return a == 0 ? 0 : (a < 0 ? -1 : 1);
 }
@@ -95,6 +100,27 @@ Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
 	ndc_quad.top_right = m4_transform(ndc_to_screen_space, v4(v2_expand(ndc_quad.top_right), 0, 1)).xy;
 
 	return ndc_quad;
+}
+
+Vector2 world_pos_to_ndc(Vector2 world_pos) {
+
+	Matrix4 proj = draw_frame.projection;
+	Matrix4 view = draw_frame.camera_xform;
+
+	Matrix4 world_space_to_ndc = m4_identity;
+	world_space_to_ndc = m4_mul(proj, m4_inverse(view));
+
+	Vector2 ndc = m4_transform(world_space_to_ndc, v4(v2_expand(world_pos), 0, 1)).xy;
+	return ndc;
+}
+
+Vector2 ndc_pos_to_screen_pos(Vector2 ndc) {
+	float w = window.width;
+	float h = window.height;
+	Vector2 screen = ndc;
+	screen.x = (ndc.x * 0.5f + 0.5f) * w;
+	screen.y = (1.0f - (ndc.y * 0.5f + 0.5f)) * h;
+	return screen;
 }
 
 // :utils
@@ -214,10 +240,25 @@ typedef struct AppFrame {
 AppFrame app_frame = {0};
 AppFrame last_app_frame = {0};
 
+#pragma pack(push, 16)
+typedef struct PointLight {
+	Vector2 position; // xy, zw unused
+	Vector2 _pad1;
+	Vector4 color;
+	float radius;
+	float intensity;
+	Vector2 pad3;
+} PointLight;
+
 // :shader
+#define POINT_LIGHT_MAX 128
 typedef struct ShaderConstBuffer {
-	int we_dont_have_a_use_for_this_yet;
+	float night_alpha;
+	Vector3 pad1;
+	PointLight point_lights[POINT_LIGHT_MAX];
+	int point_light_count;
 } ShaderConstBuffer;
+#pragma pack(pop)
 ShaderConstBuffer cbuffer = {0};
 
 // #volatile
@@ -426,6 +467,13 @@ typedef enum DamageType {
 	DMG_MAX,
 } DamageType;
 
+typedef enum EntityState {
+	STATE_nil,
+	STATE_idle,
+	STATE_resting,
+	// :state
+} EntityState;
+
 typedef struct Entity Entity; // needs forward declare
 typedef struct EntityFrame {
 	Entity** connected_to_tethers;
@@ -433,6 +481,7 @@ typedef struct EntityFrame {
 	Vector2 input_axis;
 	SpriteID functional_sprite_id;
 	bool can_interact;
+	Entity* target_en;
 	// :frame
 } EntityFrame;
 
@@ -494,6 +543,9 @@ typedef struct Entity {
 	float move_speed;
 	bool is_being_knocked_back;
 	float64 movement_cooldown_end_time;
+	// EntityState state; // not needed yet
+	bool is_agro;
+
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -549,6 +601,7 @@ typedef enum BiomeID {
 	BIOME_ice,
 	BIOME_ice_heavy,
 	BIOME_iron,
+	BIOME_enemy_nest,
 	// :biome #volatile
 	BIOME_MAX,
 } BiomeID;
@@ -576,6 +629,8 @@ WorldResourceData world_resources[] = {
 	{ BIOME_ice, ARCH_ice_vein, 10 },
 
 	{ BIOME_iron, ARCH_iron_depo, 6 },
+
+	{ BIOME_enemy_nest, ARCH_enemy1, 6 },
 	// :spawn_res system
 };
 
@@ -596,6 +651,7 @@ u32 biome_colors[BIOME_MAX] = {
 	0x70d6cd, // ice
 	0x26c9bc, // ice heavy
 	0xe49f9f, // iron
+	0xd31f1f, // enemy nest
 	// :biome #volatile
 };
 
@@ -1222,6 +1278,35 @@ bool has_reached_end_time(float64 end_time) {
 }
 
 // :func dump
+
+// 1.0 is medium intensity
+void add_point_light(Vector2 world_pos, Vector4 col, float radius, float intensity) {
+	if (cbuffer.point_light_count >= POINT_LIGHT_MAX) {
+		log_warning("Max point lights reached");
+		return ;
+	}
+
+	PointLight* pl = &cbuffer.point_lights[cbuffer.point_light_count];
+	cbuffer.point_light_count += 1;
+
+	pl->color = col;
+	pl->intensity = intensity;
+	pl->radius = radius;
+	pl->radius = pl->radius * zoom;
+	pl->position = ndc_pos_to_screen_pos(world_pos_to_ndc(world_pos));
+}
+
+void shader_recompile() {
+	string source;
+	bool ok = os_read_entire_file("res/shader.hlsl", &source, get_heap_allocator());
+	assert(ok);
+	gfx_shader_recompile_with_extension(source, sizeof(ShaderConstBuffer));
+	dealloc_string(get_heap_allocator(), source);
+}
+
+bool is_night() {
+	return true;
+}
 
 Tile* get_tile_list_at_pos_based_on_arch(Vector2 pos, ArchetypeID id) {
 	Entity en_data = get_archetype_data(id);
@@ -2340,8 +2425,22 @@ void do_ui_stuff() {
 
 // :enemy
 void update_enemy(Entity* en) {
-	// target towards player
-	Entity* target_en = get_player();
+
+	Entity* target_en = get_nil_entity();
+
+	// gain / loose agro
+	float dist_to_player = v2_dist(get_player()->pos, en->pos);
+	if (en->is_agro && dist_to_player > 100.f) {
+		en->is_agro = false;
+	}
+	if (!en->is_agro && dist_to_player < 50.f) {
+		en->is_agro = true;
+	}
+
+	if (en->is_agro && is_player_alive()) {
+		target_en = get_player();
+	}
+	en->frame.target_en = target_en;
 
 	en->friction = 20.f;
 	en->move_speed = 50.f;
@@ -2649,13 +2748,7 @@ int entry(int argc, char **argv) {
 	// the :init zone
 
 	// :shader init
-	{
-		string source;
-		bool ok = os_read_entire_file("res/shader.hlsl", &source, get_heap_allocator());
-		assert(ok);
-		gfx_shader_recompile_with_extension(source, sizeof(ShaderConstBuffer));
-		dealloc_string(get_heap_allocator(), source);
-	}
+	shader_recompile();
 
 	// world load / setup
 	if (os_is_file_s(STR("world"))) {
@@ -2756,7 +2849,6 @@ int entry(int argc, char **argv) {
 		// :frame update
 		draw_frame.enable_z_sorting = true;
 		cbuffer = (ShaderConstBuffer){0};
-		draw_frame.cbuffer = &cbuffer;
 
 		world_frame.world_proj = m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
 		// :camera
@@ -3999,13 +4091,27 @@ int entry(int argc, char **argv) {
 
 					// :enemy
 					case ARCH_enemy1: {
-						Vector2 pos = en->pos;
+						Vector2 center = en->pos;
+						float rate_mult = en->frame.target_en->is_valid ? 1.f : 0;
+						center.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0 * rate_mult);
+						center.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0 * rate_mult);
+
 						Vector2 size = v2(10, 10);
-						pos.x += size.x * -0.5;
-						pos.y += size.y * -0.5;
-						pos.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0);
-						pos.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0);
-						draw_rect(pos, size, COLOR_RED);
+						Vector2 draw_pos = center;
+						draw_pos.x += size.x * -0.5;
+						draw_pos.y += size.y * -0.5;
+
+						Vector4 col = COLOR_RED;
+						if (!en->frame.target_en->is_valid) {
+							col = v4_mul(col, v4(0.5, 0.5, 0.5, 1.f));
+						}
+
+						draw_rect(draw_pos, size, col);
+
+						if (en->frame.target_en->is_valid) {
+							add_point_light(center, v4(1,0,0,0.5), 20, 1);
+						}
+
 					} break;
 
 					default:
@@ -4204,6 +4310,16 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		// :shader cbuffer update
+		{
+			cbuffer.night_alpha = 1;
+			// cbuffer.night_alpha = sin_breathe(world->time_elapsed, 2.f);
+			// log("%f", cbuffer.night_alpha);
+
+			add_point_light(get_player()->pos, v4(0,0,0,0), 100, 1);
+		}
+		draw_frame.cbuffer = &cbuffer;
+
 		gfx_update();
 		fmod_update();
 		seconds_counter += delta_t;
@@ -4219,6 +4335,10 @@ int entry(int argc, char **argv) {
 		#if CONFIGURATION == DEBUG
 		if (is_key_down(KEY_ALT))
 		{
+			if (is_key_just_pressed('X')) {
+				shader_recompile();
+				log("reloaded shader");
+			}
 			if (is_key_just_pressed('F')) {
 				world_save_to_disk();
 				log("saved");

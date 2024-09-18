@@ -1456,10 +1456,10 @@ void world_setup()
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
-		en = entity_create();
-		setup_enemy1(en);
-		en->pos.x = 50;
-		en->pos.y = 20;
+		// en = entity_create();
+		// setup_enemy1(en);
+		// en->pos.x = 50;
+		// en->pos.y = 20;
 
 		player_en->exp_amount = 1000;
 		
@@ -2705,6 +2705,21 @@ int entry(int argc, char **argv) {
 				world_frame.player = en;
 			}
 		}
+
+		// debug adjust zoom
+		#if CONFIGURATION == DEBUG
+		{
+			if (is_key_down(KEY_SHIFT)) {
+				if (is_key_down('Q')) {
+					zoom += 0.1;
+				}
+				if (is_key_down('E')) {
+					zoom -= 0.1;
+					zoom = clamp_bottom(zoom, 0.4);
+				}
+			}
+		}
+		#endif
 
 		// :input
 		if (is_key_just_pressed(KEY_F11)) {

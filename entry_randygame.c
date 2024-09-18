@@ -1291,6 +1291,19 @@ Range2f get_entity_range(Entity* en) {
 	return (Range2f){ bottom_left, v2_add(bottom_left, get_sprite_size(get_sprite(en->sprite_id))) };
 }
 
+void do_entity_exp_drops(Entity* en) {
+	for (int i = 0; i < get_random_int_in_range(2, 3); i++) {
+		Entity* orb = entity_create();
+		setup_exp_orb(orb);
+		orb->pos = en->pos;
+		orb->has_physics = true;
+		orb->friction = 20.f;
+		orb->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
+		orb->velocity = v2_mulf(orb->velocity, get_random_float32_in_range(100, 200));
+		orb->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.4, 0.6);
+	}
+}
+
 void do_entity_drops(Entity* en) {
 	ItemID *drops;
 	// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
@@ -1430,6 +1443,12 @@ void world_setup()
 	en = entity_create();
 	setup_workbench(en);
 	en->pos = snap_position_to_nearest_tile_based_on_arch(v2(-tile_width, tile_width), en->arch);
+
+	en = entity_create();
+	setup_ice_vein(en);
+	en->pos.x = 70;
+	en->pos.y = -30;
+	en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
 
 	world->item_unlocks[ITEM_research_station].research_progress = 100;
 	world->item_unlocks[ITEM_workbench].research_progress = 100;
@@ -2340,6 +2359,7 @@ void update_enemy(Entity* en) {
 			en->velocity = v2_mulf(en->frame.input_axis, en->move_speed);
 		}
 
+		// collide with target
 		if (has_reached_end_time(en->movement_cooldown_end_time)) {
 			Range2f target_bounds = get_entity_collision_bounds(target_en);
 			target_bounds = range2f_shift(target_bounds, target_en->pos);
@@ -3405,6 +3425,7 @@ int entry(int argc, char **argv) {
 
 									if (against->health <= 0) {
 										do_entity_drops(against);
+										do_entity_exp_drops(against);
 										entity_destroy(against);
 									}
 								}
@@ -3898,18 +3919,7 @@ int entry(int argc, char **argv) {
 
 								// :drops
 								do_entity_drops(selected_en);
-
-								// exp orb drops
-								for (int i = 0; i < get_random_int_in_range(2, 3); i++) {
-									Entity* orb = entity_create();
-									setup_exp_orb(orb);
-									orb->pos = selected_en->pos;
-									orb->has_physics = true;
-									orb->friction = 20.f;
-									orb->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
-									orb->velocity = v2_mulf(orb->velocity, get_random_float32_in_range(100, 200));
-									orb->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.4, 0.6);
-								}
+								do_entity_exp_drops(selected_en);
 
 								entity_destroy(selected_en);
 							}

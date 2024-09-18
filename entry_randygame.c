@@ -385,6 +385,7 @@ typedef enum ArchetypeID {
 	ARCH_wall = 23,
 	ARCH_wall_gate = 24,
 	ARCH_o2_emitter = 25,
+	ARCH_enemy1 = 26,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -489,6 +490,10 @@ typedef struct Entity {
 	Range2f collision_bounds;
 	bool ignore_collision;
 	bool wall_seal;
+	bool move_based_on_input_axis;
+	float move_speed;
+	bool is_being_knocked_back;
+	float64 movement_cooldown_end_time;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -774,6 +779,14 @@ void entity_destroy(Entity* entity) {
 
 // :arch :setup things
 
+// :enemy
+void setup_enemy1(Entity* en) {
+	en->arch = ARCH_enemy1;
+	en->pretty_name = STR("Enemy 1");
+	en->has_physics = true;
+	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(10, 10));
+}
+
 void setup_o2_emitter(Entity* en) {
 	en->arch = ARCH_o2_emitter;
 	en->pretty_name = STR("Oxygen Feeder");
@@ -979,6 +992,8 @@ void setup_research_station(Entity* en) {
 
 void setup_player(Entity* en) {
 	en->arch = ARCH_player;
+	en->move_based_on_input_axis = true;
+	en->move_speed = 70.f;
 	en->health = 1;
 	en->max_health = en->health;
 	en->oxygen_max = 17;
@@ -1057,7 +1072,8 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_wall: setup_wall(en); break;
 		case ARCH_wall_gate: setup_wall_gate(en); break;
 		case ARCH_o2_emitter: setup_o2_emitter(en); break;
-		// :arch setup
+		case ARCH_enemy1: setup_enemy1(en); break;
+		// :arch :setup
 	}
 }
 
@@ -1421,6 +1437,11 @@ void world_setup()
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
+		en = entity_create();
+		setup_enemy1(en);
+		en->pos.x = 50;
+		en->pos.y = 20;
+
 		player_en->exp_amount = 1000;
 		
 		world->item_unlocks[ITEM_tether].research_progress = 100;
@@ -2294,6 +2315,50 @@ void do_ui_stuff() {
 
 	set_world_space();
 	pop_z_layer();
+}
+
+// update :func dump
+
+// :enemy
+void update_enemy(Entity* en) {
+	// target towards player
+	Entity* target_en = get_player();
+
+	en->friction = 20.f;
+	en->move_speed = 50.f;
+
+	if (target_en->is_valid) {
+
+		if (v2_dist(target_en->pos, en->pos) < 20.f) {
+			// attacc hard
+			en->move_speed = 300.f;
+		}
+
+		// apply movement to velocity
+		if (has_reached_end_time(en->movement_cooldown_end_time)) {
+			en->frame.input_axis = v2_normalize(v2_sub(target_en->pos, en->pos));
+			en->velocity = v2_mulf(en->frame.input_axis, en->move_speed);
+		}
+
+		if (has_reached_end_time(en->movement_cooldown_end_time)) {
+			Range2f target_bounds = get_entity_collision_bounds(target_en);
+			target_bounds = range2f_shift(target_bounds, target_en->pos);
+			Range2f our_bounds = en->collision_bounds;
+			our_bounds = range2f_shift(our_bounds, en->pos);
+			if (range2f_overlaps(target_bounds, our_bounds)) {
+				// knockback self
+				en->velocity = v2_mulf(en->frame.input_axis, -500.f);
+				en->movement_cooldown_end_time = now() + 1.f;
+
+				play_sound_at_pos("event:/enemy_hit", target_en->pos);
+
+				if (target_en->arch == ARCH_player) {
+					target_en->oxygen -= 5;
+					camera_shake(0.2);
+				}
+			}
+		}
+	}
 }
 
 // :entry
@@ -3248,6 +3313,11 @@ int entry(int argc, char **argv) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
 
+				// enemy update
+				if (en->arch == ARCH_enemy1) {
+					update_enemy(en);
+				}
+
 				// :furnace update
 				if (en->arch == ARCH_furnace) {
 
@@ -3438,8 +3508,8 @@ int entry(int argc, char **argv) {
 			}
 
 			Vector2 next_pos = {0};
-			if (en->arch == ARCH_player) {
-				next_pos = v2_add(en->pos, v2_mulf(en->frame.input_axis, 70.0 * delta_t));
+			if (en->move_based_on_input_axis) {
+				next_pos = v2_add(en->pos, v2_mulf(en->frame.input_axis, en->move_speed * delta_t));
 			} else {
 				// https://guide.handmadehero.org/code/day043
 				
@@ -3900,6 +3970,17 @@ int entry(int argc, char **argv) {
 
 					case ARCH_exp_orb: {
 						draw_rect(en->pos, v2(1, 1), col_exp);
+					} break;
+
+					// :enemy
+					case ARCH_enemy1: {
+						Vector2 pos = en->pos;
+						Vector2 size = v2(10, 10);
+						pos.x += size.x * -0.5;
+						pos.y += size.y * -0.5;
+						pos.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0);
+						pos.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0);
+						draw_rect(pos, size, COLOR_RED);
 					} break;
 
 					default:

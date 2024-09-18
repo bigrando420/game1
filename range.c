@@ -45,6 +45,11 @@ bool range2f_contains(Range2f range, Vector2 v) {
   return v.x >= range.min.x && v.x <= range.max.x && v.y >= range.min.y && v.y <= range.max.y;
 }
 
+bool range2f_overlaps(Range2f a, Range2f b) {
+  return (a.min.x <= b.max.x && a.max.x >= b.min.x &&
+          a.min.y <= b.max.y && a.max.y >= b.min.y);
+}
+
 Vector2 range2f_get_center(Range2f r) {
 	return (Vector2) { (r.max.x - r.min.x) * 0.5 + r.min.x, (r.max.y - r.min.y) * 0.5 + r.min.y };
 }

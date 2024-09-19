@@ -251,7 +251,7 @@ typedef struct PointLight {
 } PointLight;
 
 // :shader
-#define POINT_LIGHT_MAX 128
+#define POINT_LIGHT_MAX 256
 typedef struct ShaderConstBuffer {
 	float night_alpha;
 	Vector3 pad1;
@@ -742,6 +742,7 @@ BiomeID biome_at_tile(Tile tile) {
 
 typedef struct World {
 	int id_count;
+	u64 tick_count; 
 	float64 time_elapsed;
 	Entity entities[MAX_ENTITY_COUNT];
 	InventoryItemData inventory_items[ITEM_MAX];
@@ -1279,11 +1280,24 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+Range2f get_camera_view_rect_in_world_space() {
+	Range2f rect;
+	rect.min = v2(-1, -1);
+	rect.max = v2(1, 1);
+	rect = m4_transform_range2f(m4_inverse(world_frame.world_proj), rect);
+	rect = m4_transform_range2f(world_frame.world_view, rect);
+	return rect;
+}
+
 // 1.0 is medium intensity
 void add_point_light(Vector2 world_pos, Vector4 col, float radius, float intensity) {
 	if (cbuffer.point_light_count >= POINT_LIGHT_MAX) {
-		log_warning("Max point lights reached");
-		return ;
+		static bool has_notified = false;
+		if (!has_notified) {
+			log_warning("Max point lights reached");
+			has_notified = true;
+		}
+		return;
 	}
 
 	PointLight* pl = &cbuffer.point_lights[cbuffer.point_light_count];
@@ -1579,8 +1593,7 @@ typedef enum ParticleFlags {
 	PARTICLE_FLAGS_physics = (1<<1),
 	PARTICLE_FLAGS_friction = (1<<2),
 	PARTICLE_FLAGS_fade_out_with_velocity = (1<<3),
-	// PARTICLE_FLAGS_gravity = (1<<3),
-	// PARTICLE_FLAGS_bounce = (1<<4),
+	PARTICLE_FLAGS_light = (1<<4),
 } ParticleFlags;
 typedef struct Particle {
 	ParticleFlags flags;
@@ -1589,8 +1602,14 @@ typedef struct Particle {
 	Vector2 velocity;
 	Vector2 acceleration;
 	float friction;
-	float64 end_time;
+	float lifetime_length;
+	float64 lifetime_end_time;
 	float fade_out_vel_range;
+	float fade_in_pct;
+	float fade_out_pct;
+	Vector4 light_col;
+	float light_intensity;
+	float light_radius;
 } Particle;
 Particle particles[2048] = {0};
 int particle_cursor = 0;
@@ -1617,7 +1636,12 @@ void particle_update() {
 			continue;
 		}
 
-		if (p->end_time && has_reached_end_time(p->end_time)) {
+		// set end time on first update frame of particle
+		if (p->lifetime_length && p->lifetime_end_time == 0) {
+			p->lifetime_end_time = now() + p->lifetime_length;
+		}
+
+		if (p->lifetime_end_time && has_reached_end_time(p->lifetime_end_time)) {
 			particle_clear(p);
 			continue;
 		}
@@ -1650,7 +1674,36 @@ void particle_render() {
 			col.a *= float_alpha(fabsf(v2_length(p->velocity)), 0, p->fade_out_vel_range);
 		}
 
-		draw_rect(p->pos, v2(1, 1), col);
+		// fade in
+		if (p->fade_in_pct && p->lifetime_length != 0) {
+			float fade_length = p->lifetime_length * p->fade_in_pct;
+
+			float64 particle_start_time = p->lifetime_end_time - p->lifetime_length;
+
+			float alpha = float_alpha(now(), particle_start_time, particle_start_time + fade_length);
+			col.a *= alpha;
+		}
+
+		// fade out
+		if (p->fade_out_pct && p->lifetime_length != 0) {
+			float fade_out_length = p->lifetime_length * p->fade_out_pct;
+
+			// float64 particle_start_time = p->lifetime_end_time - p->lifetime_length;
+
+			float64 start_fade_out_time = p->lifetime_end_time - fade_out_length;
+
+			float alpha = 1.0-float_alpha(now(), start_fade_out_time, p->lifetime_end_time);
+			col.a *= alpha;
+		}
+
+		Vector2 size = v2(1, 1);
+		Vector2 draw_pos = v2_sub(p->pos, v2_mulf(size, 0.5));
+
+		draw_rect(draw_pos, size, col);
+
+		if (p->flags & PARTICLE_FLAGS_light) {
+			add_point_light(p->pos, p->light_col, p->light_radius, p->light_intensity * col.a);
+		}
 	}
 }
 
@@ -2783,6 +2836,8 @@ int entry(int argc, char **argv) {
 				en->frame = (EntityFrame){0};
 			}
 		}
+
+		world->tick_count += 1;
 
 		// reset appframe
 		last_app_frame = app_frame;
@@ -4257,6 +4312,48 @@ int entry(int argc, char **argv) {
 			quad->uv.y2 = (float32)(anim_sheet_pos_y+size.y)/(float32)sprite->image->height;
 		}
 
+		// world particles
+		{
+			Vector2 pos = get_player()->pos;
+
+			Range2f rect;
+			float scale = 2.0;
+			rect.min = v2(-1 * scale, -1 * scale);
+			rect.max = v2(1 * scale, 1 * scale);
+			rect = m4_transform_range2f(m4_inverse(world_frame.world_proj), rect);
+			rect = m4_transform_range2f(world_frame.world_view, rect);
+			// {
+			// 	draw_rect(rect.min, range2f_size(rect), v4(1,0,0,0.8));
+			// }
+
+			float hit_every_seconds = 0.1;
+			bool should_hit = false;
+			{
+				s64 count = now() / hit_every_seconds;
+				local_persist s64 last_count_triggered = 0;
+				if (count > last_count_triggered) {
+					should_hit = true;
+					last_count_triggered += 1;
+				}
+			}
+
+			if (should_hit) {
+				Particle* p = particle_new();
+				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_light;
+				p->pos.x = get_random_float32_in_range(rect.min.x, rect.max.x);
+				p->pos.y = get_random_float32_in_range(rect.min.y, rect.max.y);
+				p->velocity.x = get_random_float32_in_range(-4, 4);
+				p->velocity.y = 10;
+				p->col = COLOR_GREEN;
+				p->light_col = v4(0, 1, 0, 0.5);
+				p->light_intensity = 0.4;
+				p->light_radius = 10;
+				p->fade_in_pct = 0.1;
+				p->fade_out_pct = 0.2;
+				p->lifetime_length = 5;
+			}
+		}
+
 		// :tile :rendering
 		scope_z_layer(layer_background)
 		{
@@ -4316,7 +4413,8 @@ int entry(int argc, char **argv) {
 			// cbuffer.night_alpha = sin_breathe(world->time_elapsed, 2.f);
 			// log("%f", cbuffer.night_alpha);
 
-			add_point_light(get_player()->pos, v4(0,0,0,0), 100, 1);
+			// player light
+			// add_point_light(get_player()->pos, v4(0,0,0,0), 100, 1);
 		}
 		draw_frame.cbuffer = &cbuffer;
 

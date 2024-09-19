@@ -465,6 +465,7 @@ typedef struct ItemData {
 	float craft_length;
 	ItemID furnace_transform_into;
 	bool disabled;
+	bool used_in_turret;
 	// merged in from building.
 	ArchetypeID to_build;
 	int exp_cost;
@@ -892,6 +893,7 @@ void setup_turret(Entity* en) {
 	en->tile_size = v2i(2, 2);
 	en->has_collision = true;
 	en->sprite_id = SPRITE_turret;
+	en->interactable_entity = true;
 }
 
 // :enemy

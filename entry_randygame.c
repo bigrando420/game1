@@ -1322,7 +1322,7 @@ void shader_recompile() {
 }
 
 bool is_night() {
-	return true;
+	return almost_equals(world->night_alpha, 1.0, 0.1);
 }
 
 Tile* get_tile_list_at_pos_based_on_arch(Vector2 pos, ArchetypeID id) {
@@ -2490,6 +2490,10 @@ void update_enemy(Entity* en) {
 		en->is_agro = false;
 	}
 	if (!en->is_agro && dist_to_player < 50.f) {
+		en->is_agro = true;
+	}
+
+	if (is_night()) {
 		en->is_agro = true;
 	}
 
@@ -4341,14 +4345,17 @@ int entry(int argc, char **argv) {
 			}
 
 			if (should_hit) {
+				Vector4 col = hex_to_rgba(0xe7c756ff);
+
 				Particle* p = particle_new();
 				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_light;
 				p->pos.x = get_random_float32_in_range(rect.min.x, rect.max.x);
 				p->pos.y = get_random_float32_in_range(rect.min.y, rect.max.y);
 				p->velocity.x = get_random_float32_in_range(-4, 4);
 				p->velocity.y = 10;
-				p->col = COLOR_GREEN;
-				p->light_col = v4(0, 1, 0, 1);
+				p->col = col;
+				p->light_col = col;
+				p->light_col.a = 1.0; // drives effect of point light
 				p->light_intensity = 0.2;
 				p->light_radius = 10;
 				p->fade_in_pct = 0.1;
@@ -4418,10 +4425,12 @@ int entry(int argc, char **argv) {
 
 		// :shader cbuffer update
 		{
+			#if CONFIGURATION == DEBUG
 			if (is_key_just_pressed('U')) {
 				world->night_alpha_target = world->night_alpha_target == 0 ? 1.0 : 0.0;
 				log("%f", world->night_alpha_target);
 			}
+			#endif
 
 			animate_f32_to_target(&world->night_alpha, world->night_alpha_target, delta_t, 3.0);
 

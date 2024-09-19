@@ -172,6 +172,26 @@ void animate_v2_to_target(Vector2* value, Vector2 target, float delta_t, float r
 	animate_f32_to_target(&(value->y), target.y, delta_t, rate);
 }
 
+bool animate_f32_to_target_linear_with_epsilon(float* value, float target, float delta_t, float rate, float epsilon) {
+	float delta = rate * delta_t;
+	if (fabsf(target - *value) <= epsilon) {
+		*value = target;
+		return true; // Reached the target
+	}
+	if (*value < target) {
+		*value += delta;
+		if (*value > target) {
+			*value = target;
+		}
+	} else {
+		*value -= delta;
+		if (*value < target) {
+			*value = target;
+		}
+	}
+	return false;
+}
+
 Range2f quad_to_range(Draw_Quad quad) {
 	return (Range2f){quad.bottom_left, quad.top_right};
 }
@@ -741,6 +761,8 @@ BiomeID biome_at_tile(Tile tile) {
 typedef struct World {
 	int id_count;
 	u64 tick_count; 
+	u64 day_count;
+	float64 cycle_end_time;
 	float64 time_elapsed;
 	Entity entities[MAX_ENTITY_COUNT];
 	InventoryItemData inventory_items[ITEM_MAX];
@@ -4423,6 +4445,34 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		// day/night :cycle
+		{
+			float day_length = 10.0f;
+			float night_length = 5.0f;
+			float transition_length = 10.0f;
+
+			if (world->cycle_end_time == 0) {
+				world->cycle_end_time = now() + day_length; // init to start of day
+			}
+
+			if (has_reached_end_time(world->cycle_end_time)) {
+				bool is_day = world->night_alpha_target == 0;
+
+				if (is_day) {
+					world->night_alpha_target = 1.0f;
+					world->cycle_end_time = now() + night_length + transition_length;
+					log("transition to night");
+				} else {
+					world->night_alpha_target = 0.0f;
+					world->cycle_end_time = now() + day_length + transition_length;
+					world->day_count += 1;
+					log("transition to day");
+				}
+			}
+
+			animate_f32_to_target_linear_with_epsilon(&world->night_alpha, world->night_alpha_target, delta_t, 1.0/transition_length, 0.001);
+		}
+
 		// :shader cbuffer update
 		{
 			#if CONFIGURATION == DEBUG
@@ -4432,7 +4482,7 @@ int entry(int argc, char **argv) {
 			}
 			#endif
 
-			animate_f32_to_target(&world->night_alpha, world->night_alpha_target, delta_t, 3.0);
+
 
 			cbuffer.night_alpha = world->night_alpha;
 			// cbuffer.night_alpha = sin_breathe(world->time_elapsed, 2.f);

@@ -200,6 +200,7 @@ Range2f quad_to_range(Draw_Quad quad) {
 
 // :col
 // these get inited on startup because we don't have a #run for the hex_to_rgba(0x2a2d3aff) lol
+Vector4 col_golden;
 Vector4 col_fire;
 Vector4 col_select;
 Vector4 color_0;
@@ -504,6 +505,7 @@ typedef struct EntityFrame {
 	bool can_interact;
 	Entity* target_en;
 	bool is_creation;
+	bool did_shoot;
 	// :frame
 } EntityFrame;
 
@@ -568,7 +570,9 @@ typedef struct Entity {
 	// EntityState state; // not needed yet
 	bool is_agro;
 	bool is_enemy;
-
+	Vector2 last_shoot_dir;
+	float rotation_current;
+	float rotation_target;
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -1102,6 +1106,7 @@ void setup_player(Entity* en) {
 	en->move_speed = 70.f;
 	entity_max_health_setter(en, 1);
 	en->oxygen_max = 17;
+	en->oxygen = en->oxygen_max;
 	en->has_physics = true;
 	en->friction = 20.f;
 	en->collision_bounds = range2f_make_center_center(v2(0,0), v2(6, 9));
@@ -2517,6 +2522,57 @@ void do_ui_stuff() {
 	pop_z_layer();
 }
 
+void draw_base_sprite(Entity* en) {
+	Sprite* sprite = get_sprite(en->sprite_id);
+	Matrix4 xform = m4_scalar(1.0);
+	if (en->arch == ARCH_item) {
+		xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
+	}
+
+	// all entities basically have a center center position
+	// that way the ->pos is very easily used in other areas intuitively.
+	Vector2 draw_pos = v2_add(en->pos, get_offset_for_rendering(en));
+	xform = m4_translate(xform, v3(draw_pos.x, draw_pos.y, 0));
+
+	Vector4 col = COLOR_WHITE;
+	if (world_frame.selected_entity == en) {
+		if (en->frame.can_interact) {
+			col = col_select;
+		} else {
+			col = v4(0.5, 0.5, 0.5, 1);
+		}
+	}
+
+	if (en->wall_seal && en->frame.is_powered) {
+		col = v4_mul(col, col_oxygen);
+	}
+
+	if (en->white_flash_current_alpha != 0) {
+		animate_f32_to_target(&en->white_flash_current_alpha, 0, delta_t, 20.0f);
+	}
+
+	Draw_Quad* q = draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
+	set_col_override(q, v4(1, 1, 1, en->white_flash_current_alpha));
+
+	// :error flash
+	bool do_error_flash = false;
+	// :burner drill
+	if (en->arch == ARCH_burner_drill && en->current_fuel == 0) {
+		do_error_flash = true;
+	}
+	// :oxygenerator
+	if (en->arch == ARCH_oxygenerator && do_oxygenerator_error(en)) {
+		do_error_flash = true;
+	}
+
+	if (do_error_flash) {
+		set_col_override(q, v4(1, 0, 0, 0.8 * sin_breathe(os_get_elapsed_seconds(), 6.f)));
+	}
+
+	// debug pos 
+	// draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);
+}
+
 // update :func dump
 
 // :turret
@@ -2545,17 +2601,94 @@ void update_turret(Entity* en) {
 
 	// shoot
 	if (closest_enemy && has_reached_end_time(en->next_hit_end_time)) {
-		en->next_hit_end_time = now() + 0.1;
+		en->next_hit_end_time = now() + 0.5;
 
-		log("pew");
+		play_sound_at_pos("event:/turret_shot", en->pos);
 
-		closest_enemy->health -= 1;
+		Vector2 shoot_dir = v2_normalize(v2_sub(closest_enemy->pos, en->pos));
+		closest_enemy->velocity = v2_add(closest_enemy->velocity, v2_mulf(shoot_dir, 800));
+
+		en->last_shoot_dir = shoot_dir;
+		en->frame.did_shoot = true;
+
+		{
+			Vector2 pos = closest_enemy->pos;
+			Vector4 col = COLOR_RED;
+
+			for (int i = 0; i < 10; i++) {
+				Particle* p = particle_new();
+				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_friction | PARTICLE_FLAGS_fade_out_with_velocity | PARTICLE_FLAGS_light;
+				p->pos = pos;
+				pos.x += get_random_float32_in_range(-2, 2);
+				pos.y += get_random_float32_in_range(-2, 2);
+				p->velocity = v2_mulf(shoot_dir, get_random_float32_in_range(200, 300));
+				p->col = col;
+				p->friction = 20.0f;
+				p->fade_out_vel_range = 30.0f;
+
+				p->light_col = col;
+				p->light_intensity = 0.3;
+				p->light_radius = 2;
+			}
+		}
+
+		closest_enemy->health -= 3;
 		if (closest_enemy->health <= 0) {
 			// kill
 			entity_destroy(closest_enemy);
 		}
 	}
 
+}
+
+void render_turret(Entity* en) {
+	draw_base_sprite(en);
+
+	Vector2 mouse_dir = v2_normalize(v2_sub(get_mouse_pos_in_world_space(), en->pos));
+
+	Vector2 dir = en->last_shoot_dir;
+	dir.y *= -1; // for some reason this needs to be flipped.
+
+	// angle_from_vector example
+	float rotation = atan2(dir.y, dir.x);
+
+	en->rotation_target = rotation;
+	animate_f32_to_target(&en->rotation_current, en->rotation_target, delta_t, 40);
+
+	Vector2 size = v2(12, 2);
+
+	Matrix4 xform = m4_identity;
+	xform = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
+	xform = m4_rotate_z(xform, en->rotation_current);
+	xform = m4_translate(xform, v3(-1, size.y * -0.5, 0));
+
+	// muzzle flash
+	if (en->frame.did_shoot) {
+		Matrix4 target_xform = m4_identity;
+		target_xform = m4_translate(target_xform, v3(en->pos.x, en->pos.y, 0));
+		target_xform = m4_rotate_z(target_xform, en->rotation_target);
+		target_xform = m4_translate(target_xform, v3(-1, size.y * -0.5, 0));
+		Vector2 muzzle_pos = v2(12, 0);
+		muzzle_pos = m4_transform(target_xform, v4(v2_expand(muzzle_pos), 0, 1)).xy;
+
+		for (int i = 0; i < 7; i++) {
+			Particle* p = particle_new();
+			p->flags |= PARTICLE_FLAGS_light | PARTICLE_FLAGS_physics | PARTICLE_FLAGS_friction | PARTICLE_FLAGS_fade_out_with_velocity;
+			p->pos = muzzle_pos;
+			p->col = col_golden;
+			p->friction = 40;
+			p->fade_out_vel_range = 30;
+
+			p->velocity = v2_normalize(v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1)));
+			p->velocity = v2_mulf(p->velocity, get_random_float32_in_range(200, 200));
+
+			p->light_col = col_golden;
+			p->light_intensity = 0.3;
+			p->light_radius = 10;
+		}
+	}
+
+	draw_rect_xform(xform, size, COLOR_BLACK);
 }
 
 // :enemy
@@ -2639,6 +2772,7 @@ int entry(int argc, char **argv) {
 	#endif
 
 	// :col
+	col_golden = hex_to_rgba(0xddaa47ff);
 	col_fire = hex_to_rgba(0xf66144ff);
 	col_exp = hex_to_rgba(0x7bd47aff);
 	col_select = col_exp;
@@ -4240,6 +4374,8 @@ int entry(int argc, char **argv) {
 
 					case ARCH_player: break;
 
+					case ARCH_turret: render_turret(en); break;
+
 					case ARCH_exp_orb: {
 						draw_rect(en->pos, v2(1, 1), col_exp);
 					} break;
@@ -4269,59 +4405,9 @@ int entry(int argc, char **argv) {
 
 					} break;
 
-					default:
-					{
-						Sprite* sprite = get_sprite(en->sprite_id);
-						Matrix4 xform = m4_scalar(1.0);
-						if (en->arch == ARCH_item) {
-							xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
-						}
-
-						// all entities basically have a center center position
-						// that way the ->pos is very easily used in other areas intuitively.
-						Vector2 draw_pos = v2_add(en->pos, get_offset_for_rendering(en));
-						xform = m4_translate(xform, v3(draw_pos.x, draw_pos.y, 0));
-
-						Vector4 col = COLOR_WHITE;
-						if (world_frame.selected_entity == en) {
-							if (en->frame.can_interact) {
-								col = col_select;
-							} else {
-								col = v4(0.5, 0.5, 0.5, 1);
-							}
-						}
-
-						if (en->wall_seal && en->frame.is_powered) {
-							col = v4_mul(col, col_oxygen);
-						}
-
-						if (en->white_flash_current_alpha != 0) {
-							animate_f32_to_target(&en->white_flash_current_alpha, 0, delta_t, 20.0f);
-						}
-
-						Draw_Quad* q = draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
-						set_col_override(q, v4(1, 1, 1, en->white_flash_current_alpha));
-
-						// :error flash
-						bool do_error_flash = false;
-						// :burner drill
-						if (en->arch == ARCH_burner_drill && en->current_fuel == 0) {
-							do_error_flash = true;
-						}
-						// :oxygenerator
-						if (en->arch == ARCH_oxygenerator && do_oxygenerator_error(en)) {
-							do_error_flash = true;
-						}
-
-						if (do_error_flash) {
-							set_col_override(q, v4(1, 0, 0, 0.8 * sin_breathe(os_get_elapsed_seconds(), 6.f)));
-						}
-
-						// debug pos 
-						// draw_text(font, sprint(temp, STR("%f %f"), en->pos.x, en->pos.y), font_height, en->pos, v2(0.1, 0.1), COLOR_WHITE);
-
-						break;
-					}
+					default: {
+						draw_base_sprite(en);
+					} break;
 				}
 
 				// :oxygenerator render
@@ -4412,12 +4498,12 @@ int entry(int argc, char **argv) {
 			quad->uv.y2 = (float32)(anim_sheet_pos_y+size.y)/(float32)sprite->image->height;
 		}
 
-		// world particles
+		// :world particles
 		{
 			Vector2 pos = get_player()->pos;
 
 			Range2f rect;
-			float scale = 2.0;
+			float scale = 1.5;
 			rect.min = v2(-1 * scale, -1 * scale);
 			rect.max = v2(1 * scale, 1 * scale);
 			rect = m4_transform_range2f(m4_inverse(world_frame.world_proj), rect);
@@ -4426,7 +4512,7 @@ int entry(int argc, char **argv) {
 			// 	draw_rect(rect.min, range2f_size(rect), v4(1,0,0,0.8));
 			// }
 
-			float hit_every_seconds = 0.1;
+			float hit_every_seconds = 0.2;
 			bool should_hit = false;
 			{
 				s64 count = app_now() / hit_every_seconds;
@@ -4437,6 +4523,7 @@ int entry(int argc, char **argv) {
 				}
 			}
 
+			// :glow effect thingo
 			if (should_hit) {
 				Vector4 col = hex_to_rgba(0xe7c756ff);
 

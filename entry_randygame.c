@@ -1826,6 +1826,77 @@ bool world_attempt_load_from_disk() {
 	return true;
 }
 
+void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
+	if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+		
+		// interact with the slot
+		{
+
+			bool has_desired_item_in_hand = false;
+			for (int i = 0; i < growing_array_get_valid_count(desired_items); i++) {
+				ItemID desired_item = desired_items[i];
+				if (world->mouse_cursor_item.id == desired_item) {
+					has_desired_item_in_hand = true;
+					break;
+				}
+			}
+
+			if (world->mouse_cursor_item.id) {
+				if (slot->id) {
+					if (slot->id == world->mouse_cursor_item.id) {
+						// attempt stack
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							slot->amount += world->mouse_cursor_item.amount;
+							world->mouse_cursor_item = (ItemAmount){0};
+						}
+					} else {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							if (has_desired_item_in_hand) {
+								// swap
+								ItemAmount temp = world->mouse_cursor_item;
+								world->mouse_cursor_item = *slot;
+								*slot = temp;
+							} else {
+								play_sound("event:/error");
+							}
+						}
+					}
+				} else {
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						if (has_desired_item_in_hand) {
+							// place inside
+							*slot = world->mouse_cursor_item;
+							world->mouse_cursor_item = (ItemAmount){0};
+						} else {
+							play_sound("event:/error");
+						}
+					}
+				}
+			} else {
+				if (slot->id) {
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						// take into hand
+						world->mouse_cursor_item = *slot;
+						*slot = (ItemAmount){0};
+					}
+
+					item_tooltip(*slot);
+				}
+			}
+		}
+	}
+
+	draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+
+	if (slot->id) {
+		draw_item_amount_in_rect(*slot, rect);
+	}
+}
+
 // :ui
 void do_world_entity_interaction_ui_stuff() {
 
@@ -1858,67 +1929,16 @@ void do_world_entity_interaction_ui_stuff() {
 		Vector2 size = v2(10, 10);
 		x0 -= size.x * 0.5;
 
-		bool do_tooltip = false;
 		Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
-		if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-			world_frame.hover_consumed = true;
-			
-			// interact with the slot
-			{
-				if (world->mouse_cursor_item.id) {
-					if (en->input0.id) {
-						if (en->input0.id == world->mouse_cursor_item.id) {
-							// attempt stack
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								en->input0.amount += world->mouse_cursor_item.amount;
-								world->mouse_cursor_item = (ItemAmount){0};
-							}
-						} else {
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								if (world->mouse_cursor_item.id == ITEM_o2_shard) {
-									// swap
-									ItemAmount temp = world->mouse_cursor_item;
-									world->mouse_cursor_item = en->input0;
-									en->input0 = temp;
-								} else {
-									play_sound("event:/error");
-								}
-							}
-						}
-					} else {
-						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							if (world->mouse_cursor_item.id == ITEM_o2_shard) {
-								// place inside
-								en->input0 = world->mouse_cursor_item;
-								world->mouse_cursor_item = (ItemAmount){0};
-							} else {
-								play_sound("event:/error");
-							}
-						}
-					}
-				} else {
-					if (en->input0.id) {
-						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							// take into hand
-							world->mouse_cursor_item = en->input0;
-							en->input0 = (ItemAmount){0};
-						}
 
-						do_tooltip = true;
-					}
-				}
-			}
-		}
+		ItemID* desired_items;
+		growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
+		ItemID desired_item = ITEM_o2_shard;
+		growing_array_add((void**)&desired_items, &desired_item);
 
-		draw_rect(rect.min, size, COLOR_GRAY);
+		input_slot(rect, &en->input0, desired_items);
 
-		if (en->input0.id) {
-			draw_item_amount_in_rect(en->input0, rect);
-		} else {
+		if (!en->input0.id) {
 			Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
 
 			if (do_oxygenerator_error(en)) {
@@ -1927,16 +1947,10 @@ void do_world_entity_interaction_ui_stuff() {
 				set_col_override(quad, v4(0,0,0, 0.8));
 			}
 		}
-
-		if (do_tooltip) {
-			item_tooltip(en->input0);
-		}
 	}
 
 	// :burner ux
 	if (en->arch == ARCH_burner_drill) {
-
-		ItemID desired_item = ITEM_coal;
 
 		float x0 = en->pos.x;
 		float y0 = en->pos.y;
@@ -1945,66 +1959,16 @@ void do_world_entity_interaction_ui_stuff() {
 		Vector2 size = v2(10, 10);
 		x0 -= size.x * 0.5;
 
-		bool do_tooltip = false;
 		Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
-		if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-			
-			// interact with the slot
-			{
-				if (world->mouse_cursor_item.id) {
-					if (en->input0.id) {
-						if (en->input0.id == world->mouse_cursor_item.id) {
-							// attempt stack
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								en->input0.amount += world->mouse_cursor_item.amount;
-								world->mouse_cursor_item = (ItemAmount){0};
-							}
-						} else {
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								if (world->mouse_cursor_item.id == desired_item) {
-									// swap
-									ItemAmount temp = world->mouse_cursor_item;
-									world->mouse_cursor_item = en->input0;
-									en->input0 = temp;
-								} else {
-									play_sound("event:/error");
-								}
-							}
-						}
-					} else {
-						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							if (world->mouse_cursor_item.id == desired_item) {
-								// place inside
-								en->input0 = world->mouse_cursor_item;
-								world->mouse_cursor_item = (ItemAmount){0};
-							} else {
-								play_sound("event:/error");
-							}
-						}
-					}
-				} else {
-					if (en->input0.id) {
-						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							// take into hand
-							world->mouse_cursor_item = en->input0;
-							en->input0 = (ItemAmount){0};
-						}
 
-						do_tooltip = true;
-					}
-				}
-			}
-		}
+		ItemID* desired_items;
+		growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
+		ItemID desired_item = ITEM_coal;
+		growing_array_add((void**)&desired_items, &desired_item);
 
-		draw_rect(rect.min, size, COLOR_GRAY);
+		input_slot(rect, &en->input0, desired_items);
 
-		if (en->input0.id) {
-			draw_item_amount_in_rect(en->input0, rect);
-		} else {
+		if (!en->input0.id) {
 			Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
 
 			if (en->current_fuel == 0) {
@@ -2026,10 +1990,6 @@ void do_world_entity_interaction_ui_stuff() {
 
 			draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
 		}
-
-		if (do_tooltip) {
-			item_tooltip(en->input0);
-		}
 	}
 
 	// :furance ux
@@ -2044,67 +2004,17 @@ void do_world_entity_interaction_ui_stuff() {
 		y0 += get_offset_for_rendering(en).y;
 		y0 -= slot_size.x + 1.f;
 		{
-			ItemID desired_item = ITEM_coal;
 
 			Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
-			if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-				
-				// interact with the slot
-				{
-					if (world->mouse_cursor_item.id) {
-						if (en->input0.id) {
-							if (en->input0.id == world->mouse_cursor_item.id) {
-								// attempt stack
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									en->input0.amount += world->mouse_cursor_item.amount;
-									world->mouse_cursor_item = (ItemAmount){0};
-								}
-							} else {
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									if (world->mouse_cursor_item.id == desired_item) {
-										// swap
-										ItemAmount temp = world->mouse_cursor_item;
-										world->mouse_cursor_item = en->input0;
-										en->input0 = temp;
-									} else {
-										play_sound("event:/error");
-									}
-								}
-							}
-						} else {
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								if (world->mouse_cursor_item.id == desired_item) {
-									// place inside
-									en->input0 = world->mouse_cursor_item;
-									world->mouse_cursor_item = (ItemAmount){0};
-								} else {
-									play_sound("event:/error");
-								}
-							}
-						}
-					} else {
-						if (en->input0.id) {
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								// take into hand
-								world->mouse_cursor_item = en->input0;
-								en->input0 = (ItemAmount){0};
-							}
 
-							item_tooltip(en->input0);
-						}
-					}
-				}
-			}
+			ItemID* desired_items;
+			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
+			ItemID desired_item = ITEM_coal;
+			growing_array_add((void**)&desired_items, &desired_item);
 
-			draw_rect(rect.min, slot_size, COLOR_GRAY);
+			input_slot(rect, &en->input0, desired_items);
 
-			if (en->input0.id) {
-				draw_item_amount_in_rect(en->input0, rect);
-			} else {
+			if (!en->input0.id) {
 				Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
 
 				if (en->current_fuel == 0) {
@@ -2148,77 +2058,9 @@ void do_world_entity_interaction_ui_stuff() {
 				}
 			}
 
-			//
-
 			Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
-			if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
-				
-				// interact with the slot
-				{
 
-					bool has_desired_item_in_hand = false;
-					for (int i = 0; i < growing_array_get_valid_count(desired_items); i++) {
-						ItemID desired_item = desired_items[i];
-						if (world->mouse_cursor_item.id == desired_item) {
-							has_desired_item_in_hand = true;
-							break;
-						}
-					}
-
-					if (world->mouse_cursor_item.id) {
-						if (slot->id) {
-							if (slot->id == world->mouse_cursor_item.id) {
-								// attempt stack
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									slot->amount += world->mouse_cursor_item.amount;
-									world->mouse_cursor_item = (ItemAmount){0};
-								}
-							} else {
-								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-									if (has_desired_item_in_hand) {
-										// swap
-										ItemAmount temp = world->mouse_cursor_item;
-										world->mouse_cursor_item = *slot;
-										*slot = temp;
-									} else {
-										play_sound("event:/error");
-									}
-								}
-							}
-						} else {
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								if (has_desired_item_in_hand) {
-									// place inside
-									*slot = world->mouse_cursor_item;
-									world->mouse_cursor_item = (ItemAmount){0};
-								} else {
-									play_sound("event:/error");
-								}
-							}
-						}
-					} else {
-						if (slot->id) {
-							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-								// take into hand
-								world->mouse_cursor_item = *slot;
-								*slot = (ItemAmount){0};
-							}
-
-							item_tooltip(*slot);
-						}
-					}
-				}
-			}
-
-			draw_rect(rect.min, slot_size, COLOR_GRAY);
-
-			if (slot->id) {
-				draw_item_amount_in_rect(*slot, rect);
-			}
+			input_slot(rect, &en->input1, desired_items);
 
 			// craft progress bar
 			{
@@ -2232,6 +2074,41 @@ void do_world_entity_interaction_ui_stuff() {
 
 				draw_rect(v2(x0, y0), v2(bar_size.x * alpha, bar_size.y), col_oxygen);
 			}
+		}
+
+	}
+
+	// :turret ux
+	if (en->arch == ARCH_turret) {
+
+		float x0 = en->pos.x;
+		float y0 = en->pos.y;
+
+		Vector2 slot_size = v2(10, 10);
+
+		// item input
+		{
+			x0 = en->pos.x;
+			y0 = en->pos.y;
+
+			x0 -= slot_size.x * 0.5;
+			y0 = get_entity_range(en).max.y;
+			y0 += 1.f;
+
+			ItemAmount* slot = &en->input1;
+
+			ItemID* desired_items;
+			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
+			for (ItemID i = 0; i < ITEM_MAX; i++) {
+				ItemData item_data = get_item_data(i);
+				if (item_data.used_in_turret) {
+					growing_array_add((void**)&desired_items, &i);
+				}
+			}
+
+			Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
+
+			input_slot(rect, slot, desired_items);
 		}
 
 	}

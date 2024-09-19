@@ -243,11 +243,9 @@ AppFrame last_app_frame = {0};
 #pragma pack(push, 16)
 typedef struct PointLight {
 	Vector2 position; // xy, zw unused
-	Vector2 _pad1;
-	Vector4 color;
 	float radius;
 	float intensity;
-	Vector2 pad3;
+	Vector4 color;
 } PointLight;
 
 // :shader
@@ -758,6 +756,8 @@ typedef struct World {
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	EntityHandle oxygenerator;
 	ItemAmount mouse_cursor_item;
+	float night_alpha;
+	float night_alpha_target;
 	// :world :state
 } World;
 World* world = 0;
@@ -1268,6 +1268,9 @@ Draw_Quad* draw_sprite_in_rect(SpriteID sprite_id, Range2f rect, Vector4 col, fl
 
 inline float64 now() {
 	return world->time_elapsed;
+}
+inline float64 app_now() {
+	return os_get_elapsed_seconds();
 }
 
 float alpha_from_end_time(float64 end_time, float length) {
@@ -4329,7 +4332,7 @@ int entry(int argc, char **argv) {
 			float hit_every_seconds = 0.1;
 			bool should_hit = false;
 			{
-				s64 count = now() / hit_every_seconds;
+				s64 count = app_now() / hit_every_seconds;
 				local_persist s64 last_count_triggered = 0;
 				if (count > last_count_triggered) {
 					should_hit = true;
@@ -4345,12 +4348,18 @@ int entry(int argc, char **argv) {
 				p->velocity.x = get_random_float32_in_range(-4, 4);
 				p->velocity.y = 10;
 				p->col = COLOR_GREEN;
-				p->light_col = v4(0, 1, 0, 0.5);
-				p->light_intensity = 0.4;
+				p->light_col = v4(0, 1, 0, 1);
+				p->light_intensity = 0.2;
 				p->light_radius = 10;
 				p->fade_in_pct = 0.1;
 				p->fade_out_pct = 0.2;
 				p->lifetime_length = 5;
+
+				Particle* p2 = particle_new();
+				*p2 = *p;
+				p2->light_radius = 30;
+				p2->light_col = v4(0,0,0,0);
+				p2->light_intensity = 0.5;
 			}
 		}
 
@@ -4409,12 +4418,19 @@ int entry(int argc, char **argv) {
 
 		// :shader cbuffer update
 		{
-			cbuffer.night_alpha = 1;
+			if (is_key_just_pressed('U')) {
+				world->night_alpha_target = world->night_alpha_target == 0 ? 1.0 : 0.0;
+				log("%f", world->night_alpha_target);
+			}
+
+			animate_f32_to_target(&world->night_alpha, world->night_alpha_target, delta_t, 3.0);
+
+			cbuffer.night_alpha = world->night_alpha;
 			// cbuffer.night_alpha = sin_breathe(world->time_elapsed, 2.f);
 			// log("%f", cbuffer.night_alpha);
 
 			// player light
-			// add_point_light(get_player()->pos, v4(0,0,0,0), 100, 1);
+			add_point_light(get_player()->pos, v4(0,0,0,0), 100, 1);
 		}
 		draw_frame.cbuffer = &cbuffer;
 

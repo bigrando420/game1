@@ -18,11 +18,9 @@ struct PS_INPUT
 
 struct PointLight {
 	float2 position;
-	float2 _pad1;
-	float4 color;
 	float radius;
 	float intensity;
-	float2 _pad3;
+	float4 color;
 };
 
 static const int LIGHT_MAX = 256;
@@ -63,7 +61,7 @@ float4 pixel_shader_extension(PS_INPUT input, float4 color) {
 	// Store the night-shaded color
 	float3 night_shaded_color = color.rgb;
 
-	// Apply point lights with smooth accumulation
+	// Combined lighting pass
 	{
 		float total_illumination = 0.0;
 		float3 accumulated_light_color = float3(0.0, 0.0, 0.0);
@@ -81,35 +79,34 @@ float4 pixel_shader_extension(PS_INPUT input, float4 color) {
 			// Check if within light radius
 			if (distance < light.radius) {
 				// Calculate attenuation (using smoothstep for smoother falloff)
-				float attenuation = smoothstep(light.radius, 0.0, distance);
-
-				// Multiply attenuation by light intensity (from alpha channel)
-				float light_intensity = light.color.a * light.intensity;
-				float weighted_attenuation = attenuation * light_intensity;
+				float attenuation = smoothstep(light.radius, 0.0, distance) * light.intensity;
 
 				// Accumulate total illumination
-				total_illumination += weighted_attenuation;
+				total_illumination += attenuation;
 
-				// Accumulate weighted light colors
-				accumulated_light_color += light.color.rgb * weighted_attenuation;
-				accumulated_alpha += weighted_attenuation;
+				// If the light has color (alpha > 0), accumulate the light color
+				if (light.color.a > 0.0) {
+					float color_alpha = light.color.a * attenuation;
+					accumulated_light_color += light.color.rgb * color_alpha;
+					accumulated_alpha += color_alpha;
+				}
 			}
 		}
 
-		// Cap total_illumination to [0, 1]
+		// Clamp total_illumination to [0, 1]
 		total_illumination = saturate(total_illumination);
-
-		// Normalize accumulated light color
-		if (accumulated_alpha > 0.0) {
-			accumulated_light_color /= accumulated_alpha;
-		}
 
 		// Blend between night-shaded and original color based on total illumination
 		float3 lit_color = lerp(night_shaded_color, original_color, total_illumination);
 
-		// Apply averaged light color tint to the lit color
-		float constant_to_reduce_light_brightness = 0.5;
-		lit_color = lerp(lit_color, accumulated_light_color, total_illumination * constant_to_reduce_light_brightness);
+		// Apply accumulated light color tint if any
+		if (accumulated_alpha > 0.0) {
+			// Normalize accumulated light color
+			accumulated_light_color /= accumulated_alpha;
+
+			// Apply color tint to the lit color
+			lit_color = lerp(lit_color, accumulated_light_color, accumulated_alpha);
+		}
 
 		// Set the final color
 		color.rgb = lit_color;

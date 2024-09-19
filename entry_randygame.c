@@ -352,6 +352,7 @@ typedef enum SpriteID {
 	SPRITE_wall_gate,
 	SPRITE_fabricator,
 	SPRITE_o2_emitter,
+	SPRITE_turret,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -404,6 +405,7 @@ typedef enum ItemID {
 	ITEM_wall,
 	ITEM_wall_gate,
 	ITEM_o2_emitter,
+	ITEM_turret,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -445,6 +447,7 @@ typedef enum ArchetypeID {
 	ARCH_wall_gate = 24,
 	ARCH_o2_emitter = 25,
 	ARCH_enemy1 = 26,
+	ARCH_turret = 27,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -500,6 +503,7 @@ typedef struct EntityFrame {
 	SpriteID functional_sprite_id;
 	bool can_interact;
 	Entity* target_en;
+	bool is_creation;
 	// :frame
 } EntityFrame;
 
@@ -563,6 +567,7 @@ typedef struct Entity {
 	float64 movement_cooldown_end_time;
 	// EntityState state; // not needed yet
 	bool is_agro;
+	bool is_enemy;
 
 
 	// state that is completely constant, derived by archetype
@@ -848,6 +853,7 @@ Entity* entity_create() {
 
 	world->id_count += 1;
 	entity_found->id = world->id_count;
+	entity_found->frame.is_creation = true;
 
 	return entity_found;
 }
@@ -856,7 +862,33 @@ void entity_destroy(Entity* entity) {
 	memset(entity, 0, sizeof(Entity));
 }
 
+void entity_max_health_setter(Entity* en, int new_max_health) {
+
+	if (en->frame.is_creation) {
+		// fresh entity, just setup as normal
+		en->health = new_max_health;
+		en->max_health = new_max_health;
+	} else {
+		// we're deserialising.
+
+		float prev_max_health = en->max_health;
+		en->max_health = new_max_health;
+
+		if (prev_max_health != new_max_health || en->health >= new_max_health) {
+			en->health = new_max_health;
+		}
+	}
+}
+
 // :arch :setup things
+
+void setup_turret(Entity* en) {
+	en->arch = ARCH_turret;
+	en->pretty_name = STR("Turret");
+	en->tile_size = v2i(2, 2);
+	en->has_collision = true;
+	en->sprite_id = SPRITE_turret;
+}
 
 // :enemy
 void setup_enemy1(Entity* en) {
@@ -864,6 +896,8 @@ void setup_enemy1(Entity* en) {
 	en->pretty_name = STR("Enemy 1");
 	en->has_physics = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(10, 10));
+	en->is_enemy = true;
+	entity_max_health_setter(en, 5);
 }
 
 void setup_o2_emitter(Entity* en) {
@@ -899,8 +933,7 @@ void setup_iron_depo(Entity* en) {
 	en->pretty_name = STR("Iron Deposit");
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_iron_depo;
-	en->health = 10;
-	en->max_health = en->health;
+	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_raw_iron, .amount=1};
@@ -913,8 +946,7 @@ void setup_coal_depo(Entity* en) {
 	en->pretty_name = STR("Coal Deposit");
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_coal_depo;
-	en->health = 10;
-	en->max_health = en->health;
+	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_coal, .amount=1};
@@ -948,8 +980,7 @@ void setup_ice_vein(Entity* en) {
 	en->pretty_name = STR("Oxygen Vein");
 	en->arch = ARCH_ice_vein;
 	en->sprite_id = SPRITE_ice_vein;
-	en->health = ice_vein_health;
-	en->max_health = en->health;
+	entity_max_health_setter(en, ice_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_o2_shard, .amount=1};
@@ -990,8 +1021,7 @@ void setup_grass(Entity* en) {
 	en->pretty_name = STR("Grass");
 	en->arch = ARCH_grass;
 	en->sprite_id = SPRITE_grass;
-	en->health = grass_health;
-	en->max_health = en->health;
+	entity_max_health_setter(en, grass_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_fiber, .amount=get_random_int_in_range(1, 2)};
@@ -1003,8 +1033,7 @@ void setup_flint_depo(Entity* en) {
 	en->arch = ARCH_flint_depo;
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_flint_depo;
-	en->health = flint_depo_health;
-	en->max_health = en->health;
+	entity_max_health_setter(en, flint_depo_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(1, 2)};
@@ -1016,8 +1045,7 @@ void setup_copper_depo(Entity* en) {
 	en->pretty_name = STR("Copper Deposit");
 	en->arch = ARCH_copper_depo;
 	en->sprite_id = SPRITE_copper_depo;
-	en->health = copper_health;
-	en->max_health = en->health;
+	entity_max_health_setter(en, copper_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=1};
@@ -1034,8 +1062,7 @@ void setup_teleporter1(Entity* en) {
 void setup_exp_vein(Entity* en) {
 	en->arch = ARCH_exp_vein;
 	en->sprite_id = SPRITE_exp_vein;
-	en->health = exp_vein_health;
-	en->max_health = en->health;
+	entity_max_health_setter(en, exp_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_exp, .amount=get_random_int_in_range(2, 3)};
@@ -1073,10 +1100,8 @@ void setup_player(Entity* en) {
 	en->arch = ARCH_player;
 	en->move_based_on_input_axis = true;
 	en->move_speed = 70.f;
-	en->health = 1;
-	en->max_health = en->health;
+	entity_max_health_setter(en, 1);
 	en->oxygen_max = 17;
-	en->oxygen = en->oxygen_max;
 	en->has_physics = true;
 	en->friction = 20.f;
 	en->collision_bounds = range2f_make_center_center(v2(0,0), v2(6, 9));
@@ -1086,8 +1111,7 @@ void setup_rock(Entity* en) {
 	en->pretty_name = STR("Rock");
 	en->arch = ARCH_rock;
 	en->sprite_id = SPRITE_rock0;
-	en->health = rock_health;
-	en->max_health = en->health;
+	entity_max_health_setter(en, rock_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=1};
@@ -1101,8 +1125,7 @@ void setup_tree(Entity* en) {
 	en->offset_based_on_tile_height = true;
 	en->sprite_id = SPRITE_tree1;
 	// en->sprite_id = SPRITE_tree1;
-	en->health = tree_health;
-	en->max_health = en->health;
+	entity_max_health_setter(en, tree_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
 	en->drops[0] = (ItemAmount){.id=ITEM_pine_wood, .amount=1};
@@ -1126,8 +1149,8 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		// filling these in so we can get compiler errors for missing cases
 		case ARCH_nil: break;
 		case ARCH_MAX: break;
-		case ARCH_item: setup_item(en, 0); log_warning("setting up item in entity_setup ???"); break;
 		//
+		case ARCH_item: setup_item(en, en->item_id); break;
 		case ARCH_exp_orb: setup_exp_orb(en); break;
 		case ARCH_player: setup_player(en); break;
 		case ARCH_furnace: setup_furnace(en); break;
@@ -1152,6 +1175,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_wall_gate: setup_wall_gate(en); break;
 		case ARCH_o2_emitter: setup_o2_emitter(en); break;
 		case ARCH_enemy1: setup_enemy1(en); break;
+		case ARCH_turret: setup_turret(en); break;
 		// :arch :setup
 	}
 }
@@ -1784,17 +1808,11 @@ bool world_attempt_load_from_disk() {
 
 	memcpy(world, result.data, result.count);
 
-	// copy across "constants"
+	// re-setup to override the static data
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* en = &world->entities[i];
 		if (en->is_valid) {
-			Entity* arch_data = &entity_archetype_data[en->arch];
-
-			// :const entity data 
-			en->pretty_name = arch_data->pretty_name;
-			en->max_health = arch_data->max_health;
-			// this can't be set because items need to infer it dynamically.
-			// en->sprite_id = arch_data->sprite_id;
+			entity_setup(en, en->arch);
 		}
 	}
 
@@ -2501,6 +2519,45 @@ void do_ui_stuff() {
 
 // update :func dump
 
+// :turret
+void update_turret(Entity* en) {
+
+	en->radius = 100.f;
+
+	// find closest
+	Entity* closest_enemy = 0;
+	float closest_enemy_dist = 0;
+	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+		Entity* against = &world->entities[i];
+		if (against->is_valid && against != en && against->is_enemy) {
+
+			float dist = v2_dist(against->pos, en->pos);
+			if (dist > en->radius) {
+				continue;
+			}
+
+			if (!closest_enemy || dist < closest_enemy_dist) {
+				closest_enemy_dist = dist;
+				closest_enemy = against;
+			}
+		}
+	}
+
+	// shoot
+	if (closest_enemy && has_reached_end_time(en->next_hit_end_time)) {
+		en->next_hit_end_time = now() + 0.1;
+
+		log("pew");
+
+		closest_enemy->health -= 1;
+		if (closest_enemy->health <= 0) {
+			// kill
+			entity_destroy(closest_enemy);
+		}
+	}
+
+}
+
 // :enemy
 void update_enemy(Entity* en) {
 
@@ -2633,6 +2690,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_wall_gate] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/wall_gate.png"), get_heap_allocator())};
 		sprites[SPRITE_fabricator] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/fabricator.png"), get_heap_allocator())};
 		sprites[SPRITE_o2_emitter] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/o2_emitter.png"), get_heap_allocator())};
+		sprites[SPRITE_turret] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/turret.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -2735,12 +2793,21 @@ int entry(int argc, char **argv) {
 
 		// :item :buildings
 
+		item_data[ITEM_turret] = (ItemData){
+			.to_build=ARCH_turret,
+			.icon=SPRITE_turret,
+			.description=STR("Shoot bullets at nearby enemies"),
+			.exp_cost=100,
+			.ingredients_count=2,
+			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 2} }
+		};
+
 		item_data[ITEM_o2_emitter] = (ItemData){
 			.to_build=ARCH_o2_emitter,
 			.icon=SPRITE_o2_emitter,
 			.description=STR("Feed oxygen into a sealed room with 3x more efficency"),
 			.exp_cost=100,
-			.ingredients_count=2,
+			.ingredients_count=3,
 			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_copper_ingot, 2}, {ITEM_o2_shard, 10} }
 		};
 
@@ -3524,6 +3591,10 @@ int entry(int argc, char **argv) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
 
+				if (en->arch == ARCH_turret) {
+					update_turret(en);
+				}
+
 				// enemy update
 				if (en->arch == ARCH_enemy1) {
 					update_enemy(en);
@@ -4028,7 +4099,7 @@ int entry(int argc, char **argv) {
 					// just left tether
 					play_sound("event:/o2_disconnect");
 					#if !defined(DISABLE_O2)
-					o2_riser = play_sound("event:/o2_riser");
+					// o2_riser = play_sound("event:/o2_riser");
 					#endif
 				}
 
@@ -4481,8 +4552,6 @@ int entry(int argc, char **argv) {
 				log("%f", world->night_alpha_target);
 			}
 			#endif
-
-
 
 			cbuffer.night_alpha = world->night_alpha;
 			// cbuffer.night_alpha = sin_breathe(world->time_elapsed, 2.f);

@@ -217,7 +217,7 @@ Vector4 col_exp;
 float o2_fuel_length = 30.f;
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
-float player_reach_radius = 30.0f;
+float player_reach_radius = 50.0f;
 float tether_connection_radius = 50.0;
 float o2_full_tank_deplete_length = 16.0f; // #volatile length of oxygen riser sfx
 float oxygen_regen_tick_length = 0.01;
@@ -237,7 +237,7 @@ const int tree_health = 10;
 
 // :layers
 typedef enum Layers {
-	layer_background = 9,
+	layer_background = 5,
 	layer_world = 10,
 	layer_buildings,
 	layer_ui = 20,
@@ -455,6 +455,7 @@ typedef enum ArchetypeID {
 	ARCH_o2_emitter = 25,
 	ARCH_enemy1 = 26,
 	ARCH_turret = 27,
+	ARCH_meteor = 28,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -580,6 +581,9 @@ typedef struct Entity {
 	Vector2 last_shoot_dir;
 	float rotation_current;
 	float rotation_target;
+	bool enemy_target;
+	bool destroyable_by_explosion;
+	// :entity
 
 	// state that is completely constant, derived by archetype
 	// this was originally in a separate data structure, but it feels better inside here.
@@ -593,7 +597,6 @@ typedef struct Entity {
 
 	EntityFrame frame;
 	EntityFrame last_frame;
-	// :entity
 } Entity;
 #define MAX_ENTITY_COUNT 1024
 
@@ -875,7 +878,7 @@ Entity* entity_create() {
 	return entity_found;
 }
 
-void entity_destroy(Entity* entity) {
+void entity_zero_immediately(Entity* entity) {
 	memset(entity, 0, sizeof(Entity));
 }
 
@@ -899,19 +902,27 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 // :arch :setup things
 
+void setup_meteor(Entity* en) {
+	en->arch = ARCH_meteor;
+}
+
 void setup_turret(Entity* en) {
 	en->arch = ARCH_turret;
 	en->pretty_name = STR("Turret");
 	en->tile_size = v2i(2, 2);
+	en->destroyable_by_explosion = true;
 	en->has_collision = true;
 	en->sprite_id = SPRITE_turret;
 	en->interactable_entity = true;
+	en->enemy_target = true;
+	entity_max_health_setter(en, 10);
 }
 
 // :enemy
 void setup_enemy1(Entity* en) {
 	en->arch = ARCH_enemy1;
 	en->pretty_name = STR("Enemy 1");
+	en->destroyable_by_explosion = true;
 	en->has_physics = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(10, 10));
 	en->is_enemy = true;
@@ -923,16 +934,19 @@ void setup_o2_emitter(Entity* en) {
 	en->pretty_name = STR("Oxygen Feeder");
 	en->is_oxygen_tether = true;
 	en->tile_size = v2i(1, 1);
+	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_o2_emitter;
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
 	en->wall_seal = true;
+	en->enemy_target = true;
 }
 
 void setup_wall(Entity* en) {
 	en->arch = ARCH_wall;
 	en->pretty_name = STR("Wall");
 	en->tile_size = v2i(1, 1);
+	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_wall;
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
@@ -941,6 +955,7 @@ void setup_wall(Entity* en) {
 void setup_wall_gate(Entity* en) {
 	en->arch = ARCH_wall_gate;
 	en->pretty_name = STR("Wall Gate");
+	en->destroyable_by_explosion = true;
 	en->tile_size = v2i(1, 1);
 	en->sprite_id = SPRITE_wall_gate;
 	en->wall_seal = true;
@@ -950,6 +965,7 @@ void setup_iron_depo(Entity* en) {
 	en->arch = ARCH_iron_depo;
 	en->pretty_name = STR("Iron Deposit");
 	en->tile_size = v2i(2, 1);
+	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_iron_depo;
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
@@ -963,6 +979,7 @@ void setup_coal_depo(Entity* en) {
 	en->arch = ARCH_coal_depo;
 	en->pretty_name = STR("Coal Deposit");
 	en->tile_size = v2i(2, 1);
+	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_coal_depo;
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
@@ -983,10 +1000,12 @@ void setup_burner_drill(Entity* en) {
 	en->arch = ARCH_burner_drill;
 	en->pretty_name = STR("Thumper");
 	en->tile_size = v2i(2, 2);
+	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_burner_drill;
 	en->radius = tile_width * 6;
 	en->interactable_entity = true;
 	en->has_collision = true;
+	en->enemy_target = true;
 }
 
 void setup_tile_resource(Entity* en) {
@@ -998,6 +1017,7 @@ void setup_ice_vein(Entity* en) {
 	en->pretty_name = STR("Oxygen Vein");
 	en->arch = ARCH_ice_vein;
 	en->sprite_id = SPRITE_ice_vein;
+	en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, ice_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1015,6 +1035,7 @@ void setup_exp_orb(Entity* en) {
 void setup_tether(Entity* en) {
 	en->arch = ARCH_tether;
 	en->pretty_name = STR("Tether");
+	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_tether;
 	en->is_oxygen_tether = true;
 	en->tether_connection_offset.y = 4;
@@ -1039,6 +1060,7 @@ void setup_grass(Entity* en) {
 	en->pretty_name = STR("Grass");
 	en->arch = ARCH_grass;
 	en->sprite_id = SPRITE_grass;
+	en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, grass_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1051,6 +1073,7 @@ void setup_flint_depo(Entity* en) {
 	en->arch = ARCH_flint_depo;
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_flint_depo;
+	en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, flint_depo_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1063,6 +1086,7 @@ void setup_copper_depo(Entity* en) {
 	en->pretty_name = STR("Copper Deposit");
 	en->arch = ARCH_copper_depo;
 	en->sprite_id = SPRITE_copper_depo;
+	en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, copper_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1090,6 +1114,8 @@ void setup_exp_vein(Entity* en) {
 void setup_furnace(Entity* en) {
 	en->arch = ARCH_furnace;
 	en->tile_size = v2i(2, 2);
+	en->enemy_target = true;
+	en->destroyable_by_explosion = true;
 	en->pretty_name = STR("Furnace");
 	en->sprite_id = SPRITE_furnace;
 	en->interactable_entity = true;
@@ -1116,6 +1142,8 @@ void setup_research_station(Entity* en) {
 
 void setup_player(Entity* en) {
 	en->arch = ARCH_player;
+	en->enemy_target = true;
+	en->destroyable_by_explosion = true;
 	en->move_based_on_input_axis = true;
 	en->move_speed = 70.f;
 	entity_max_health_setter(en, 1);
@@ -1129,6 +1157,7 @@ void setup_player(Entity* en) {
 void setup_rock(Entity* en) {
 	en->pretty_name = STR("Rock");
 	en->arch = ARCH_rock;
+	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_rock0;
 	entity_max_health_setter(en, rock_health);
 	en->destroyable_world_item = true;
@@ -1140,6 +1169,7 @@ void setup_rock(Entity* en) {
 void setup_tree(Entity* en) {
 	en->arch = ARCH_tree;
 	en->pretty_name = STR("Pine Tree");
+	en->destroyable_by_explosion = true;
 	en->tile_size = v2i(2, 2);
 	en->offset_based_on_tile_height = true;
 	en->sprite_id = SPRITE_tree1;
@@ -1195,6 +1225,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_o2_emitter: setup_o2_emitter(en); break;
 		case ARCH_enemy1: setup_enemy1(en); break;
 		case ARCH_turret: setup_turret(en); break;
+		case ARCH_meteor: setup_meteor(en); break;
 		// :arch :setup
 	}
 }
@@ -1348,6 +1379,33 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+typedef struct ArchetypeWeight {
+	ArchetypeID value;
+	float weight;
+} ArchetypeWeight;
+
+ArchetypeID random_weighted_archetype(ArchetypeWeight* weights, int weights_count) {
+	// Calculate the total weight
+	float total_weight = 0.0f;
+	for (int i = 0; i < weights_count; i++) {
+		total_weight += weights[i].weight;
+	}
+
+	// Generate a random number in the range [0, total_weight)
+	float random_number = get_random_float32_in_range(0.0f, total_weight);
+
+	// Find the item that corresponds to the random number
+	float cumulative_weight = 0.0f;
+	for (int i = 0; i < weights_count; i++) {
+		cumulative_weight += weights[i].weight;
+		if (random_number < cumulative_weight) {
+			return weights[i].value;
+		}
+	}
+
+	return 0;
+}
+
 Range2f get_camera_view_rect_in_world_space() {
 	Range2f rect;
 	rect.min = v2(-1, -1);
@@ -1495,6 +1553,23 @@ void do_entity_drops(Entity* en) {
 	}
 }
 
+// :destroy
+void entity_destroy(Entity* self, Entity* destroyed_by) {
+
+	if (self->arch == ARCH_player) {
+		// player death
+		self->oxygen = 0;
+	} else {
+
+		do_entity_drops(self);
+		if (destroyed_by->arch == ARCH_player || destroyed_by->arch == ARCH_burner_drill) {
+			do_entity_exp_drops(self);
+		}
+
+		entity_zero_immediately(self);
+	}
+}
+
 Vector2 v2_tile_pos_to_entity_world_pos(Vector2i tile_pos, ArchetypeID id) {
 	Vector2 pos = v2_tile_pos_to_world_pos(tile_pos);
 	pos.x += get_archetype_data(id).tile_size.x * tile_width * 0.5;
@@ -1551,26 +1626,32 @@ typedef struct TileEntityCache {
 	int tile_count;
 } TileEntityCache;
 
-TileEntityCache* create_tile_entity_pair_cache() {
-	TileEntityCache* cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
+void add_new_entity_to_tile_cache(Entity* en) {
+	TileEntityCache* cache = world_frame.tile_entity_cache;
+
+	Tile* tiles = get_tile_list_at_pos_based_on_arch(en->pos, en->arch);
+	for (int j=0;j<growing_array_get_valid_count(tiles);j++) {
+		Tile tile = tiles[j];
+		Vector2i local_tile_pos = world_tile_to_local_map(tile);
+		int index = local_tile_pos.y * map.width + local_tile_pos.x;
+		if (index >= 0 && index < cache->tile_count) {
+			cache->tiles[index].entity = en;
+		}
+	}
+}
+
+void create_tile_entity_pair_cache() {
+	world_frame.tile_entity_cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
+
+	TileEntityCache* cache = world_frame.tile_entity_cache;
 
 	cache->tile_count = map.height * map.width;
 	cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
 
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* en = &world->entities[i];
-		Tile* tiles = get_tile_list_at_pos_based_on_arch(en->pos, en->arch);
-		for (int j=0;j<growing_array_get_valid_count(tiles);j++) {
-			Tile tile = tiles[j];
-			Vector2i local_tile_pos = world_tile_to_local_map(tile);
-			int index = local_tile_pos.y * map.width + local_tile_pos.x;
-			if (index >= 0 && index < cache->tile_count) {
-				cache->tiles[index].entity = en;
-			}
-		}
+		add_new_entity_to_tile_cache(en);
 	}
-
-	return cache;
 }
 
 TileCache* tile_cache_at_tile(Tile tile) {
@@ -1593,6 +1674,20 @@ Entity* entity_at_tile(Tile tile) {
 	} else {
 		return cache->tiles[index].entity;
 	}
+}
+
+bool does_overlap_existing_entities(Vector2 pos, ArchetypeID id) {
+
+	Tile* tiles = get_tile_list_at_pos_based_on_arch(pos, id);
+	for (int i = 0; i < growing_array_get_valid_count(tiles); i++) {
+		Tile tile = tiles[i];
+		TileCache* tc = tile_cache_at_tile(tile);
+		if (tc->entity) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 // :map init
@@ -1623,10 +1718,10 @@ void world_setup()
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
-		// en = entity_create();
-		// setup_enemy1(en);
-		// en->pos.x = 50;
-		// en->pos.y = 20;
+		en = entity_create();
+		setup_meteor(en);
+		en->pos.x = 50;
+		en->pos.y = 20;
 
 		player_en->exp_amount = 1000;
 		
@@ -2884,6 +2979,97 @@ void draw_base_sprite(Entity* en) {
 
 // update :func dump
 
+// :meteor
+float meteor_strike_length = 2.f;
+void update_meteor(Entity* en) {
+
+	en->radius = 70.f;
+
+	if (en->next_hit_end_time == 0) {
+		en->next_hit_end_time = now() + meteor_strike_length;
+	}
+
+	if (has_reached_end_time(en->next_hit_end_time)) {
+
+		// boom
+		play_sound_at_pos("event:/explosion", en->pos);
+		camera_shake(0.5);
+
+		// damage entities in a radius
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* against = &world->entities[i];
+			if (is_valid(against) && against->destroyable_by_explosion) {
+				float dist = v2_dist(against->pos, en->pos);
+				if (dist < en->radius) {
+					entity_destroy(against, en);
+				}
+			}
+		}
+
+		// spawn in new resources
+		for (int i = 0; i < get_random_int_in_range(6, 10); i++) {
+			
+			ArchetypeWeight weights[] = {
+				{ARCH_ice_vein, 2},
+				{ARCH_iron_depo, 2},
+				{ARCH_copper_depo, 1},
+			};
+
+			ArchetypeID arch = random_weighted_archetype(weights, ARRAY_COUNT(weights));
+
+			Vector2 spawn_pos;
+			bool found_pos = false;
+			int iterations = 0;
+			while (true) {
+				spawn_pos = en->pos;
+				spawn_pos.x += get_random_float32_in_range(en->radius * -0.5, en->radius * 0.5);
+				spawn_pos.y += get_random_float32_in_range(en->radius * -0.5, en->radius * 0.5);
+				spawn_pos = snap_position_to_nearest_tile_based_on_arch(spawn_pos, arch);
+
+				if (!does_overlap_existing_entities(spawn_pos, arch)) {
+					found_pos = true;
+					break;
+				}
+
+				iterations += 1;
+				if (iterations > 100) { // failsafe
+					break;
+				}
+			}
+
+			if (found_pos) {
+				Entity* spawn = entity_create();
+				entity_setup(spawn, arch);
+				spawn->pos = spawn_pos;
+
+				add_new_entity_to_tile_cache(spawn); // need to update the cache instantly, because gangster shit is happening
+			} else {
+				log_warning("couldn't find space for spawning in a resource");
+				break;
+			}
+		}
+
+		entity_zero_immediately(en);
+	}
+
+}
+// :meteor
+void render_meteor(Entity* en) {
+
+	float alpha = alpha_from_end_time(en->next_hit_end_time, meteor_strike_length);
+
+	Vector2 draw_pos = en->pos;
+	draw_pos.x -= en->radius;
+	draw_pos.y -= en->radius;
+
+	Vector4 col = COLOR_RED;
+	col.a = 0.7 * alpha;
+
+	Draw_Quad* quad = draw_circle(draw_pos, v2(en->radius * 2, en->radius * 2), col);
+	quad->z = layer_background+1;
+
+}
+
 // :turret
 void update_turret(Entity* en) {
 
@@ -2953,7 +3139,7 @@ void update_turret(Entity* en) {
 			closest_enemy->health -= 3;
 			if (closest_enemy->health <= 0) {
 				// kill
-				entity_destroy(closest_enemy);
+				entity_zero_immediately(closest_enemy);
 			}
 		} else {
 			play_sound_at_pos("event:/no_ammo_click", en->pos);
@@ -3014,24 +3200,53 @@ void render_turret(Entity* en) {
 // :enemy
 void update_enemy(Entity* en) {
 
+	float enemy_agro_radius = 50.f;
+
+	// find nearest natural target
+	Entity* nearest_target = 0;
+	float nearest_target_distance = 0;
+	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+		Entity* against = &world->entities[i];
+		if (is_valid(against) && against->enemy_target && against->arch != ARCH_player) {
+
+			float dist = v2_dist(against->pos, en->pos);
+			bool should_agro = dist < enemy_agro_radius || is_night();
+
+			if (should_agro && (!nearest_target || nearest_target_distance > dist)) {
+				nearest_target = against;
+				nearest_target_distance = dist;
+			}
+
+		}
+	}
+
 	Entity* target_en = get_nil_entity();
+	if (nearest_target) {
+		target_en = nearest_target;
+	} else {
+		// agro player
 
-	// gain / loose agro
-	float dist_to_player = v2_dist(get_player()->pos, en->pos);
-	if (en->is_agro && dist_to_player > 100.f) {
-		en->is_agro = false;
-	}
-	if (!en->is_agro && dist_to_player < 50.f) {
-		en->is_agro = true;
+		// this is kinda redundant, since we could just use the system above for natural targets.
+		// Maybe we wanna keep this loose agro system tho? idk.
+
+		// gain / loose agro
+		float dist_to_player = v2_dist(get_player()->pos, en->pos);
+		if (en->is_agro && dist_to_player > 100.f) {
+			en->is_agro = false;
+		}
+		if (!en->is_agro && dist_to_player < 50.f) {
+			en->is_agro = true;
+		}
+
+		if (is_night()) {
+			en->is_agro = true;
+		}
+
+		if (en->is_agro && is_player_alive()) {
+			target_en = get_player();
+		}
 	}
 
-	if (is_night()) {
-		en->is_agro = true;
-	}
-
-	if (en->is_agro && is_player_alive()) {
-		target_en = get_player();
-	}
 	en->frame.target_en = target_en;
 
 	// sound stuff, need to do #continualsound
@@ -3078,6 +3293,11 @@ void update_enemy(Entity* en) {
 				if (target_en->arch == ARCH_player) {
 					target_en->oxygen -= 5;
 					camera_shake(0.2);
+				} else {
+					target_en->health -= 1;
+					if (target_en->health <= 0) {
+						entity_zero_immediately(target_en);
+					}
 				}
 			}
 		}
@@ -3423,7 +3643,7 @@ int entry(int argc, char **argv) {
 			world->time_elapsed += delta_t;
 
 			// setup tile entity cache for the frame
-			world_frame.tile_entity_cache = create_tile_entity_pair_cache();
+			create_tile_entity_pair_cache();
 
 			// find player lol
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -3665,6 +3885,10 @@ int entry(int argc, char **argv) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
 
+				if (en->arch == ARCH_meteor) {
+					update_meteor(en);
+				}
+
 				if (en->arch == ARCH_turret) {
 					update_turret(en);
 				}
@@ -3760,9 +3984,7 @@ int entry(int argc, char **argv) {
 									play_sound_at_pos("event:/hit_generic", against->pos);
 
 									if (against->health <= 0) {
-										do_entity_drops(against);
-										do_entity_exp_drops(against);
-										entity_destroy(against);
+										entity_destroy(against, en);
 									}
 								}
 							}
@@ -3813,7 +4035,7 @@ int entry(int argc, char **argv) {
 						if (v2_dist(en->pos, player->pos) < 2.0f) {
 							play_sound("event:/exp_pickup");
 							player->exp_amount += en->exp_amount;
-							entity_destroy(en);
+							entity_zero_immediately(en);
 						}
 					}
 				}
@@ -3840,7 +4062,7 @@ int entry(int argc, char **argv) {
 						if (v2_dist(en->pos, player->pos) < 2.0f) {
 							play_sound("event:/item_pickup");
 							world->inventory_items[en->item_id].amount += en->item_amount;
-							entity_destroy(en);
+							entity_zero_immediately(en);
 						}
 					}
 				}
@@ -4253,11 +4475,7 @@ int entry(int argc, char **argv) {
 							if (selected_en->health <= 0) {
 								camera_shake(0.1); // shake extra on death
 
-								// :drops
-								do_entity_drops(selected_en);
-								do_entity_exp_drops(selected_en);
-
-								entity_destroy(selected_en);
+								entity_destroy(selected_en, player);
 							}
 						}
 					} else {
@@ -4296,7 +4514,7 @@ int entry(int argc, char **argv) {
 							setup_item(drop, selected_en->item_id);
 							drop->pos = selected_en->pos;
 
-							entity_destroy(selected_en);
+							entity_zero_immediately(selected_en);
 						} else {
 							play_sound("event:/error");
 						}
@@ -4314,6 +4532,7 @@ int entry(int argc, char **argv) {
 
 					case ARCH_player: break;
 
+					case ARCH_meteor: render_meteor(en); break;
 					case ARCH_turret: render_turret(en); break;
 
 					case ARCH_exp_orb: {
@@ -4464,7 +4683,7 @@ int entry(int argc, char **argv) {
 			}
 
 			// :glow effect thingo
-			if (should_hit) {
+			if (is_night() && should_hit) {
 				Vector4 col = hex_to_rgba(0xe7c756ff);
 
 				Particle* p = particle_new();
@@ -4545,8 +4764,8 @@ int entry(int argc, char **argv) {
 
 		// day/night :cycle
 		{
-			float day_length = 10.0f;
-			float night_length = 5.0f;
+			float day_length = 15 * 60;
+			float night_length = 4 * 60;
 			float transition_length = 10.0f;
 
 			if (world->cycle_end_time == 0) {

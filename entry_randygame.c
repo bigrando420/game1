@@ -2,6 +2,10 @@
 // Go there if you want to read this codebase.
 // C needs declarations to be ordered, and header files are a waste of time. So reading this top to bottom isn't recommended.
 
+#include "fmod/fmod_errors.h"
+#include "fmod/fmod.h"
+#include "fmod/fmod_studio.h"
+
 #include "range.c"
 #include "config.c"
 #include "easings.c"
@@ -582,6 +586,9 @@ typedef struct Entity {
 	string pretty_name;
 	//
 
+	// this is for the app lifetime
+	FMOD_STUDIO_EVENTINSTANCE* continual_sound;
+
 	EntityFrame frame;
 	EntityFrame last_frame;
 	// :entity
@@ -813,6 +820,9 @@ inline Entity* get_nil_entity() {
 }
 bool is_nil(Entity* en) {
 	return en == get_nil_entity();
+}
+bool is_valid(Entity* en) {
+	return !is_nil(en) && en->is_valid;
 }
 
 EntityHandle handle_from_entity(Entity* en) {
@@ -3004,6 +3014,18 @@ void update_enemy(Entity* en) {
 		target_en = get_player();
 	}
 	en->frame.target_en = target_en;
+
+	// sound stuff
+	// if (is_valid(target_en) && !is_sound_playing(en->continual_sound)) {
+	// 	en->continual_sound = play_sound_at_pos("event:/enemy_wakeup", en->pos);
+	// }
+	// if (is_valid(target_en) && is_sound_playing(en->continual_sound)) {
+	// 	// update pos
+	// 	update_sound_position(en->continual_sound, en->pos);
+	// }
+	// if (!is_valid(target_en) && is_sound_playing(en->continual_sound)) {
+	// 	stop_sound(en->continual_sound);
+	// }
 
 	en->friction = 20.f;
 	en->move_speed = 50.f;

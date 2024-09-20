@@ -1,7 +1,3 @@
-#include "fmod/fmod_errors.h"
-#include "fmod/fmod.h"
-#include "fmod/fmod_studio.h"
-
 FMOD_STUDIO_SYSTEM* fmod_studio_system = 0;
 FMOD_STUDIO_BANK* fmod_studio_bank = 0;
 FMOD_STUDIO_BANK* fmod_studio_strings_bank = 0;
@@ -39,6 +35,50 @@ FMOD_STUDIO_EVENTINSTANCE* play_sound_at_pos(char* path, Vector2 pos) {
 
 FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
 	return play_sound_at_pos(path, v2(99999, 99999));
+}
+
+// todo - some kind of automated continuous sound system...
+/*
+typedef struct ContinuousSound {
+  FMOD_STUDIO_EVENTINSTANCE* event;
+
+  u64 last_frame_update;
+  // we call update_sound on this every frame
+  // It's stored in an array somewhere.
+  // so in the global fmod update function, we check if it's been updated, if not, we kill it.
+
+} ContinuousSound;
+*/
+
+bool is_sound_playing(FMOD_STUDIO_EVENTINSTANCE* sound) {
+    FMOD_STUDIO_PLAYBACK_STATE state;
+    FMOD_RESULT result = FMOD_Studio_EventInstance_GetPlaybackState(sound, &state);
+    if (result != FMOD_OK) {
+        // log_error("FMOD error: %s", FMOD_ErrorString(result));
+        return false;
+    }
+    return state != FMOD_STUDIO_PLAYBACK_STOPPED;
+}
+
+void update_sound_position(FMOD_STUDIO_EVENTINSTANCE* instance, Vector2 pos) {
+    FMOD_RESULT ok;
+    FMOD_3D_ATTRIBUTES attributes;
+
+    // Get the current 3D attributes of the sound instance
+    ok = FMOD_Studio_EventInstance_Get3DAttributes(instance, &attributes);
+    if (ok != FMOD_OK) {
+        log_error("FMOD error getting attributes: %s", FMOD_ErrorString(ok));
+        return;
+    }
+
+    // Update the position
+    attributes.position = (FMOD_VECTOR){pos.x, pos.y, 0};
+
+    // Set the updated 3D attributes back to the sound instance
+    ok = FMOD_Studio_EventInstance_Set3DAttributes(instance, &attributes);
+    if (ok != FMOD_OK) {
+        log_error("FMOD error setting attributes: %s", FMOD_ErrorString(ok));
+    }
 }
 
 void stop_sound(FMOD_STUDIO_EVENTINSTANCE* instance) {

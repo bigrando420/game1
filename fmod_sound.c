@@ -38,6 +38,7 @@ FMOD_STUDIO_EVENTINSTANCE* play_sound(char* path) {
 }
 
 // todo - some kind of automated continuous sound system...
+// #continualsound
 /*
 typedef struct ContinuousSound {
   FMOD_STUDIO_EVENTINSTANCE* event;

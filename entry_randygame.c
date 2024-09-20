@@ -358,6 +358,7 @@ typedef enum SpriteID {
 	SPRITE_fabricator,
 	SPRITE_o2_emitter,
 	SPRITE_turret,
+	SPRITE_bullet,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -411,6 +412,7 @@ typedef enum ItemID {
 	ITEM_wall_gate,
 	ITEM_o2_emitter,
 	ITEM_turret,
+	ITEM_bullet,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -586,8 +588,8 @@ typedef struct Entity {
 	string pretty_name;
 	//
 
-	// this is for the app lifetime
-	FMOD_STUDIO_EVENTINSTANCE* continual_sound;
+	// #continualsound
+	// FMOD_STUDIO_EVENTINSTANCE* continual_sound;
 
 	EntityFrame frame;
 	EntityFrame last_frame;
@@ -913,7 +915,7 @@ void setup_enemy1(Entity* en) {
 	en->has_physics = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(10, 10));
 	en->is_enemy = true;
-	entity_max_health_setter(en, 5);
+	entity_max_health_setter(en, 3);
 }
 
 void setup_o2_emitter(Entity* en) {
@@ -2105,7 +2107,7 @@ void do_world_entity_interaction_ui_stuff() {
 			y0 = get_entity_range(en).max.y;
 			y0 += 1.f;
 
-			ItemAmount* slot = &en->input1;
+			ItemAmount* slot = &en->input0;
 
 			ItemID* desired_items;
 			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
@@ -2119,6 +2121,11 @@ void do_world_entity_interaction_ui_stuff() {
 			Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
 
 			input_slot(rect, slot, desired_items);
+			if (!slot->id) {
+				Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_bullet), rect, COLOR_WHITE, 0.1);
+
+				set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
+			}
 		}
 
 	}
@@ -2356,7 +2363,7 @@ void do_ui_stuff() {
 		}
 	}
 
-	// :workbench
+	// :workbench :fabricator
 	if (world->ux_state == UX_entity_interaction && interacting_with_entity->arch == ARCH_workbench) {
 		Entity* entity = interacting_with_entity;
 
@@ -2631,6 +2638,7 @@ void do_ui_stuff() {
 		if (selected) {
 			UnlockState* unlock_state = &world->item_unlocks[selected];
 			ItemData item_data = get_item_data(selected);
+			bool is_building = item_data.to_build != 0;
 
 			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
@@ -2664,7 +2672,7 @@ void do_ui_stuff() {
 
 			// title
 			{
-				string txt = get_archetype_data(item_data.to_build).pretty_name;
+				string txt = is_building ? get_archetype_data(item_data.to_build).pretty_name : item_data.pretty_name;
 				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 				y0 -= met.visual_size.y + 2.f;
 			}
@@ -2904,42 +2912,53 @@ void update_turret(Entity* en) {
 	if (closest_enemy && has_reached_end_time(en->next_hit_end_time)) {
 		en->next_hit_end_time = now() + 0.5;
 
-		play_sound_at_pos("event:/turret_shot", en->pos);
-
 		Vector2 shoot_dir = v2_normalize(v2_sub(closest_enemy->pos, en->pos));
-		closest_enemy->velocity = v2_add(closest_enemy->velocity, v2_mulf(shoot_dir, 800));
-
 		en->last_shoot_dir = shoot_dir;
-		en->frame.did_shoot = true;
 
-		{
-			Vector2 pos = closest_enemy->pos;
-			Vector4 col = COLOR_RED;
-
-			for (int i = 0; i < 10; i++) {
-				Particle* p = particle_new();
-				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_friction | PARTICLE_FLAGS_fade_out_with_velocity | PARTICLE_FLAGS_light;
-				p->pos = pos;
-				pos.x += get_random_float32_in_range(-2, 2);
-				pos.y += get_random_float32_in_range(-2, 2);
-				p->velocity = v2_mulf(shoot_dir, get_random_float32_in_range(200, 300));
-				p->col = col;
-				p->friction = 20.0f;
-				p->fade_out_vel_range = 30.0f;
-
-				p->light_col = col;
-				p->light_intensity = 0.3;
-				p->light_radius = 2;
+		if (en->input0.id) {
+			if (en->input0.amount <= 2) {
+				play_sound_at_pos("event:/turret_shot_low", en->pos);
+			} else {
+				play_sound_at_pos("event:/turret_shot", en->pos);
 			}
-		}
 
-		closest_enemy->health -= 3;
-		if (closest_enemy->health <= 0) {
-			// kill
-			entity_destroy(closest_enemy);
+			closest_enemy->velocity = v2_add(closest_enemy->velocity, v2_mulf(shoot_dir, 800));
+			en->frame.did_shoot = true;
+			en->input0.amount -= 1;
+			if (en->input0.amount <= 0) {
+				en->input0 = (ItemAmount){0};
+			}
+
+			{
+				Vector2 pos = closest_enemy->pos;
+				Vector4 col = COLOR_RED;
+
+				for (int i = 0; i < 10; i++) {
+					Particle* p = particle_new();
+					p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_friction | PARTICLE_FLAGS_fade_out_with_velocity | PARTICLE_FLAGS_light;
+					p->pos = pos;
+					pos.x += get_random_float32_in_range(-2, 2);
+					pos.y += get_random_float32_in_range(-2, 2);
+					p->velocity = v2_mulf(shoot_dir, get_random_float32_in_range(200, 300));
+					p->col = col;
+					p->friction = 20.0f;
+					p->fade_out_vel_range = 30.0f;
+
+					p->light_col = col;
+					p->light_intensity = 0.3;
+					p->light_radius = 2;
+				}
+			}
+
+			closest_enemy->health -= 3;
+			if (closest_enemy->health <= 0) {
+				// kill
+				entity_destroy(closest_enemy);
+			}
+		} else {
+			play_sound_at_pos("event:/no_ammo_click", en->pos);
 		}
 	}
-
 }
 
 void render_turret(Entity* en) {
@@ -3015,7 +3034,7 @@ void update_enemy(Entity* en) {
 	}
 	en->frame.target_en = target_en;
 
-	// sound stuff
+	// sound stuff, need to do #continualsound
 	// if (is_valid(target_en) && !is_sound_playing(en->continual_sound)) {
 	// 	en->continual_sound = play_sound_at_pos("event:/enemy_wakeup", en->pos);
 	// }
@@ -3138,6 +3157,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_fabricator] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/fabricator.png"), get_heap_allocator())};
 		sprites[SPRITE_o2_emitter] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/o2_emitter.png"), get_heap_allocator())};
 		sprites[SPRITE_turret] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/turret.png"), get_heap_allocator())};
+		sprites[SPRITE_bullet] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/bullet.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -3163,7 +3183,7 @@ int entry(int argc, char **argv) {
 			data->craft_length = 2.0;
 		}
 
-		// :item
+		// :item resources
 		item_data[ITEM_iron_ingot] = (ItemData){ .pretty_name=STR("Iron Ingot"), .icon=SPRITE_iron_ingot};
 		item_data[ITEM_raw_iron] = (ItemData){ .pretty_name=STR("Raw Iron"), .icon=SPRITE_raw_iron, .furnace_transform_into=ITEM_iron_ingot};
 		item_data[ITEM_o2_shard] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_o2_shard};
@@ -3247,6 +3267,18 @@ int entry(int argc, char **argv) {
 			.exp_cost=100,
 			.ingredients_count=2,
 			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 2} }
+		};
+		// these need to be a package deal...
+		item_data[ITEM_bullet] = (ItemData){
+			.pretty_name=STR("Iron Bullet"),
+			.description=STR("Ammo for turrets"),
+			.icon=SPRITE_bullet,
+			.exp_cost=100,
+			.used_in_turret=true,
+			.ingredients_count=1,
+			.ingredients={
+				{ITEM_iron_ingot, 1},
+			},
 		};
 
 		item_data[ITEM_o2_emitter] = (ItemData){

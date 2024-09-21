@@ -17,6 +17,12 @@
 
 #define scope_z_layer(Z) defer_scope(push_z_layer(Z), pop_z_layer())
 
+Vector2 get_random_v2() {
+	Vector2 vec = v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1));
+	vec = v2_normalize(vec);
+	return vec;
+}
+
 inline float64 fmod_cycling(float64 x, float64 y) {
 	float remainder = x - (floorf(x/y) * y);
 	return remainder;
@@ -224,7 +230,6 @@ float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 1.f;
 float teleporter_radius = 8.0f;
 const int tile_width = 8;
-const float world_half_length = tile_width * 10;
 const float cursor_selection_slop_radius = 16.0f;
 const float player_pickup_radius = 32.0f;
 const int ice_vein_health = 10;
@@ -626,11 +631,6 @@ bool is_fully_unlocked(UnlockState unlock_state) {
 
 typedef Vector2i Tile;
 
-typedef struct TileData {
-	Tile tile;
-	Entity* entity_at_tile;
-} TileData;
-
 typedef enum BiomeID {
 	BIOME_void,
 	BIOME_core,
@@ -751,10 +751,9 @@ void init_biome_maps() {
 }
 
 Tile local_map_to_world_tile(Vector2i local) {
-	return (Tile) {
-		local.x - floor((float)map.width * 0.5),
-		(local.y-map.height) + floor((float)(map.height) * 0.5) + 1,
-	};
+	int x_index = local.x - floor((float)map.width * 0.5);
+	int y_index = local.y - floor((float)map.height * 0.5);
+	return (Tile){x_index, y_index};
 }
 
 Vector2i world_tile_to_local_map(Tile world) {
@@ -802,6 +801,7 @@ typedef struct World {
 	ItemAmount mouse_cursor_item;
 	float night_alpha;
 	float night_alpha_target;
+	float64 next_meteor_spawn_end_time;
 	// :world :state
 } World;
 World* world = 0;
@@ -904,6 +904,7 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 void setup_meteor(Entity* en) {
 	en->arch = ARCH_meteor;
+	en->radius = 70.f;
 }
 
 void setup_turret(Entity* en) {
@@ -1379,6 +1380,12 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+Range2f get_world_rect() {
+	float width = map.width * tile_width;
+	float height = map.height * tile_width;
+	return (Range2f) {.min=v2(width * -0.5, height * -0.5), .max=v2(width * 0.5, height * 0.5)};
+}
+
 typedef struct ArchetypeWeight {
 	ArchetypeID value;
 	float weight;
@@ -1553,23 +1560,6 @@ void do_entity_drops(Entity* en) {
 	}
 }
 
-// :destroy
-void entity_destroy(Entity* self, Entity* destroyed_by) {
-
-	if (self->arch == ARCH_player) {
-		// player death
-		self->oxygen = 0;
-	} else {
-
-		do_entity_drops(self);
-		if (destroyed_by->arch == ARCH_player || destroyed_by->arch == ARCH_burner_drill) {
-			do_entity_exp_drops(self);
-		}
-
-		entity_zero_immediately(self);
-	}
-}
-
 Vector2 v2_tile_pos_to_entity_world_pos(Vector2i tile_pos, ArchetypeID id) {
 	Vector2 pos = v2_tile_pos_to_world_pos(tile_pos);
 	pos.x += get_archetype_data(id).tile_size.x * tile_width * 0.5;
@@ -1611,11 +1601,35 @@ void item_tooltip(ItemAmount item_amount) {
 	pop_z_layer();
 }
 
+float max_trauma = 0.6;
+
 void camera_shake(float amount) {
 	camera_trauma += amount;
+	if (camera_trauma > max_trauma) {
+		camera_trauma = max_trauma;
+	}
+}
+
+void camera_shake_at_pos(float amount, Vector2 source_position, float radius, float falloff_distance) {
+	Vector2 cam_pos = camera_pos;
+
+	// Calculate the distance between the camera and the source position
+	float distance = v2_dist(cam_pos, source_position);
+
+	if (distance <= radius) {
+		// Within the radius, apply the full shake amount
+		camera_shake(amount);
+	} else if (distance <= radius + falloff_distance) {
+		// Between radius and radius + falloff_distance, interpolate the shake amount linearly
+		float t = (distance - radius) / falloff_distance;
+		float adjusted_amount = amount * (1.0f - t);
+		camera_shake(adjusted_amount);
+	}
+	// Beyond radius + falloff_distance, do not apply any shake
 }
 
 typedef struct TileCache {
+	Tile world_tile;
 	Entity* entity;
 	// BiomeID biome;
 	bool visited;
@@ -1641,12 +1655,26 @@ void add_new_entity_to_tile_cache(Entity* en) {
 }
 
 void create_tile_entity_pair_cache() {
+	if (world_frame.tile_entity_cache != 0) {
+		return;
+	}
+
 	world_frame.tile_entity_cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
 
 	TileEntityCache* cache = world_frame.tile_entity_cache;
 
 	cache->tile_count = map.height * map.width;
 	cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
+
+	for (int y = 0; y < map.height; y++)
+	for (int x = 0; x < map.width; x++) {
+		TileCache* tc = &cache->tiles[local_map_pos_to_index(v2i(x, y))];
+		tc->world_tile = local_map_to_world_tile(v2i(x, y));
+
+		Vector2i tile = local_map_to_world_tile(v2i(x, y));
+		tile = world_tile_to_local_map(tile);
+		assert(tile.x == x && tile.y == y);
+	}
 
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* en = &world->entities[i];
@@ -1692,22 +1720,22 @@ bool does_overlap_existing_entities(Vector2 pos, ArchetypeID id) {
 
 void spawn_world_resources() {
 
+	create_tile_entity_pair_cache();
+
 	// create an array of tiles for each biome
-	TileData* tiles_for_biome[BIOME_MAX] = {0};
+	TileCache** tiles_for_biome[BIOME_MAX] = {0};
 	for (BiomeID biome = 1; biome < BIOME_MAX; biome++)
 	{
-		TileData* tiles;
-		growing_array_init((void**)&tiles, sizeof(TileData), get_temporary_allocator());
+		TileCache** tiles;
+		growing_array_init_reserve((void**)&tiles, sizeof(TileCache*), 128, get_temporary_allocator());
 
 		for (int y = 0; y < map.height; y++)
 		for (int x = 0; x < map.width; x++)
 		{
-			BiomeID biome_at_tile = map.tiles[y * map.width + x];
+			BiomeID biome_at_tile = map.tiles[local_map_pos_to_index(v2i(x, y))];
 			if (biome_at_tile == biome) {
-				TileData tdata = {0};
-				tdata.tile = local_map_to_world_tile(v2i(x, y));
-				tdata.entity_at_tile = entity_at_tile(tdata.tile);
-				growing_array_add((void**)&tiles, &tdata);
+				TileCache* tc = tile_cache_at_tile(local_map_to_world_tile(v2i(x, y)));
+				growing_array_add((void**)&tiles, &tc);
 			}
 		}
 
@@ -1720,9 +1748,9 @@ void spawn_world_resources() {
 		Tile* potential_spawn_tiles;
 		growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
 		for (int j = 0; j < growing_array_get_valid_count(tiles_for_biome[data.biome_id]); j++) {
-			TileData tile_data = tiles_for_biome[data.biome_id][j];
-			if (!tile_data.entity_at_tile) {
-				growing_array_add((void**)&potential_spawn_tiles, &tile_data.tile);
+			TileCache* tc = tiles_for_biome[data.biome_id][j];
+			if (!tc->entity) {
+				growing_array_add((void**)&potential_spawn_tiles, &tc->world_tile);
 			}
 		}
 
@@ -1790,10 +1818,10 @@ void world_setup() {
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
-		en = entity_create();
-		setup_meteor(en);
-		en->pos.x = 50;
-		en->pos.y = 20;
+		// en = entity_create();
+		// setup_meteor(en);
+		// en->pos.x = 50;
+		// en->pos.y = 20;
 
 		player_en->exp_amount = 1000;
 		
@@ -3055,8 +3083,6 @@ void draw_base_sprite(Entity* en) {
 float meteor_strike_length = 2.f;
 void update_meteor(Entity* en) {
 
-	en->radius = 70.f;
-
 	if (en->next_hit_end_time == 0) {
 		en->next_hit_end_time = now() + meteor_strike_length;
 	}
@@ -3064,8 +3090,12 @@ void update_meteor(Entity* en) {
 	if (has_reached_end_time(en->next_hit_end_time)) {
 
 		// boom
-		play_sound_at_pos("event:/explosion", en->pos);
-		camera_shake(0.5);
+		play_sound_at_pos("event:/meteor_crash", en->pos);
+
+		// somewhat #volatile with fmod sound spatialisation range
+		float start_falloff = 80.f;
+		float end_falloff = 500.f;
+		camera_shake_at_pos(0.5, en->pos, start_falloff, end_falloff-start_falloff);
 
 		// damage entities in a radius
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -3073,7 +3103,11 @@ void update_meteor(Entity* en) {
 			if (is_valid(against) && against->destroyable_by_explosion) {
 				float dist = v2_dist(against->pos, en->pos);
 				if (dist < en->radius) {
-					entity_destroy(against, en);
+					if (against->arch == ARCH_player) {
+						against->oxygen = 0;
+					} else {
+						entity_zero_immediately(against);
+					}
 				}
 			}
 		}
@@ -3868,7 +3902,46 @@ int entry(int argc, char **argv) {
 				// Range2f range = get_entity_range(en);
 			}
 		}
-		
+
+		// spawn :meteors
+		{
+			if (world->next_meteor_spawn_end_time == 0) {
+				world->next_meteor_spawn_end_time = now() + get_random_float32_in_range(60, 180);
+			}
+
+			if (has_reached_end_time(world->next_meteor_spawn_end_time)) {
+				world->next_meteor_spawn_end_time = 0;
+
+				Vector2 spawn_pos;
+				bool found_pos = false;
+				int iterations = 0;
+				while (true) {
+
+					spawn_pos = get_player()->pos;
+					spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, 200.f)));
+
+					float spawn_safe_zone_radius = tile_width * 8 + get_archetype_data(ARCH_meteor).radius;
+					if (fabsf(v2_length(spawn_pos)) > spawn_safe_zone_radius) {
+						found_pos = true;
+						break;
+					}
+
+					iterations += 1;
+					if (iterations > 100) {
+						break;
+					}
+				}
+
+				if (found_pos) {
+					Entity* en = entity_create();
+					setup_meteor(en);
+					en->pos = spawn_pos;
+				} else {
+					log_warning("failed to find spawn pos for meteor");
+				}
+			}
+		}
+
 		// :update entities
 		Entity* player = get_player();
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -3974,7 +4047,9 @@ int entry(int argc, char **argv) {
 									play_sound_at_pos("event:/hit_generic", against->pos);
 
 									if (against->health <= 0) {
-										entity_destroy(against, en);
+										do_entity_drops(against);
+										do_entity_exp_drops(against);
+										entity_zero_immediately(against);
 									}
 								}
 							}
@@ -4465,7 +4540,9 @@ int entry(int argc, char **argv) {
 							if (selected_en->health <= 0) {
 								camera_shake(0.1); // shake extra on death
 
-								entity_destroy(selected_en, player);
+								do_entity_drops(selected_en);
+								do_entity_exp_drops(selected_en);
+								entity_zero_immediately(selected_en);
 							}
 						}
 					} else {

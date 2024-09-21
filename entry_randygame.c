@@ -894,7 +894,7 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 		float prev_max_health = en->max_health;
 		en->max_health = new_max_health;
 
-		if (prev_max_health != new_max_health || en->health >= new_max_health) {
+		if (prev_max_health == en->health || en->health >= new_max_health) {
 			en->health = new_max_health;
 		}
 	}
@@ -1690,9 +1690,79 @@ bool does_overlap_existing_entities(Vector2 pos, ArchetypeID id) {
 	return false;
 }
 
+void spawn_world_resources() {
+
+	// create an array of tiles for each biome
+	TileData* tiles_for_biome[BIOME_MAX] = {0};
+	for (BiomeID biome = 1; biome < BIOME_MAX; biome++)
+	{
+		TileData* tiles;
+		growing_array_init((void**)&tiles, sizeof(TileData), get_temporary_allocator());
+
+		for (int y = 0; y < map.height; y++)
+		for (int x = 0; x < map.width; x++)
+		{
+			BiomeID biome_at_tile = map.tiles[y * map.width + x];
+			if (biome_at_tile == biome) {
+				TileData tdata = {0};
+				tdata.tile = local_map_to_world_tile(v2i(x, y));
+				tdata.entity_at_tile = entity_at_tile(tdata.tile);
+				growing_array_add((void**)&tiles, &tdata);
+			}
+		}
+
+		tiles_for_biome[biome] = tiles;
+	}
+
+	for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
+		WorldResourceData data = world_resources[i];
+
+		Tile* potential_spawn_tiles;
+		growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
+		for (int j = 0; j < growing_array_get_valid_count(tiles_for_biome[data.biome_id]); j++) {
+			TileData tile_data = tiles_for_biome[data.biome_id][j];
+			if (!tile_data.entity_at_tile) {
+				growing_array_add((void**)&potential_spawn_tiles, &tile_data.tile);
+			}
+		}
+
+		int iterations = 0;
+		while (true) {
+			// pick from a random spot
+			int count = growing_array_get_valid_count(potential_spawn_tiles);
+			Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
+
+			Vector2 spawn_pos = v2_tile_pos_to_entity_world_pos(spawn_tile, data.arch_id);
+
+			// is it close to any entities?
+			bool too_close = false;
+			for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+				Entity* en = &world->entities[j];
+				if (en->is_valid && en->arch == data.arch_id && !en->isnt_a_tile) {
+					int tile_radius = data.dist_from_self;
+					if (v2_dist(spawn_pos, en->pos) < tile_width * tile_radius) {
+						too_close = true;
+						break;
+					}
+				}
+			}
+
+			if (!too_close) {
+				Entity* en = entity_create();
+				entity_setup(en, data.arch_id);
+				en->pos = spawn_pos;
+			}
+
+			iterations += 1;
+			if (iterations > 300) {
+				break;
+			}
+		}
+	}
+}
+
 // :map init
-void world_setup()
-{
+void world_setup() {
 	Entity* player_en = entity_create();
 	setup_player(player_en);
 	player_en->pos.x = 20.f;
@@ -1711,6 +1781,8 @@ void world_setup()
 	en->pos.x = 70;
 	en->pos.y = -30;
 	en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
+
+	spawn_world_resources();
 
 	world->item_unlocks[ITEM_research_station].research_progress = 100;
 	world->item_unlocks[ITEM_workbench].research_progress = 100;
@@ -3749,88 +3821,6 @@ int entry(int argc, char **argv) {
 		do_ui_stuff();
 		do_world_entity_interaction_ui_stuff();
 
-		// create an array of tiles for each biome
-		TileData* tiles_for_biome[BIOME_MAX] = {0};
-		for (BiomeID biome = 1; biome < BIOME_MAX; biome++)
-		{
-			TileData* tiles;
-			growing_array_init((void**)&tiles, sizeof(TileData), get_temporary_allocator());
-
-			for (int y = 0; y < map.height; y++)
-			for (int x = 0; x < map.width; x++)
-			{
-				BiomeID biome_at_tile = map.tiles[y * map.width + x];
-				if (biome_at_tile == biome) {
-					TileData tdata = {0};
-					tdata.tile = local_map_to_world_tile(v2i(x, y));
-					tdata.entity_at_tile = entity_at_tile(tdata.tile);
-					growing_array_add((void**)&tiles, &tdata);
-				}
-			}
-
-			tiles_for_biome[biome] = tiles;
-		}
-
-		// spawn_res in world
-		{
-			for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
-				WorldResourceData data = world_resources[i];
-
-				Tile* potential_spawn_tiles;
-				growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
-				for (int j = 0; j < growing_array_get_valid_count(tiles_for_biome[data.biome_id]); j++) {
-					TileData tile_data = tiles_for_biome[data.biome_id][j];
-					if (!tile_data.entity_at_tile) {
-						growing_array_add((void**)&potential_spawn_tiles, &tile_data.tile);
-					}
-				}
-
-				bool should_respawn = biome_at_tile(v2_world_pos_to_tile_pos(get_player()->pos)) == BIOME_core;
-
-				if (should_respawn && has_reached_end_time(world->resource_next_spawn_end_time[i])) {
-					// pick from a random spot
-					int count = growing_array_get_valid_count(potential_spawn_tiles);
-					Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
-
-					Vector2 spawn_pos = v2_tile_pos_to_entity_world_pos(spawn_tile, data.arch_id);
-
-					// is it close to any entities?
-					bool too_close = false;
-					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
-						Entity* en = &world->entities[j];
-						if (en->is_valid && en->arch == data.arch_id && !en->isnt_a_tile) {
-							int tile_radius = data.dist_from_self;
-							if (v2_dist(spawn_pos, en->pos) < tile_width * tile_radius) {
-								too_close = true;
-								break;
-							}
-						}
-					}
-
-					if (!too_close) {
-						Entity* en = entity_create();
-						entity_setup(en, data.arch_id);
-						en->pos = spawn_pos;
-
-						float respawn_length = 10.0;
-						if (world->time_elapsed < 1.0) {
-							respawn_length = 0.0;
-						}
-						world->resource_next_spawn_end_time[i] = now() + respawn_length;
-					}
-				}
-
-				/*
-				if (data.biome_id == BIOME_forest)
-				for (int j = 0; j < growing_array_get_valid_count(potential_spawn_tiles); j++) {
-					Tile tile = potential_spawn_tiles[j];
-					Draw_Quad* quad = draw_circle(v2_tile_pos_to_world_pos(tile), v2(1, 1), COLOR_GREEN);
-					quad->z = 30;
-				}
-				*/
-			}
-		}
-
 		// :select entity
 		if (!world_frame.hover_consumed)
 		{
@@ -4826,6 +4816,10 @@ int entry(int argc, char **argv) {
 			if (is_key_just_pressed('X')) {
 				shader_recompile();
 				log("reloaded shader");
+			}
+			if (is_key_just_pressed('N')) {
+				// instantly cycle to next day/night
+				world->cycle_end_time = now();
 			}
 			if (is_key_just_pressed('F')) {
 				world_save_to_disk();

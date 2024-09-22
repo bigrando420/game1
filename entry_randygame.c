@@ -837,6 +837,7 @@ typedef struct WorldFrame {
 	bool show_inventory;
 	Entity* player;
 	TileEntityCache* tile_entity_cache;
+	bool is_creation;
 	// :frame state
 } WorldFrame;
 WorldFrame world_frame;
@@ -2376,6 +2377,19 @@ void do_ui_stuff() {
 		draw_text_with_pivot(font, txt, font_height_beeg, pos, text_scale, col, PIVOT_top_left);
 	}
 
+	// time til next :cycle
+	{
+		Vector4 col = COLOR_WHITE;
+
+		string txt = tprint("Time until %s: %is", world->night_alpha_target == 0 ? "night" : "day", (int)(world->cycle_end_time - now()));
+		Vector2 pos = {0};
+		pos.y += screen_height - 2.0f;
+		pos.x = screen_width;
+		pos.x -= 1.0f;
+
+		draw_text_with_pivot(font, txt, font_height, pos, text_scale, col, PIVOT_top_right);
+	}
+
 	// :respawn ui
 	if (world->ux_state == UX_respawn) {
 		u32 title_font_height = 128;
@@ -3099,6 +3113,10 @@ void update_enemy_nest(Entity* en) {
 		if (is_valid(against) && against->arch == ARCH_enemy1 && against->spawned_from.id == en->id) {
 			enemy_count += 1;
 		}
+	}
+
+	if (en->last_frame.is_creation) {
+		en->next_hit_end_time = now();
 	}
 
 	if (enemy_count < 1 && en->next_hit_end_time == 0.0) {
@@ -4882,8 +4900,8 @@ int entry(int argc, char **argv) {
 
 		// day/night :cycle
 		{
-			float day_length = 15 * 60;
-			float night_length = 4 * 60;
+			float day_length = 10 * 60;
+			float night_length = 3 * 60;
 			float transition_length = 10.0f;
 
 			if (world->cycle_end_time == 0) {

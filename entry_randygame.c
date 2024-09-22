@@ -365,6 +365,7 @@ typedef enum SpriteID {
 	SPRITE_o2_emitter,
 	SPRITE_turret,
 	SPRITE_bullet,
+	SPRITE_enemy_nest,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -462,6 +463,7 @@ typedef enum ArchetypeID {
 	ARCH_enemy1 = 26,
 	ARCH_turret = 27,
 	ARCH_meteor = 28,
+	ARCH_enemy_nest = 29,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -509,6 +511,11 @@ typedef enum EntityState {
 	STATE_resting,
 	// :state
 } EntityState;
+
+typedef struct EntityHandle {
+	int id;
+	int index;
+} EntityHandle;
 
 typedef struct Entity Entity; // needs forward declare
 typedef struct EntityFrame {
@@ -590,6 +597,7 @@ typedef struct Entity {
 	float rotation_target;
 	bool enemy_target;
 	bool destroyable_by_explosion;
+	EntityHandle spawned_from;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -606,11 +614,6 @@ typedef struct Entity {
 	EntityFrame last_frame;
 } Entity;
 #define MAX_ENTITY_COUNT 1024
-
-typedef struct EntityHandle {
-	int id;
-	int index;
-} EntityHandle;
 
 typedef enum UXState {
 	UX_nil,
@@ -672,7 +675,7 @@ WorldResourceData world_resources[] = {
 
 	{ BIOME_iron, ARCH_iron_depo, 6 },
 
-	{ BIOME_enemy_nest, ARCH_enemy1, 6 },
+	{ BIOME_enemy_nest, ARCH_enemy_nest, 4 },
 	// :spawn_res system
 };
 
@@ -680,6 +683,7 @@ typedef struct Map {
 	int width;
 	int height;
 	BiomeID* tiles;
+	Tile* biome_tiles[BIOME_MAX];
 } Map;
 Map map = {0};
 
@@ -702,6 +706,25 @@ Vector4 biome_col_hex_to_rgba(u32 col) {
 	u8 g = (col>>8) & 0x000000FF;
 	u8 b = (col>>0) & 0x000000FF;
 	return (Vector4){r/255.0, g/255.0, b/255.0, 1};
+}
+
+Tile local_map_to_world_tile(Vector2i local) {
+	int x_index = local.x - floor((float)map.width * 0.5);
+	int y_index = local.y - floor((float)map.height * 0.5);
+	return (Tile){x_index, y_index};
+}
+
+Vector2i world_tile_to_local_map(Tile world) {
+	int x_index = world.x + floor((float)map.width * 0.5);
+	int y_index = world.y + floor((float)map.height * 0.5);
+	x_index = clamp(x_index, 0, map.width-1);
+	y_index = clamp(y_index, 0, map.height-1);
+	return (Vector2i){x_index, y_index};
+}
+
+int local_map_pos_to_index(Vector2i local_map) {
+	int index = local_map.y * map.width + local_map.x;
+	return index;
 }
 
 void init_biome_maps() {
@@ -749,26 +772,22 @@ void init_biome_maps() {
 		if (!found_biomes[i]) {
 			log_warning("Biome %i is unused", i);
 		}
+
+		Tile* tiles;
+		growing_array_init_reserve((void**)&tiles, sizeof(Tile), 128, get_heap_allocator());
+
+		for (int y = 0; y < map.height; y++)
+		for (int x = 0; x < map.width; x++)
+		{
+			BiomeID biome_at_tile = map.tiles[local_map_pos_to_index(v2i(x, y))];
+			if (biome_at_tile == i) {
+				Tile t = local_map_to_world_tile(v2i(x, y));
+				growing_array_add((void**)&tiles, &t);
+			}
+		}
+
+		map.biome_tiles[i] = tiles;
 	}
-}
-
-Tile local_map_to_world_tile(Vector2i local) {
-	int x_index = local.x - floor((float)map.width * 0.5);
-	int y_index = local.y - floor((float)map.height * 0.5);
-	return (Tile){x_index, y_index};
-}
-
-Vector2i world_tile_to_local_map(Tile world) {
-	int x_index = world.x + floor((float)map.width * 0.5);
-	int y_index = world.y + floor((float)map.height * 0.5);
-	x_index = clamp(x_index, 0, map.width-1);
-	y_index = clamp(y_index, 0, map.height-1);
-	return (Vector2i){x_index, y_index};
-}
-
-int local_map_pos_to_index(Vector2i local_map) {
-	int index = local_map.y * map.width + local_map.x;
-	return index;
 }
 
 BiomeID biome_at_tile(Tile tile) {
@@ -904,6 +923,13 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 // :arch :setup things
 
+// :nest
+void setup_enemy_nest(Entity* en) {
+	en->arch = ARCH_enemy_nest;
+	en->sprite_id = SPRITE_enemy_nest;
+	en->tile_size = v2i(2, 2);
+}
+
 void setup_meteor(Entity* en) {
 	en->arch = ARCH_meteor;
 	en->radius = 70.f;
@@ -922,12 +948,13 @@ void setup_turret(Entity* en) {
 }
 
 // :enemy
+Vector2 enemy_size = {8, 8};
 void setup_enemy1(Entity* en) {
 	en->arch = ARCH_enemy1;
 	en->pretty_name = STR("Enemy 1");
 	en->destroyable_by_explosion = true;
 	en->has_physics = true;
-	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(10, 10));
+	en->collision_bounds = range2f_make_center_center(v2(0, 0), enemy_size);
 	en->is_enemy = true;
 	entity_max_health_setter(en, 3);
 }
@@ -1229,6 +1256,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_enemy1: setup_enemy1(en); break;
 		case ARCH_turret: setup_turret(en); break;
 		case ARCH_meteor: setup_meteor(en); break;
+		case ARCH_enemy_nest: setup_enemy_nest(en); break;
 		// :arch :setup
 	}
 }
@@ -1724,33 +1752,14 @@ void spawn_world_resources() {
 
 	create_tile_entity_pair_cache();
 
-	// create an array of tiles for each biome
-	TileCache** tiles_for_biome[BIOME_MAX] = {0};
-	for (BiomeID biome = 1; biome < BIOME_MAX; biome++)
-	{
-		TileCache** tiles;
-		growing_array_init_reserve((void**)&tiles, sizeof(TileCache*), 128, get_temporary_allocator());
-
-		for (int y = 0; y < map.height; y++)
-		for (int x = 0; x < map.width; x++)
-		{
-			BiomeID biome_at_tile = map.tiles[local_map_pos_to_index(v2i(x, y))];
-			if (biome_at_tile == biome) {
-				TileCache* tc = tile_cache_at_tile(local_map_to_world_tile(v2i(x, y)));
-				growing_array_add((void**)&tiles, &tc);
-			}
-		}
-
-		tiles_for_biome[biome] = tiles;
-	}
-
 	for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 		WorldResourceData data = world_resources[i];
 
 		Tile* potential_spawn_tiles;
 		growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
-		for (int j = 0; j < growing_array_get_valid_count(tiles_for_biome[data.biome_id]); j++) {
-			TileCache* tc = tiles_for_biome[data.biome_id][j];
+		for (int j = 0; j < growing_array_get_valid_count(map.biome_tiles[data.biome_id]); j++) {
+			Tile t = map.biome_tiles[data.biome_id][j];
+			TileCache* tc = tile_cache_at_tile(t);
 			if (!tc->entity) {
 				growing_array_add((void**)&potential_spawn_tiles, &tc->world_tile);
 			}
@@ -3081,6 +3090,39 @@ void draw_base_sprite(Entity* en) {
 
 // update :func dump
 
+// :nest
+void update_enemy_nest(Entity* en) {
+
+	int enemy_count = 0;
+	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+		Entity* against = &world->entities[i];
+		if (is_valid(against) && against->arch == ARCH_enemy1 && against->spawned_from.id == en->id) {
+			enemy_count += 1;
+		}
+	}
+
+	if (enemy_count < 1 && en->next_hit_end_time == 0.0) {
+		en->next_hit_end_time = now() + get_random_float32_in_range(20, 40);
+	}
+
+	if (enemy_count < 1 && en->next_hit_end_time != 0 && has_reached_end_time(en->next_hit_end_time)) {
+		Entity* spawn = entity_create();
+		setup_enemy1(spawn);
+		spawn->pos = en->pos;
+		spawn->spawned_from = handle_from_entity(en);
+
+		en->next_hit_end_time = 0;
+	}
+
+}
+
+// :nest
+void render_enemy_nest(Entity* en) {
+	draw_base_sprite(en);
+
+	add_point_light(en->pos, COLOR_RED, 20, 0.5);
+}
+
 // :meteor
 float meteor_strike_length = 2.f;
 void update_meteor(Entity* en) {
@@ -3481,6 +3523,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_o2_emitter] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/o2_emitter.png"), get_heap_allocator())};
 		sprites[SPRITE_turret] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/turret.png"), get_heap_allocator())};
 		sprites[SPRITE_bullet] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/bullet.png"), get_heap_allocator())};
+		sprites[SPRITE_enemy_nest] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/enemy_nest.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -3934,6 +3977,17 @@ int entry(int argc, char **argv) {
 					en->pos = spawn_pos;
 				} else {
 					log_warning("failed to find spawn pos for meteor");
+				}
+			}
+		}
+
+		// nests need to be updated prior, beacuse they spawn the enemies
+		// enemies need to be updated later to ensure there's at least a nil target, otherwise we crash
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			if (en->is_valid) {
+				if (en->arch == ARCH_enemy_nest) {
+					update_enemy_nest(en);
 				}
 			}
 		}
@@ -4595,6 +4649,7 @@ int entry(int argc, char **argv) {
 
 					case ARCH_player: break;
 
+					case ARCH_enemy_nest: render_enemy_nest(en); break;
 					case ARCH_meteor: render_meteor(en); break;
 					case ARCH_turret: render_turret(en); break;
 
@@ -4609,7 +4664,7 @@ int entry(int argc, char **argv) {
 						center.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0 * rate_mult);
 						center.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0 * rate_mult);
 
-						Vector2 size = v2(10, 10);
+						Vector2 size = enemy_size;
 						Vector2 draw_pos = center;
 						draw_pos.x += size.x * -0.5;
 						draw_pos.y += size.y * -0.5;

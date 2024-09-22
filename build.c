@@ -14,7 +14,7 @@
 // allocations made way earlier in the frame are likely not used anymore.
 // This might however not always be the case, so it's probably a good idea to make sure you always have
 // enough temporary storage for your game.
-#define TEMPORARY_STORAGE_SIZE MB(8) 
+#define TEMPORARY_STORAGE_SIZE MB(32) 
 
 // Enable VERY_DEBUG if you are having memory bugs to detect things like heap corruption earlier.
 // #define VERY_DEBUG 1

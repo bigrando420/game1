@@ -660,7 +660,7 @@ typedef struct WorldResourceData {
 WorldResourceData world_resources[] = {
 	{ BIOME_forest, ARCH_tree, 5 },
 	{ BIOME_forest, ARCH_grass, 3 },
-	{ BIOME_forest, ARCH_flint_depo, 20 },
+	// { BIOME_forest, ARCH_flint_depo, 20 },
 
 	{ BIOME_barren, ARCH_rock, 10 },
 	{ BIOME_barren, ARCH_coal_depo, 20 },
@@ -668,7 +668,7 @@ WorldResourceData world_resources[] = {
 	{ BIOME_copper, ARCH_copper_depo, 10 },
 
 	{ BIOME_copper_heavy, ARCH_copper_depo, 4 },
-	{ BIOME_copper_heavy, ARCH_flint_depo, 20 },
+	// { BIOME_copper_heavy, ARCH_flint_depo, 20 },
 	{ BIOME_copper_heavy, ARCH_rock, 10 },
 
 	{ BIOME_ice, ARCH_ice_vein, 10 },
@@ -952,12 +952,13 @@ void setup_turret(Entity* en) {
 Vector2 enemy_size = {8, 8};
 void setup_enemy1(Entity* en) {
 	en->arch = ARCH_enemy1;
-	en->pretty_name = STR("Enemy 1");
+	en->pretty_name = STR("Æ█Ξ2vX");
 	en->destroyable_by_explosion = true;
+	en->destroyable_world_item = true;
 	en->has_physics = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), enemy_size);
 	en->is_enemy = true;
-	entity_max_health_setter(en, 3);
+	entity_max_health_setter(en, 20);
 }
 
 void setup_o2_emitter(Entity* en) {
@@ -1662,9 +1663,7 @@ void camera_shake_at_pos(float amount, Vector2 source_position, float radius, fl
 typedef struct TileCache {
 	Tile world_tile;
 	Entity* entity;
-	// BiomeID biome;
 	bool visited;
-	Vector4 debug_col_override;
 } TileCache;
 typedef struct TileEntityCache {
 	TileCache* tiles;
@@ -1830,10 +1829,10 @@ void world_setup() {
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
-		// en = entity_create();
-		// setup_meteor(en);
-		// en->pos.x = 50;
-		// en->pos.y = 20;
+		en = entity_create();
+		setup_meteor(en);
+		en->pos.x = 50;
+		en->pos.y = 20;
 
 		player_en->exp_amount = 1000;
 		
@@ -3142,17 +3141,15 @@ void render_enemy_nest(Entity* en) {
 }
 
 // :meteor
-float meteor_strike_length = 2.f;
+float meteor_strike_length = 3.5f;
 void update_meteor(Entity* en) {
 
 	if (en->next_hit_end_time == 0) {
 		en->next_hit_end_time = now() + meteor_strike_length;
+		play_sound_at_pos("event:/meteor_crash", en->pos);
 	}
 
 	if (has_reached_end_time(en->next_hit_end_time)) {
-
-		// boom
-		play_sound_at_pos("event:/meteor_crash", en->pos);
 
 		// somewhat #volatile with fmod sound spatialisation range
 		float start_falloff = 80.f;
@@ -3174,12 +3171,13 @@ void update_meteor(Entity* en) {
 		}
 
 		// spawn in new resources
-		for (int i = 0; i < get_random_int_in_range(6, 10); i++) {
+		for (int i = 0; i < get_random_int_in_range(3, 5); i++) {
 			
+			// :meteor drops 
 			ArchetypeWeight weights[] = {
 				{ARCH_ice_vein, 2},
-				{ARCH_iron_depo, 2},
-				{ARCH_copper_depo, 1},
+				{ARCH_coal_depo, 2},
+				{ARCH_rock, 4},
 			};
 
 			ArchetypeID arch = random_weighted_archetype(weights, ARRAY_COUNT(weights));
@@ -3225,14 +3223,16 @@ void render_meteor(Entity* en) {
 
 	float alpha = alpha_from_end_time(en->next_hit_end_time, meteor_strike_length);
 
+	float radius = en->radius * ease_in_exp(alpha, 20);
+
 	Vector2 draw_pos = en->pos;
-	draw_pos.x -= en->radius;
-	draw_pos.y -= en->radius;
+	draw_pos.x -= radius;
+	draw_pos.y -= radius;
 
 	Vector4 col = COLOR_RED;
 	col.a = 0.7 * alpha;
 
-	Draw_Quad* quad = draw_circle(draw_pos, v2(en->radius * 2, en->radius * 2), col);
+	Draw_Quad* quad = draw_circle(draw_pos, v2(radius * 2, radius * 2), col);
 	quad->z = layer_background+1;
 
 }
@@ -3367,14 +3367,18 @@ void render_turret(Entity* en) {
 // :enemy
 void update_enemy(Entity* en) {
 
-	float enemy_agro_radius = 50.f;
+	float enemy_agro_radius = 100.f;
 
 	// find nearest natural target
 	Entity* nearest_target = 0;
 	float nearest_target_distance = 0;
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* against = &world->entities[i];
-		if (is_valid(against) && against->enemy_target && against->arch != ARCH_player) {
+		if (is_valid(against) && against->enemy_target) {
+
+			if (against->arch == ARCH_player && !is_player_alive()) {
+				continue;
+			}
 
 			float dist = v2_dist(against->pos, en->pos);
 			bool should_agro = dist < enemy_agro_radius || is_night();
@@ -3390,28 +3394,6 @@ void update_enemy(Entity* en) {
 	Entity* target_en = get_nil_entity();
 	if (nearest_target) {
 		target_en = nearest_target;
-	} else {
-		// agro player
-
-		// this is kinda redundant, since we could just use the system above for natural targets.
-		// Maybe we wanna keep this loose agro system tho? idk.
-
-		// gain / loose agro
-		float dist_to_player = v2_dist(get_player()->pos, en->pos);
-		if (en->is_agro && dist_to_player > 150.f) {
-			en->is_agro = false;
-		}
-		if (!en->is_agro && dist_to_player < 50.f) {
-			en->is_agro = true;
-		}
-
-		if (is_night()) {
-			en->is_agro = true;
-		}
-
-		if (en->is_agro && is_player_alive()) {
-			target_en = get_player();
-		}
 	}
 
 	en->frame.target_en = target_en;
@@ -3425,7 +3407,7 @@ void update_enemy(Entity* en) {
 	}
 
 	en->friction = 20.f;
-	en->move_speed = 50.f;
+	en->move_speed = 85.f;
 
 	if (target_en->is_valid) {
 
@@ -3725,8 +3707,8 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_furnace,
 			.description=STR("Can burn stuff into something more useful."),
 			.exp_cost=30,
-			.ingredients_count=2,
-			.ingredients={ {ITEM_rock, 10}, {ITEM_flint, 2} }
+			.ingredients_count=1,
+			.ingredients={ {ITEM_rock, 5} }
 		};
 
 		item_data[ITEM_workbench] = (ItemData){
@@ -3963,7 +3945,7 @@ int entry(int argc, char **argv) {
 		// spawn :meteors
 		{
 			if (world->next_meteor_spawn_end_time == 0) {
-				world->next_meteor_spawn_end_time = now() + get_random_float32_in_range(60, 180);
+				world->next_meteor_spawn_end_time = now() + get_random_float32_in_range(30, 50);
 			}
 
 			if (has_reached_end_time(world->next_meteor_spawn_end_time)) {
@@ -3975,7 +3957,7 @@ int entry(int argc, char **argv) {
 				while (true) {
 
 					spawn_pos = get_player()->pos;
-					spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, 200.f)));
+					spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, 40.f)));
 
 					float spawn_safe_zone_radius = tile_width * 8 + get_archetype_data(ARCH_meteor).radius;
 					if (fabsf(v2_length(spawn_pos)) > spawn_safe_zone_radius) {
@@ -4870,8 +4852,8 @@ int entry(int argc, char **argv) {
 					float y_pos = y * tile_width;
 					Draw_Quad* quad = draw_rect(v2(x_pos, y_pos), v2(tile_width, tile_width), col);
 
-					TileCache* tc = tile_cache_at_tile(v2i(x, y));
-					set_col_override(quad, tc->debug_col_override);
+					// TileCache* tc = tile_cache_at_tile(v2i(x, y));
+					// set_col_override(quad, tc->debug_col_override);
 				}
 			}
 

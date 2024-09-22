@@ -253,6 +253,7 @@ typedef enum Layers {
 // global :app stuff
 // we could move this into an AppState struct.
 // or we could just keep cavemaning it like this lol, since it's not needed.
+u64 frame_count = 0;
 float exp_error_flash_alpha = 0;
 float exp_error_flash_alpha_target = 0;
 float camera_trauma = 0;
@@ -519,6 +520,7 @@ typedef struct EntityFrame {
 	Entity* target_en;
 	bool is_creation;
 	bool did_shoot;
+	bool is_awake;
 	// :frame
 } EntityFrame;
 
@@ -3106,7 +3108,6 @@ void update_meteor(Entity* en) {
 					if (against->arch == ARCH_player) {
 						against->oxygen = 0;
 					} else {
-						entity_zero_immediately(against);
 					}
 				}
 			}
@@ -3337,7 +3338,7 @@ void update_enemy(Entity* en) {
 
 		// gain / loose agro
 		float dist_to_player = v2_dist(get_player()->pos, en->pos);
-		if (en->is_agro && dist_to_player > 100.f) {
+		if (en->is_agro && dist_to_player > 150.f) {
 			en->is_agro = false;
 		}
 		if (!en->is_agro && dist_to_player < 50.f) {
@@ -3354,18 +3355,14 @@ void update_enemy(Entity* en) {
 	}
 
 	en->frame.target_en = target_en;
+	en->frame.is_awake = is_valid(target_en);
 
-	// sound stuff, need to do #continualsound
-	// if (is_valid(target_en) && !is_sound_playing(en->continual_sound)) {
-	// 	en->continual_sound = play_sound_at_pos("event:/enemy_wakeup", en->pos);
-	// }
-	// if (is_valid(target_en) && is_sound_playing(en->continual_sound)) {
-	// 	// update pos
-	// 	update_sound_position(en->continual_sound, en->pos);
-	// }
-	// if (!is_valid(target_en) && is_sound_playing(en->continual_sound)) {
-	// 	stop_sound(en->continual_sound);
-	// }
+	if (en->frame.is_awake && !en->last_frame.is_awake) {
+		attach_cont_sound_to_entity("event:/enemy_wakeup", en);
+	}
+	if (en->frame.is_awake) {
+		update_attached_cont_sounds_entity(en);
+	}
 
 	en->friction = 20.f;
 	en->move_speed = 50.f;
@@ -3717,7 +3714,6 @@ int entry(int argc, char **argv) {
 	world_save_to_disk();
 
 	float64 seconds_counter = 0.0;
-	s32 frame_count = 0;
 
 	float64 last_time = os_get_elapsed_seconds();
 	while (!window.should_close) {

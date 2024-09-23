@@ -3206,16 +3206,23 @@ void update_meteor(Entity* en) {
 		}
 
 		// spawn in new resources
+		int ice_count = 0;
 		for (int i = 0; i < get_random_int_in_range(3, 5); i++) {
 			
 			// :meteor drops 
 			ArchetypeWeight weights[] = {
-				{ARCH_ice_vein, 2},
+				{ARCH_ice_vein, 1},
 				{ARCH_coal_depo, 2},
-				{ARCH_rock, 4},
+				{ARCH_rock, 3},
 			};
 
 			ArchetypeID arch = random_weighted_archetype(weights, ARRAY_COUNT(weights));
+			if (ice_count < 1) {
+				arch = ARCH_ice_vein;
+			}
+			if (arch == ARCH_ice_vein) {
+				ice_count += 1;
+			}
 
 			Vector2 spawn_pos;
 			bool found_pos = false;
@@ -4005,8 +4012,13 @@ int entry(int argc, char **argv) {
 				int iterations = 0;
 				while (true) {
 
+					float max_spawn_radius = 10.f;
+					if (iterations > 10) {
+						max_spawn_radius = 150.f;
+					}
+
 					spawn_pos = get_player()->pos;
-					spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, 40.f)));
+					spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, max_spawn_radius)));
 
 					float spawn_safe_zone_radius = tile_width * 8 + get_archetype_data(ARCH_meteor).radius;
 					if (fabsf(v2_length(spawn_pos)) > spawn_safe_zone_radius) {

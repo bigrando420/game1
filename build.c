@@ -9,7 +9,7 @@
 
 #define INITIAL_PROGRAM_MEMORY_SIZE MB(5)
 
-#define ENABLE_PROFILING 1
+// #define ENABLE_PROFILING 1
 
 // You might want to increase this if you get a log warning saying the temporary storage was overflown.
 // In many cases, overflowing the temporary storage should be fine since it just wraps back around and

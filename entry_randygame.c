@@ -366,6 +366,7 @@ typedef enum SpriteID {
 	SPRITE_turret,
 	SPRITE_bullet,
 	SPRITE_enemy_nest,
+	SPRITE_red_core,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -420,6 +421,7 @@ typedef enum ItemID {
 	ITEM_o2_emitter,
 	ITEM_turret,
 	ITEM_bullet,
+	ITEM_red_core,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -957,6 +959,8 @@ void setup_enemy1(Entity* en) {
 	en->has_physics = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), enemy_size);
 	en->is_enemy = true;
+	en->drops_count = 1;
+	en->drops[0] = (ItemAmount){ITEM_red_core, 1};
 	entity_max_health_setter(en, 20);
 }
 
@@ -971,6 +975,7 @@ void setup_o2_emitter(Entity* en) {
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
 	en->wall_seal = true;
 	en->enemy_target = true;
+	entity_max_health_setter(en, 3);
 }
 
 void setup_wall(Entity* en) {
@@ -996,7 +1001,7 @@ void setup_iron_depo(Entity* en) {
 	en->arch = ARCH_iron_depo;
 	en->pretty_name = STR("Iron Deposit");
 	en->tile_size = v2i(2, 1);
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_iron_depo;
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
@@ -1010,7 +1015,7 @@ void setup_coal_depo(Entity* en) {
 	en->arch = ARCH_coal_depo;
 	en->pretty_name = STR("Coal Deposit");
 	en->tile_size = v2i(2, 1);
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_coal_depo;
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
@@ -1037,6 +1042,7 @@ void setup_burner_drill(Entity* en) {
 	en->interactable_entity = true;
 	en->has_collision = true;
 	en->enemy_target = true;
+	entity_max_health_setter(en, 3);
 }
 
 void setup_tile_resource(Entity* en) {
@@ -1048,7 +1054,7 @@ void setup_ice_vein(Entity* en) {
 	en->pretty_name = STR("Oxygen Vein");
 	en->arch = ARCH_ice_vein;
 	en->sprite_id = SPRITE_ice_vein;
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, ice_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1091,7 +1097,7 @@ void setup_grass(Entity* en) {
 	en->pretty_name = STR("Grass");
 	en->arch = ARCH_grass;
 	en->sprite_id = SPRITE_grass;
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, grass_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1104,7 +1110,7 @@ void setup_flint_depo(Entity* en) {
 	en->arch = ARCH_flint_depo;
 	en->tile_size = v2i(2, 1);
 	en->sprite_id = SPRITE_flint_depo;
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, flint_depo_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1117,7 +1123,7 @@ void setup_copper_depo(Entity* en) {
 	en->pretty_name = STR("Copper Deposit");
 	en->arch = ARCH_copper_depo;
 	en->sprite_id = SPRITE_copper_depo;
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, copper_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
@@ -1151,6 +1157,7 @@ void setup_furnace(Entity* en) {
 	en->sprite_id = SPRITE_furnace;
 	en->interactable_entity = true;
 	en->has_collision = true;
+	entity_max_health_setter(en, 3);
 }
 
 void setup_workbench(Entity* en) {
@@ -1188,7 +1195,7 @@ void setup_player(Entity* en) {
 void setup_rock(Entity* en) {
 	en->pretty_name = STR("Rock");
 	en->arch = ARCH_rock;
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_rock0;
 	entity_max_health_setter(en, rock_health);
 	en->destroyable_world_item = true;
@@ -1200,7 +1207,7 @@ void setup_rock(Entity* en) {
 void setup_tree(Entity* en) {
 	en->arch = ARCH_tree;
 	en->pretty_name = STR("Pine Tree");
-	en->destroyable_by_explosion = true;
+	// en->destroyable_by_explosion = true;
 	en->tile_size = v2i(2, 2);
 	en->offset_based_on_tile_height = true;
 	en->sprite_id = SPRITE_tree1;
@@ -1555,7 +1562,11 @@ Range2f get_entity_range(Entity* en) {
 }
 
 void do_entity_exp_drops(Entity* en) {
-	for (int i = 0; i < get_random_int_in_range(2, 3); i++) {
+	int exp_amount = 3;
+	if (en->is_enemy) {
+		exp_amount = 8;
+	}
+	for (int i = 0; i < get_random_int_in_range(exp_amount-1, exp_amount); i++) {
 		Entity* orb = entity_create();
 		setup_exp_orb(orb);
 		orb->pos = en->pos;
@@ -1572,11 +1583,33 @@ void do_entity_drops(Entity* en) {
 	// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
 	growing_array_init_reserve((void**)&drops, sizeof(ItemID), 2, get_temporary_allocator());
 
-	// drops from entity data
-	for (int i = 0; i < en->drops_count; i++) {
-		ItemAmount drop = en->drops[i];
-		for (int j = 0; j < drop.amount; j++) {
-			growing_array_add((void**)&drops, &drop.id);
+	if (en->drops_count) {
+		// drops from entity data
+		for (int i = 0; i < en->drops_count; i++) {
+			ItemAmount drop = en->drops[i];
+			for (int j = 0; j < drop.amount; j++) {
+				growing_array_add((void**)&drops, &drop.id);
+			}
+		}
+	}
+
+	if (en->right_click_remove) {
+
+		// drop building stuff
+		ItemData item_data = get_item_data(en->item_id);
+		for (int i = 0; i < item_data.ingredients_count; i++) {
+			ItemAmount drop = item_data.ingredients[i];
+			for (int j = 0; j < drop.amount; j++) {
+				growing_array_add((void**)&drops, &drop.id);
+			}
+		}
+
+		for (int j = 0; j < en->input0.amount; j++) {
+			growing_array_add((void**)&drops, &en->input0.id);
+		}
+
+		for (int j = 0; j < en->input1.amount; j++) {
+			growing_array_add((void**)&drops, &en->input1.id);
 		}
 	}
 
@@ -3165,6 +3198,8 @@ void update_meteor(Entity* en) {
 					if (against->arch == ARCH_player) {
 						against->oxygen = 0;
 					} else {
+						do_entity_drops(against);
+						entity_zero_immediately(against);
 					}
 				}
 			}
@@ -3303,9 +3338,11 @@ void update_turret(Entity* en) {
 				}
 			}
 
-			closest_enemy->health -= 3;
+			closest_enemy->health -= 20;
 			if (closest_enemy->health <= 0) {
 				// kill
+				do_entity_drops(closest_enemy);
+				do_entity_exp_drops(closest_enemy);
 				entity_zero_immediately(closest_enemy);
 			}
 		} else {
@@ -3367,7 +3404,7 @@ void render_turret(Entity* en) {
 // :enemy
 void update_enemy(Entity* en) {
 
-	float enemy_agro_radius = 100.f;
+	float enemy_agro_radius = 70.f;
 
 	// find nearest natural target
 	Entity* nearest_target = 0;
@@ -3381,7 +3418,7 @@ void update_enemy(Entity* en) {
 			}
 
 			float dist = v2_dist(against->pos, en->pos);
-			bool should_agro = dist < enemy_agro_radius || is_night();
+			bool should_agro = dist < enemy_agro_radius || is_night() || en->is_agro;
 
 			if (should_agro && (!nearest_target || nearest_target_distance > dist)) {
 				nearest_target = against;
@@ -3394,6 +3431,7 @@ void update_enemy(Entity* en) {
 	Entity* target_en = get_nil_entity();
 	if (nearest_target) {
 		target_en = nearest_target;
+		en->is_agro = true; // perma agro
 	}
 
 	en->frame.target_en = target_en;
@@ -3411,7 +3449,7 @@ void update_enemy(Entity* en) {
 
 	if (target_en->is_valid) {
 
-		if (v2_dist(target_en->pos, en->pos) < 20.f) {
+		if (v2_dist(target_en->pos, en->pos) < 16.f) {
 			// attacc hard
 			en->move_speed = 300.f;
 		}
@@ -3441,6 +3479,7 @@ void update_enemy(Entity* en) {
 				} else {
 					target_en->health -= 1;
 					if (target_en->health <= 0) {
+						do_entity_drops(target_en);
 						entity_zero_immediately(target_en);
 					}
 				}
@@ -3524,6 +3563,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_turret] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/turret.png"), get_heap_allocator())};
 		sprites[SPRITE_bullet] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/bullet.png"), get_heap_allocator())};
 		sprites[SPRITE_enemy_nest] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/enemy_nest.png"), get_heap_allocator())};
+		sprites[SPRITE_red_core] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/red_core.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -3550,6 +3590,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item resources
+		item_data[ITEM_red_core] = (ItemData){ .pretty_name=STR("Æ█Ξ2vX Core"), .icon=SPRITE_red_core};
 		item_data[ITEM_iron_ingot] = (ItemData){ .pretty_name=STR("Iron Ingot"), .icon=SPRITE_iron_ingot};
 		item_data[ITEM_raw_iron] = (ItemData){ .pretty_name=STR("Raw Iron"), .icon=SPRITE_raw_iron, .furnace_transform_into=ITEM_iron_ingot};
 		item_data[ITEM_o2_shard] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_o2_shard};
@@ -3626,24 +3667,25 @@ int entry(int argc, char **argv) {
 
 		// :item :buildings
 
+		// :turret
 		item_data[ITEM_turret] = (ItemData){
 			.to_build=ARCH_turret,
 			.icon=SPRITE_turret,
 			.description=STR("Shoot bullets at nearby enemies"),
-			.exp_cost=100,
-			.ingredients_count=2,
-			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 2} }
+			.exp_cost=50,
+			.ingredients_count=3,
+			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 2}, {ITEM_red_core, 1} }
 		};
 		// these need to be a package deal...
 		item_data[ITEM_bullet] = (ItemData){
-			.pretty_name=STR("Iron Bullet"),
+			.pretty_name=STR("Bullet"),
 			.description=STR("Ammo for turrets"),
 			.icon=SPRITE_bullet,
-			.exp_cost=100,
+			.exp_cost=50,
 			.used_in_turret=true,
 			.ingredients_count=1,
 			.ingredients={
-				{ITEM_iron_ingot, 1},
+				{ITEM_red_core, 1},
 			},
 		};
 
@@ -3684,7 +3726,9 @@ int entry(int argc, char **argv) {
 			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
 		};
 
+		// :burner
 		item_data[ITEM_burner_drill] = (ItemData){
+			.disabled=true,
 			.to_build=ARCH_burner_drill,
 			.icon=SPRITE_burner_drill,
 			.description=STR("Burns coal to hit things"),
@@ -3693,13 +3737,14 @@ int entry(int argc, char **argv) {
 			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 6} }
 		};
 
+		// :tether
 		item_data[ITEM_tether] = (ItemData){
 			.to_build=ARCH_tether,
 			.icon=SPRITE_tether,
 			.description=STR("Extends oxygen range"),
 			.exp_cost=50,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_copper_ingot, 1}, {ITEM_fiber, 4} }
+			.ingredients={ {ITEM_copper_ingot, 1}, {ITEM_fiber, 8} }
 		};
 
 		item_data[ITEM_furnace] = (ItemData){
@@ -4640,6 +4685,17 @@ int entry(int argc, char **argv) {
 							setup_item(drop, selected_en->item_id);
 							drop->pos = selected_en->pos;
 
+							for (int j = 0; j < selected_en->input0.amount; j++) {
+								Entity* drop = entity_create();
+								setup_item(drop, selected_en->input0.id);
+								drop->pos = selected_en->pos;
+							}
+							for (int j = 0; j < selected_en->input1.amount; j++) {
+								Entity* drop = entity_create();
+								setup_item(drop, selected_en->input1.id);
+								drop->pos = selected_en->pos;
+							}
+
 							entity_zero_immediately(selected_en);
 						} else {
 							play_sound("event:/error");
@@ -4948,7 +5004,9 @@ int entry(int argc, char **argv) {
 		seconds_counter += delta_t;
 		frame_count += 1;
 		if (seconds_counter > 1.0) {
+			#if ENABLE_PROFILING
 			log("fps: %i", frame_count);
+			#endif
 			seconds_counter = 0.0;
 			frame_count = 0;
 		}

@@ -708,7 +708,7 @@ Vector4 biome_col_hex_to_rgba(u32 col) {
 	return (Vector4){r/255.0, g/255.0, b/255.0, 1};
 }
 
-Tile local_map_to_world_tile(Vector2i local) {
+inline Tile local_map_to_world_tile(Vector2i local) {
 	int x_index = local.x - floor((float)map.width * 0.5);
 	int y_index = local.y - floor((float)map.height * 0.5);
 	return (Tile){x_index, y_index};
@@ -722,9 +722,8 @@ Vector2i world_tile_to_local_map(Tile world) {
 	return (Vector2i){x_index, y_index};
 }
 
-int local_map_pos_to_index(Vector2i local_map) {
-	int index = local_map.y * map.width + local_map.x;
-	return index;
+inline int local_map_pos_to_index(Vector2i local_map) {
+	return local_map.y * map.width + local_map.x;
 }
 
 void init_biome_maps() {
@@ -1689,23 +1688,24 @@ void create_tile_entity_pair_cache() {
 		return;
 	}
 
-	world_frame.tile_entity_cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
+	tm_scope("allocs")
+	{
+		world_frame.tile_entity_cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
+		TileEntityCache* cache = world_frame.tile_entity_cache;
+		cache->tile_count = map.height * map.width;
+		cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
+	}
 
 	TileEntityCache* cache = world_frame.tile_entity_cache;
 
-	cache->tile_count = map.height * map.width;
-	cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
-
+	tm_scope("store tiles")
 	for (int y = 0; y < map.height; y++)
 	for (int x = 0; x < map.width; x++) {
 		TileCache* tc = &cache->tiles[local_map_pos_to_index(v2i(x, y))];
 		tc->world_tile = local_map_to_world_tile(v2i(x, y));
-
-		Vector2i tile = local_map_to_world_tile(v2i(x, y));
-		tile = world_tile_to_local_map(tile);
-		assert(tile.x == x && tile.y == y);
 	}
 
+	tm_scope("add enttiy to tile cache")
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* en = &world->entities[i];
 		add_new_entity_to_tile_cache(en);
@@ -3759,7 +3759,10 @@ int entry(int argc, char **argv) {
 	float64 seconds_counter = 0.0;
 
 	float64 last_time = os_get_elapsed_seconds();
-	while (!window.should_close) {
+	
+	while (!window.should_close)
+	tm_scope("frame")
+	{
 		reset_temporary_storage();
 		world_frame = (WorldFrame){0};
 		float64 current_time = os_get_elapsed_seconds();
@@ -3783,6 +3786,7 @@ int entry(int argc, char **argv) {
 		app_frame = (AppFrame){0};
 
 		// :world update
+		tm_scope("world update")
 		{
 			world->tick_count += 1;
 			world->time_elapsed += delta_t;
@@ -3983,6 +3987,7 @@ int entry(int argc, char **argv) {
 
 		// nests need to be updated prior, beacuse they spawn the enemies
 		// enemies need to be updated later to ensure there's at least a nil target, otherwise we crash
+		tm_scope("enemy update")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
@@ -3994,6 +3999,7 @@ int entry(int argc, char **argv) {
 
 		// :update entities
 		Entity* player = get_player();
+		tm_scope("entity update")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
@@ -4195,6 +4201,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// :physics update
+		tm_scope("physics")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (!en->is_valid || !en->has_physics) {
@@ -4345,6 +4352,7 @@ int entry(int argc, char **argv) {
 		#endif
 
 		// for each o2 emitter, run through neighboring wall seals, making them powered
+		tm_scope("power algo")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid && en->arch == ARCH_o2_emitter && en->frame.is_powered) {
@@ -4385,6 +4393,7 @@ int entry(int argc, char **argv) {
 
 		// figure out if the player is inside
 		bool is_inside = true;
+		tm_scope("room flood fill")
 		{
 			Vector2i* stack;
 			growing_array_init_reserve((void**)&stack, sizeof(Vector2i), map.width*map.height, get_temporary_allocator());
@@ -4641,6 +4650,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// :render entities
+		tm_scope("push render entities")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
@@ -4860,8 +4870,11 @@ int entry(int argc, char **argv) {
 			// draw_rect(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y) + tile_width * -0.5), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5));
 		}
 
-		particle_update();
-		particle_render();
+		tm_scope("particle update n render")
+		{
+			particle_update();
+			particle_render();
+		}
 
 		// player :hud
 		if (is_player_alive())
@@ -4926,14 +4939,22 @@ int entry(int argc, char **argv) {
 		}
 		draw_frame.cbuffer = &cbuffer;
 
-		gfx_update();
-		fmod_update();
+		tm_scope("gfx_update") {
+			gfx_update();
+		}
+		tm_scope("fmod update") {
+			fmod_update();
+		}
 		seconds_counter += delta_t;
 		frame_count += 1;
 		if (seconds_counter > 1.0) {
-			// log("fps: %i", frame_count);
+			log("fps: %i", frame_count);
 			seconds_counter = 0.0;
 			frame_count = 0;
+		}
+
+		if (is_key_just_pressed('P')) {
+			dump_profile_result();
 		}
 
 		// load/save commands

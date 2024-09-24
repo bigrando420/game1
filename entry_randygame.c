@@ -367,6 +367,7 @@ typedef enum SpriteID {
 	SPRITE_bullet,
 	SPRITE_enemy_nest,
 	SPRITE_red_core,
+	SPRITE_large_ice_vein,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -466,6 +467,7 @@ typedef enum ArchetypeID {
 	ARCH_turret = 27,
 	ARCH_meteor = 28,
 	ARCH_enemy_nest = 29,
+	ARCH_large_ice_vein = 30,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -519,6 +521,12 @@ typedef struct EntityHandle {
 	int index;
 } EntityHandle;
 
+typedef enum GameError {
+	GAME_ERR_nil,
+	GAME_ERR_no_room_in_destination,
+	GAME_ERR_no_fuel,
+} GameError;
+
 typedef struct Entity Entity; // needs forward declare
 typedef struct EntityFrame {
 	Entity** connected_to_tethers;
@@ -530,6 +538,7 @@ typedef struct EntityFrame {
 	bool is_creation;
 	bool did_shoot;
 	bool is_awake;
+	GameError error;
 	// :frame
 } EntityFrame;
 
@@ -569,8 +578,10 @@ typedef struct Entity {
 	float64 pick_up_cooldown_end_time;
 	float white_flash_current_alpha;
 	int exp_amount;
+	// todo - turn this into an array, that way we can loop thru it and not have the drops break
 	ItemAmount input0;
 	ItemAmount input1;
+	ItemAmount output0;
 	int anim_index;
 	float64 time_til_next_frame;
 	Vector2i last_move_dir;
@@ -581,7 +592,9 @@ typedef struct Entity {
 	int current_fuel;
 	bool offset_based_on_tile_height;
 	ItemID current_crafting_item;
-	int progress_on_crafting; // this goes up to 100
+	int progress_on_crafting; // this goes up to 100 (deprecated)
+	int progress; // use this now
+	int progress_max;
 	float64 next_crafting_progress_tick_end_time;
 	bool has_collision;
 	Range2f collision_bounds;
@@ -600,6 +613,9 @@ typedef struct Entity {
 	bool enemy_target;
 	bool destroyable_by_explosion;
 	EntityHandle spawned_from;
+	ItemID big_resource_drop;
+	bool hover_for_info;
+	s32 z_layer;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -925,6 +941,19 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 // :arch :setup things
 
+void setup_large_ice_vein(Entity* en) {
+	en->pretty_name = STR("Large Ice Vein");
+	en->arch = ARCH_large_ice_vein;
+	en->sprite_id = SPRITE_large_ice_vein;
+	en->big_resource_drop = ITEM_o2_shard;
+	entity_max_health_setter(en, 1);
+	en->destroyable_world_item = false;
+	en->hover_for_info = true;
+	en->dmg_type = DMG_pickaxe;
+	en->has_collision = true;
+	en->tile_size = v2i(3, 2);
+}
+
 // :nest
 void setup_enemy_nest(Entity* en) {
 	en->arch = ARCH_enemy_nest;
@@ -1032,17 +1061,17 @@ void setup_longboi_test(Entity* en) {
 	en->sprite_id = SPRITE_longboi_test;
 }
 
+// :burner 
 void setup_burner_drill(Entity* en) {
 	en->arch = ARCH_burner_drill;
-	en->pretty_name = STR("Thumper");
-	en->tile_size = v2i(2, 2);
+	en->pretty_name = STR("Burner Drill");
+	en->tile_size = v2i(1, 1);
 	en->destroyable_by_explosion = true;
 	en->sprite_id = SPRITE_burner_drill;
-	en->radius = tile_width * 6;
 	en->interactable_entity = true;
 	en->has_collision = true;
 	en->enemy_target = true;
-	entity_max_health_setter(en, 3);
+	entity_max_health_setter(en, 5);
 }
 
 void setup_tile_resource(Entity* en) {
@@ -1265,6 +1294,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_turret: setup_turret(en); break;
 		case ARCH_meteor: setup_meteor(en); break;
 		case ARCH_enemy_nest: setup_enemy_nest(en); break;
+		case ARCH_large_ice_vein: setup_large_ice_vein(en); break;
 		// :arch :setup
 	}
 }
@@ -1418,6 +1448,10 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+Vector4 get_red_error_col_override() {
+	return v4(1, 0, 0, 0.8 * sin_breathe(os_get_elapsed_seconds(), 6.f));
+}
+
 Range2f get_world_rect() {
 	float width = map.width * tile_width;
 	float height = map.height * tile_width;
@@ -1516,7 +1550,10 @@ Range2f get_entity_collision_bounds(Entity* en) {
 	Range2f bounds = en->collision_bounds;
 	if (almost_equals(range2f_size(bounds).x, 0, 0.1) || almost_equals(range2f_size(bounds).y, 0, 0.1)) {
 		// auto-gen bounds from sprite size
-		bounds = range2f_make_center_center(v2(0,0), get_sprite_size(get_sprite(en->sprite_id)));
+		// bounds = range2f_make_center_center(v2(0,0), get_sprite_size(get_sprite(en->sprite_id)));
+
+		// gen from tile size instead?
+		bounds = range2f_make_center_center(v2(0,0), v2(en->tile_size.x * tile_width, en->tile_size.y * tile_width));
 	}
 	return bounds;
 }
@@ -1541,23 +1578,29 @@ Vector2 snap_position_to_nearest_tile_based_on_arch(Vector2 pos, ArchetypeID id)
 	return pos;
 }
 
-Vector2 get_offset_for_rendering(Entity* en) {
-	Sprite* sprite = get_sprite(en->sprite_id);
+Vector2 get_offset_for_rendering(ArchetypeID id) {
+	Entity en = get_archetype_data(id);
+
+	Sprite* sprite = get_sprite(en.sprite_id);
 
 	Vector2 offset = {0};
 	offset.x -= get_sprite_size(sprite).x * 0.5;
 
-	if (en->offset_based_on_tile_height) {
-		offset.y -= en->tile_size.y * tile_width * 0.5;
+	if (en.offset_based_on_tile_height) {
+		offset.y -= en.tile_size.y * tile_width * 0.5;
 	} else {
 		offset.y -= get_sprite_size(sprite).y * 0.5;
+	}
+
+	if (en.arch == ARCH_burner_drill) {
+		offset.x = tile_width * -0.5;
 	}
 
 	return offset;
 }
 
 Range2f get_entity_range(Entity* en) {
-	Vector2 bottom_left = v2_add(en->pos, get_offset_for_rendering(en));
+	Vector2 bottom_left = v2_add(en->pos, get_offset_for_rendering(en->arch));
 	return (Range2f){ bottom_left, v2_add(bottom_left, get_sprite_size(get_sprite(en->sprite_id))) };
 }
 
@@ -1576,6 +1619,14 @@ void do_entity_exp_drops(Entity* en) {
 		orb->velocity = v2_mulf(orb->velocity, get_random_float32_in_range(100, 200));
 		orb->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.4, 0.6);
 	}
+}
+
+void drop_item_at_pos(ItemID drop_id, Vector2 pos) {
+	Entity* drop = entity_create();
+	setup_item(drop, drop_id);
+	drop->pos = pos;
+	drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
+	drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
 }
 
 void do_entity_drops(Entity* en) {
@@ -1863,9 +1914,10 @@ void world_setup() {
 	#if defined(DEV_TESTING)
 	{
 		en = entity_create();
-		setup_meteor(en);
+		setup_large_ice_vein(en);
 		en->pos.x = 50;
 		en->pos.y = 20;
+		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
 
 		player_en->exp_amount = 1000;
 		
@@ -2203,47 +2255,118 @@ void do_world_entity_interaction_ui_stuff() {
 	// :burner ux
 	if (en->arch == ARCH_burner_drill) {
 
+		float slot_size = 10;
+
 		float x0 = en->pos.x;
 		float y0 = en->pos.y;
-		y0 += 10.f;
 
-		Vector2 size = v2(10, 10);
-		x0 -= size.x * 0.5;
+		Range2f render_range = get_entity_range(en);
 
-		Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
+		// fuel input & bar
+		{
+			x0 -= slot_size * 0.5;
 
-		ItemID* desired_items;
-		growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
-		ItemID desired_item = ITEM_coal;
-		growing_array_add((void**)&desired_items, &desired_item);
+			y0 = render_range.min.y - 1;
 
-		input_slot(rect, &en->input0, desired_items);
+			y0 -= slot_size;
 
-		if (!en->input0.id) {
-			Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
+			Range2f rect = range2f_make_bottom_left(v2(x0, y0), v2(slot_size, slot_size));
 
-			if (en->current_fuel == 0) {
-				set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
-			} else {
-				set_col_override(quad, v4(0,0,0, 0.8));
+			ItemID* desired_items;
+			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
+			ItemID desired_item = ITEM_coal;
+			growing_array_add((void**)&desired_items, &desired_item);
+
+			input_slot(rect, &en->input0, desired_items);
+
+			if (!en->input0.id) {
+				Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
+
+				if (en->last_frame.error == GAME_ERR_no_fuel) {
+					set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
+				} else {
+					set_col_override(quad, v4(0,0,0, 0.8));
+				}
+			}
+			// fuel bar
+			{
+				x0 += slot_size + 1.f;
+
+				Vector2 bar_size = v2(2, slot_size);
+
+				draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+
+				float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
+
+				draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
 			}
 		}
 
-		// fuel bar
+		// drill output
 		{
-			x0 += size.x + 1.f;
+			x0 = en->pos.x;
+			y0 = en->pos.y;
 
-			Vector2 bar_size = v2(2, size.y);
+			x0 -= slot_size * 0.5;
 
-			draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+			y0 = render_range.max.y + 1.f;
 
-			float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
+			// progress bar
+			{
+				Vector2 bar_size = v2(slot_size, 2);
 
-			draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
+				draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+
+				float alpha = float_alpha(en->progress, 0, en->progress_max);
+
+				draw_rect(v2(x0, y0), v2(bar_size.x * alpha, bar_size.y), col_oxygen);
+
+				y0 += bar_size.y + 1;
+			}
+
+			Range2f rect = range2f_make_bottom_left(v2(x0, y0), v2(slot_size, slot_size));
+
+			// output slot
+			{
+				ItemAmount* slot = &en->output0;
+
+				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+					// interact with the slot
+					{
+						if (world->mouse_cursor_item.id) {
+							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+								play_sound("event:/error");
+							}
+						} else {
+							if (slot->id) {
+								if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+									// take into hand
+									world->mouse_cursor_item = *slot;
+									*slot = (ItemAmount){0};
+								}
+
+								item_tooltip(*slot);
+							}
+						}
+					}
+				}
+
+				Draw_Quad* q = draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+				if (en->last_frame.error == GAME_ERR_no_room_in_destination) {
+					set_col_override(q, get_red_error_col_override());
+				}
+
+				if (slot->id) {
+					draw_item_amount_in_rect(*slot, rect);
+				}
+			}
+
 		}
 	}
 
-	// :furance ux
+	// :furnace ux
 	if (en->arch == ARCH_furnace) {
 
 		float x0 = en->pos.x;
@@ -2252,7 +2375,7 @@ void do_world_entity_interaction_ui_stuff() {
 		// fuel input
 		Vector2 slot_size = v2(10, 10);
 		x0 -= slot_size.x * 0.5;
-		y0 += get_offset_for_rendering(en).y;
+		y0 += get_offset_for_rendering(en->arch).y;
 		y0 -= slot_size.x + 1.f;
 		{
 
@@ -3006,19 +3129,20 @@ void do_ui_stuff() {
 			}
 
 			// range preview
-			if (arch_id == ARCH_burner_drill)
-			{
-				float radius = get_archetype_data(arch_id).radius;
+			// if (arch_id == ARCH_burner_drill)
+			// {
+				// float radius = get_archetype_data(arch_id).radius;
 				// #polish - make this an outline, copy custom shader example
-				draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.1));
-			}
+				// draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.1));
+			// }
 
 			// draw preview
 			{
 				Matrix4 xform = m4_identity;
 				Vector2 sprite_size = get_sprite_size(icon);
-				xform = m4_translate(xform, v3(pos.x, pos.y, 0));
-				xform = m4_translate(xform, v3(sprite_size.x * -0.5, sprite_size.y * -0.5, 0));
+				// #volatile with entity rendering
+				Vector2 draw_pos = v2_add(pos, get_offset_for_rendering(arch_id));
+				xform = m4_translate(xform, v3(draw_pos.x, draw_pos.y, 0));
 
 				Vector4 col_override = {0};
 				if (!has_room_to_place) {
@@ -3092,7 +3216,7 @@ void draw_base_sprite(Entity* en) {
 
 	// all entities basically have a center center position
 	// that way the ->pos is very easily used in other areas intuitively.
-	Vector2 draw_pos = v2_add(en->pos, get_offset_for_rendering(en));
+	Vector2 draw_pos = v2_add(en->pos, get_offset_for_rendering(en->arch));
 	xform = m4_translate(xform, v3(draw_pos.x, draw_pos.y, 0));
 
 	Vector4 col = COLOR_WHITE;
@@ -3116,7 +3240,7 @@ void draw_base_sprite(Entity* en) {
 	set_col_override(q, v4(1, 1, 1, en->white_flash_current_alpha));
 
 	// :error flash
-	bool do_error_flash = false;
+	bool do_error_flash = en->last_frame.error;
 	// :burner drill
 	if (en->arch == ARCH_burner_drill && en->current_fuel == 0) {
 		do_error_flash = true;
@@ -3211,13 +3335,12 @@ void update_meteor(Entity* en) {
 			
 			// :meteor drops 
 			ArchetypeWeight weights[] = {
-				{ARCH_ice_vein, 1},
 				{ARCH_coal_depo, 2},
 				{ARCH_rock, 3},
 			};
 
 			ArchetypeID arch = random_weighted_archetype(weights, ARRAY_COUNT(weights));
-			if (ice_count < 1) {
+			if (ice_count < 2) {
 				arch = ARCH_ice_vein;
 			}
 			if (arch == ARCH_ice_vein) {
@@ -3265,7 +3388,7 @@ void render_meteor(Entity* en) {
 
 	float alpha = alpha_from_end_time(en->next_hit_end_time, meteor_strike_length);
 
-	float radius = en->radius * ease_in_exp(alpha, 20);
+	float radius = en->radius * ease_in_exp(alpha, 8);
 
 	Vector2 draw_pos = en->pos;
 	draw_pos.x -= radius;
@@ -3571,6 +3694,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_bullet] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/bullet.png"), get_heap_allocator())};
 		sprites[SPRITE_enemy_nest] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/enemy_nest.png"), get_heap_allocator())};
 		sprites[SPRITE_red_core] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/red_core.png"), get_heap_allocator())};
+		sprites[SPRITE_large_ice_vein] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/large_ice_vein.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -3706,13 +3830,14 @@ int entry(int argc, char **argv) {
 		};
 
 		// note, this should go into a "Shelter #1" grouped research unlock thingo
+		// :wall
 		item_data[ITEM_wall_gate] = (ItemData){
 			.to_build=ARCH_wall_gate,
 			.icon=SPRITE_wall_gate,
 			.description=STR("Allows travel into a sealed room"),
 			.exp_cost=50,
 			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 1}, }
+			.ingredients={ {ITEM_rock, 1}, }
 		};
 		item_data[ITEM_wall] = (ItemData){
 			.to_build=ARCH_wall,
@@ -3720,7 +3845,7 @@ int entry(int argc, char **argv) {
 			.description=STR("Can be used to build a sealed Oxygen room"),
 			.exp_cost=50,
 			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 1} }
+			.ingredients={ {ITEM_rock, 1} }
 		};
 
 		item_data[ITEM_longboi_test] = (ItemData){
@@ -3735,13 +3860,12 @@ int entry(int argc, char **argv) {
 
 		// :burner
 		item_data[ITEM_burner_drill] = (ItemData){
-			.disabled=true,
 			.to_build=ARCH_burner_drill,
 			.icon=SPRITE_burner_drill,
-			.description=STR("Burns coal to hit things"),
+			.description=STR("Burns coal to drill into large veins"),
 			.exp_cost=200,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 6} }
+			.ingredients={ {ITEM_iron_ingot, 4}, {ITEM_rock, 4} }
 		};
 
 		// :tether
@@ -3957,6 +4081,7 @@ int entry(int argc, char **argv) {
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
 				bool has_interaction = en->destroyable_world_item
+					|| en->hover_for_info
 					|| en->interactable_entity
 					|| en->right_click_remove;
 				// add extra :interact cases here ^^
@@ -3982,7 +4107,7 @@ int entry(int argc, char **argv) {
 			if (world_frame.selected_entity) {
 				Entity* en = world_frame.selected_entity;
 
-				// draw basic tooltip in top right
+				// draw basic tooltip
 				defer_scope(set_screen_space(), set_world_space())
 				{
 					float x0 = screen_width * 0.5;
@@ -4001,7 +4126,7 @@ int entry(int argc, char **argv) {
 		// spawn :meteors
 		{
 			if (world->next_meteor_spawn_end_time == 0) {
-				world->next_meteor_spawn_end_time = now() + get_random_float32_in_range(30, 50);
+				world->next_meteor_spawn_end_time = now() + get_random_float32_in_range(100, 120);
 			}
 
 			if (has_reached_end_time(world->next_meteor_spawn_end_time)) {
@@ -4128,8 +4253,8 @@ int entry(int argc, char **argv) {
 					if (en->current_fuel <= 0) {
 						// attempt fuel consume
 						if (en->input0.id) {
-							en->last_fuel_max = 30;
-							en->current_fuel = 30;
+							en->last_fuel_max = 50;
+							en->current_fuel = 50;
 
 							en->input0.amount -= 1;
 							if (en->input0.amount <= 0) {
@@ -4138,40 +4263,39 @@ int entry(int argc, char **argv) {
 						}
 					}
 
+					en->progress_max = 10;
+
 					// hit timer processing
 					if (en->current_fuel > 0) {
 						if (en->next_hit_end_time == 0) {
-							en->next_hit_end_time = now() + 1.f;
+							en->next_hit_end_time = now() + 1.0f;
 						}
-						if (has_reached_end_time(en->next_hit_end_time)) {
-							en->next_hit_end_time = 0;
+						if (en->output0.amount < 2) {
+							if (has_reached_end_time(en->next_hit_end_time)) {
+								en->next_hit_end_time = 0;
 
-							// get all entities in radius
-							bool did_hit_something = false;
-							for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
-								Entity* against = &world->entities[j];
-								if (against->destroyable_world_item && v2_dist(en->pos, against->pos) < en->radius) {
-									did_hit_something = true;
+								en->current_fuel -= 1;
 
-									against->white_flash_current_alpha = 1.0;
-									particle_emit(against->pos, PFX_hit);
-									against->health -= 1;
+								// get tile next to it
+								Tile tile_pos = v2_world_pos_to_tile_pos(en->pos);
+								tile_pos.x += 1;
+								TileCache* tc = tile_cache_at_tile(tile_pos);
+								if (tc->entity && tc->entity->big_resource_drop) {
+									Entity* resource = tc->entity;
 
-									play_sound_at_pos("event:/hit_generic", against->pos);
-
-									if (against->health <= 0) {
-										do_entity_drops(against);
-										do_entity_exp_drops(against);
-										entity_zero_immediately(against);
+									en->progress += 1;
+									if (en->progress >= en->progress_max) {
+										en->output0.id = resource->big_resource_drop;
+										en->output0.amount += 1;
+										en->progress = 0;
 									}
 								}
 							}
-
-							if (did_hit_something) {
-								camera_shake(0.1);
-								en->current_fuel -= 1;
-							}
+						} else {
+							en->frame.error = GAME_ERR_no_room_in_destination;
 						}
+					} else {
+						en->frame.error = GAME_ERR_no_fuel;
 					}
 				}
 
@@ -4653,6 +4777,16 @@ int entry(int argc, char **argv) {
 							} // #extend_dmg_type_here
 
 							selected_en->health -= damage_amount;
+
+							// old idea, probs too overloaded for us to click on it & mine from it with drills...
+							//
+							// drop intermittently
+							// if (selected_en->big_resource_drop && selected_en->health <= 0) {
+							// 	drop_item_at_pos(selected_en->big_resource_drop, selected_en->pos);
+							// 	selected_en->health = selected_en->max_health;
+							// 	camera_shake(0.1);
+							// }
+
 							if (selected_en->health <= 0) {
 								camera_shake(0.1); // shake extra on death
 
@@ -4721,7 +4855,16 @@ int entry(int argc, char **argv) {
 		tm_scope("push render entities")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
-			if (en->is_valid) {
+			if (en->is_valid)
+			{
+				s32 z_layer = en->z_layer;
+				if (z_layer == 0) {
+					z_layer = layer_world;
+					if (en->item_id) {
+						z_layer = layer_buildings;
+					}
+				}
+				push_z_layer(z_layer);
 
 				switch (en->arch) {
 
@@ -4783,7 +4926,7 @@ int entry(int argc, char **argv) {
 					Vector2 draw_pos = en->pos;
 					draw_pos.x -= size.x * 0.5;
 
-					draw_pos.y += get_offset_for_rendering(en).y;
+					draw_pos.y += get_offset_for_rendering(en->arch).y;
 					draw_pos.y -= 2;
 
 					draw_rect(draw_pos, size, COLOR_BLACK);
@@ -4804,6 +4947,8 @@ int entry(int argc, char **argv) {
 					draw_pos = v2_add(draw_pos, en->tether_connection_offset);
 					draw_rect(draw_pos, v2(2, 2), col_oxygen);
 				}
+
+				pop_z_layer();
 			}
 		}
 

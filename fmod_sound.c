@@ -22,7 +22,7 @@ FMOD_STUDIO_EVENTINSTANCE* play_sound_at_pos_with_cooldown(char* path, Vector2 p
 
   // set pos
 	FMOD_3D_ATTRIBUTES attributes;
-	attributes.position = (FMOD_VECTOR){pos.x, pos.y, 0};
+	attributes.position = (FMOD_VECTOR){pos.x, 0, pos.y};
 	attributes.forward = (FMOD_VECTOR){0, 0, 1};
 	attributes.up = (FMOD_VECTOR){0, 1, 0};
 	FMOD_Studio_EventInstance_Set3DAttributes(instance, &attributes);
@@ -55,7 +55,7 @@ void update_sound_position(FMOD_STUDIO_EVENTINSTANCE* instance, Vector2 pos) {
   }
 
   // Update the position
-  attributes.position = (FMOD_VECTOR){pos.x, pos.y, 0};
+  attributes.position = (FMOD_VECTOR){pos.x, 0, pos.y};
 
   // Set the updated 3D attributes back to the sound instance
   ok = FMOD_Studio_EventInstance_Set3DAttributes(instance, &attributes);
@@ -155,7 +155,7 @@ void fmod_update() {
 
   // update listener pos
   FMOD_3D_ATTRIBUTES attributes;
-	attributes.position = (FMOD_VECTOR){get_player()->pos.x, get_player()->pos.y, 0};
+	attributes.position = (FMOD_VECTOR){get_player()->pos.x, 0, get_player()->pos.y};
 	attributes.forward = (FMOD_VECTOR){0, 0, 1};
 	attributes.up = (FMOD_VECTOR){0, 1, 0};
 	ok = FMOD_Studio_System_SetListenerAttributes(fmod_studio_system, 0, &attributes, 0);

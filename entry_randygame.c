@@ -368,6 +368,7 @@ typedef enum SpriteID {
 	SPRITE_enemy_nest,
 	SPRITE_red_core,
 	SPRITE_large_ice_vein,
+	SPRITE_wood_crate,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -423,6 +424,7 @@ typedef enum ItemID {
 	ITEM_turret,
 	ITEM_bullet,
 	ITEM_red_core,
+	ITEM_wood_crate,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -468,6 +470,7 @@ typedef enum ArchetypeID {
 	ARCH_meteor = 28,
 	ARCH_enemy_nest = 29,
 	ARCH_large_ice_vein = 30,
+	ARCH_wood_crate = 31,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -616,6 +619,7 @@ typedef struct Entity {
 	ItemID big_resource_drop;
 	bool hover_for_info;
 	s32 z_layer;
+	bool has_input_storage;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -940,6 +944,15 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 }
 
 // :arch :setup things
+
+void setup_wood_crate(Entity* en) {
+	en->arch = ARCH_wood_crate;
+	en->sprite_id = SPRITE_wood_crate;
+	en->pretty_name = STR("Storage Crate");
+	en->has_collision = true;
+	en->interactable_entity = true;
+	en->has_input_storage = true;
+}
 
 void setup_large_ice_vein(Entity* en) {
 	en->pretty_name = STR("Large Ice Vein");
@@ -1295,6 +1308,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_meteor: setup_meteor(en); break;
 		case ARCH_enemy_nest: setup_enemy_nest(en); break;
 		case ARCH_large_ice_vein: setup_large_ice_vein(en); break;
+		case ARCH_wood_crate: setup_wood_crate(en); break;
 		// :arch :setup
 	}
 }
@@ -2200,7 +2214,7 @@ void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
 	}
 }
 
-// :ui
+// :ui :ux
 void do_world_entity_interaction_ui_stuff() {
 
 	// randy: I'm trying out making this UI be more diagetic and in the world.
@@ -2221,6 +2235,8 @@ void do_world_entity_interaction_ui_stuff() {
 	push_z_layer(layer_ui);
 
 	Entity* en = entity_from_handle(world->interacting_with_entity);
+
+	float slot_size = 10.f;
 
 	// :oxygenerator ui
 	if (en->arch == ARCH_oxygenerator) {
@@ -2490,6 +2506,69 @@ void do_world_entity_interaction_ui_stuff() {
 			}
 		}
 
+	}
+
+	// :storage ux
+	if (en->arch == ARCH_wood_crate) {
+		// slot_size.x;
+
+		float x0 = en->pos.x;
+		float y0 = en->pos.y;
+
+		x0 -= slot_size * 0.5;
+		y0 = get_entity_range(en).max.y + 1.f;
+
+		{
+			Range2f rect = range2f_make_bottom_left(v2(x0, y0), v2(slot_size, slot_size));
+
+			ItemAmount* slot = &en->input0;
+
+			if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+				if (world->mouse_cursor_item.id) {
+					if (slot->id) {
+						if (slot->id == world->mouse_cursor_item.id) {
+							// attempt stack
+							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+								slot->amount += world->mouse_cursor_item.amount;
+								world->mouse_cursor_item = (ItemAmount){0};
+							}
+						} else {
+							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+								// swap
+								ItemAmount temp = world->mouse_cursor_item;
+								world->mouse_cursor_item = *slot;
+								*slot = temp;
+							}
+						}
+					} else {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							*slot = world->mouse_cursor_item;
+							world->mouse_cursor_item = (ItemAmount){0};
+						}
+					}
+				} else {
+					if (slot->id) {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							// take into hand
+							world->mouse_cursor_item = *slot;
+							*slot = (ItemAmount){0};
+						}
+
+						item_tooltip(*slot);
+					}
+				}
+			}
+
+			draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+
+			if (slot->id) {
+				draw_item_amount_in_rect(*slot, rect);
+			}
+		}
 	}
 
 	pop_z_layer();
@@ -3695,6 +3774,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_enemy_nest] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/enemy_nest.png"), get_heap_allocator())};
 		sprites[SPRITE_red_core] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/red_core.png"), get_heap_allocator())};
 		sprites[SPRITE_large_ice_vein] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/large_ice_vein.png"), get_heap_allocator())};
+		sprites[SPRITE_wood_crate] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/wood_crate.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -3797,6 +3877,15 @@ int entry(int argc, char **argv) {
 		};
 
 		// :item :buildings
+
+		item_data[ITEM_wood_crate] = (ItemData){
+			.to_build=ARCH_wood_crate,
+			.icon=SPRITE_wood_crate,
+			.description=STR("Stores items"),
+			.exp_cost=50,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 2} }
+		};
 
 		// :turret
 		item_data[ITEM_turret] = (ItemData){
@@ -4296,6 +4385,22 @@ int entry(int argc, char **argv) {
 						}
 					} else {
 						en->frame.error = GAME_ERR_no_fuel;
+					}
+
+					// attempt put output slot into inventory beside it.
+					if (en->output0.id) {
+						Tile tile_pos = v2_world_pos_to_tile_pos(en->pos);
+						tile_pos.x -= 1;
+						TileCache* tc = tile_cache_at_tile(tile_pos);
+						if (tc->entity && tc->entity->has_input_storage) {
+							Entity* storage = tc->entity;
+
+							if (storage->input0.id == 0 || storage->input0.id == en->output0.id) {
+								storage->input0.amount += en->output0.amount;
+								storage->input0.id = en->output0.id;
+								en->output0 = (ItemAmount){0};
+							}
+						}
 					}
 				}
 

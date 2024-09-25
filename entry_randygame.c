@@ -44,6 +44,13 @@ Range2f m4_transform_range2f(Matrix4 m, Range2f r) {
 	return r;
 }
 
+typedef enum Direction {
+	DIR_east,
+	DIR_south,
+	DIR_west,
+	DIR_north,
+} Direction;
+
 typedef enum Pivot {
 	PIVOT_bottom_left,
 	PIVOT_bottom_center,
@@ -245,6 +252,7 @@ typedef enum Layers {
 	layer_background = 5,
 	layer_world = 10,
 	layer_buildings,
+	layer_player,
 	layer_ui = 20,
 	layer_tooltip,
 	layer_cursor_item,
@@ -369,6 +377,10 @@ typedef enum SpriteID {
 	SPRITE_red_core,
 	SPRITE_large_ice_vein,
 	SPRITE_wood_crate,
+	SPRITE_conveyor_up,
+	SPRITE_conveyor_down,
+	SPRITE_conveyor_left,
+	SPRITE_conveyor_right,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -425,6 +437,7 @@ typedef enum ItemID {
 	ITEM_bullet,
 	ITEM_red_core,
 	ITEM_wood_crate,
+	ITEM_conveyor,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -471,6 +484,7 @@ typedef enum ArchetypeID {
 	ARCH_enemy_nest = 29,
 	ARCH_large_ice_vein = 30,
 	ARCH_wood_crate = 31,
+	ARCH_conveyor = 32,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -620,6 +634,7 @@ typedef struct Entity {
 	bool hover_for_info;
 	s32 z_layer;
 	bool has_input_storage;
+	Direction dir;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -844,6 +859,7 @@ typedef struct World {
 	float night_alpha;
 	float night_alpha_target;
 	float64 next_meteor_spawn_end_time;
+	Direction cursor_rotate_dir;
 	// :world :state
 } World;
 World* world = 0;
@@ -944,6 +960,13 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 }
 
 // :arch :setup things
+
+void setup_conveyor(Entity* en) {
+	en->arch = ARCH_conveyor;
+	en->pretty_name = STR("Conveyor");
+	en->has_input_storage = true;
+	en->sprite_id = SPRITE_conveyor_right;
+}
 
 void setup_wood_crate(Entity* en) {
 	en->arch = ARCH_wood_crate;
@@ -1222,6 +1245,7 @@ void setup_research_station(Entity* en) {
 
 void setup_player(Entity* en) {
 	en->arch = ARCH_player;
+	en->z_layer = layer_player;
 	en->enemy_target = true;
 	en->destroyable_by_explosion = true;
 	en->move_based_on_input_axis = true;
@@ -1309,6 +1333,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_enemy_nest: setup_enemy_nest(en); break;
 		case ARCH_large_ice_vein: setup_large_ice_vein(en); break;
 		case ARCH_wood_crate: setup_wood_crate(en); break;
+		case ARCH_conveyor: setup_conveyor(en); break;
 		// :arch :setup
 	}
 }
@@ -3187,9 +3212,34 @@ void do_ui_stuff() {
 			// :place building
 			world_frame.hover_consumed = true;
 
-			Sprite* icon = get_sprite(item_data.icon);
+			SpriteID sprite_id = item_data.icon;
 			ArchetypeID arch_id = item_data.to_build;
 			Entity arch_data = get_archetype_data(arch_id);
+
+			if (is_key_just_pressed('R')) {
+				consume_key_just_pressed('R');
+				world->cursor_rotate_dir = world->cursor_rotate_dir + 1;
+				if (world->cursor_rotate_dir > 3) {
+					world->cursor_rotate_dir = 0;
+				}
+			}
+
+			// manual override for conveyor
+			if (arch_id == ARCH_conveyor) {
+				if (world->cursor_rotate_dir == DIR_east) {
+					sprite_id = SPRITE_conveyor_right;
+				} else if (world->cursor_rotate_dir == DIR_south) {
+					sprite_id = SPRITE_conveyor_down;
+				} else if (world->cursor_rotate_dir == DIR_west) {
+					sprite_id = SPRITE_conveyor_left;
+				} else if (world->cursor_rotate_dir == DIR_north) {
+					sprite_id = SPRITE_conveyor_up;
+				} else {
+					sprite_id = 0;
+				}
+			}
+
+			Sprite* icon = get_sprite(sprite_id);
 
 			Vector2 pos = get_mouse_pos_in_world_space();
 			pos = snap_position_to_nearest_tile_based_on_arch(pos, arch_id);
@@ -3264,6 +3314,7 @@ void do_ui_stuff() {
 					en->pos = pos;
 					en->right_click_remove = true;
 					en->item_id = world->mouse_cursor_item.id;
+					en->dir = world->cursor_rotate_dir;
 
 					world->mouse_cursor_item.amount -= 1;
 					if (world->mouse_cursor_item.amount <= 0) {
@@ -3775,6 +3826,10 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_red_core] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/red_core.png"), get_heap_allocator())};
 		sprites[SPRITE_large_ice_vein] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/large_ice_vein.png"), get_heap_allocator())};
 		sprites[SPRITE_wood_crate] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/wood_crate.png"), get_heap_allocator())};
+		sprites[SPRITE_conveyor_up] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_up.png"), get_heap_allocator())};
+		sprites[SPRITE_conveyor_down] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_down.png"), get_heap_allocator())};
+		sprites[SPRITE_conveyor_left] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_left.png"), get_heap_allocator())};
+		sprites[SPRITE_conveyor_right] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_right.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -3877,6 +3932,15 @@ int entry(int argc, char **argv) {
 		};
 
 		// :item :buildings
+
+		item_data[ITEM_conveyor] = (ItemData){
+			.to_build=ARCH_conveyor,
+			.icon=SPRITE_conveyor_right,
+			.description=STR("Moves items"),
+			.exp_cost=50,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 1} }
+		};
 
 		item_data[ITEM_wood_crate] = (ItemData){
 			.to_build=ARCH_wood_crate,
@@ -4274,6 +4338,18 @@ int entry(int argc, char **argv) {
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
+
+				if (en->arch == ARCH_conveyor) {
+					if (en->dir == DIR_east) {
+						en->sprite_id = SPRITE_conveyor_right;
+					} else if (en->dir == DIR_south) {
+						en->sprite_id = SPRITE_conveyor_down;
+					} else if (en->dir == DIR_west) {
+						en->sprite_id = SPRITE_conveyor_left;
+					} else if (en->dir == DIR_north) {
+						en->sprite_id = SPRITE_conveyor_up;
+					}
+				}
 
 				if (en->arch == ARCH_meteor) {
 					update_meteor(en);
@@ -5058,7 +5134,9 @@ int entry(int argc, char **argv) {
 		}
 
 		// render :player
-		if (is_player_alive()) {
+		if (is_player_alive())
+		// scope_z_layer(layer_player)
+		{
 			Entity* en = get_player();
 
 			en->frame.functional_sprite_id = SPRITE_player_idle;

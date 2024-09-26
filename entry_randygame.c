@@ -631,10 +631,10 @@ typedef struct Entity {
 	bool destroyable_by_explosion;
 	EntityHandle spawned_from;
 	ItemID big_resource_drop;
-	bool hover_for_info;
 	s32 z_layer;
 	bool has_input_storage;
 	Direction dir;
+	float64 next_update_end_time;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -709,6 +709,7 @@ WorldResourceData world_resources[] = {
 	{ BIOME_copper_heavy, ARCH_rock, 10 },
 
 	{ BIOME_ice, ARCH_ice_vein, 10 },
+	{ BIOME_ice_heavy, ARCH_large_ice_vein, 10 },
 
 	{ BIOME_iron, ARCH_iron_depo, 6 },
 
@@ -732,7 +733,7 @@ u32 biome_colors[BIOME_MAX] = {
 	0xbf6937, // copper,
 	0xa54b18, // copper heavy
 	0x70d6cd, // ice
-	0x26c9bc, // ice heavy
+	0xa4eee6, // ice heavy
 	0xe49f9f, // iron
 	0xd31f1f, // enemy nest
 	// :biome #volatile
@@ -984,7 +985,6 @@ void setup_large_ice_vein(Entity* en) {
 	en->big_resource_drop = ITEM_o2_shard;
 	entity_max_health_setter(en, 1);
 	en->destroyable_world_item = false;
-	en->hover_for_info = true;
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 	en->tile_size = v2i(3, 2);
@@ -1145,6 +1145,7 @@ void setup_tether(Entity* en) {
 
 void setup_oxygenerator(Entity* en) {
 	en->arch = ARCH_oxygenerator;
+	en->has_input_storage = true;
 	en->pretty_name = STR("Emergency Oxygenerator");
 	en->sprite_id = SPRITE_oxygenerator;
 	en->is_oxygen_tether = true;
@@ -1889,36 +1890,40 @@ void spawn_world_resources() {
 		}
 
 		int iterations = 0;
-		while (true) {
-			// pick from a random spot
-			int count = growing_array_get_valid_count(potential_spawn_tiles);
-			Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
+		int count = growing_array_get_valid_count(potential_spawn_tiles);
+		if (count) {
+			while (true) {
+				// pick from a random spot
+				Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
 
-			Vector2 spawn_pos = v2_tile_pos_to_entity_world_pos(spawn_tile, data.arch_id);
+				Vector2 spawn_pos = v2_tile_pos_to_entity_world_pos(spawn_tile, data.arch_id);
 
-			// is it close to any entities?
-			bool too_close = false;
-			for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
-				Entity* en = &world->entities[j];
-				if (en->is_valid && en->arch == data.arch_id && !en->isnt_a_tile) {
-					int tile_radius = data.dist_from_self;
-					if (v2_dist(spawn_pos, en->pos) < tile_width * tile_radius) {
-						too_close = true;
-						break;
+				// is it close to any entities?
+				bool too_close = false;
+				for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+					Entity* en = &world->entities[j];
+					if (en->is_valid && en->arch == data.arch_id && !en->isnt_a_tile) {
+						int tile_radius = data.dist_from_self;
+						if (v2_dist(spawn_pos, en->pos) < tile_width * tile_radius) {
+							too_close = true;
+							break;
+						}
 					}
 				}
-			}
 
-			if (!too_close) {
-				Entity* en = entity_create();
-				entity_setup(en, data.arch_id);
-				en->pos = spawn_pos;
-			}
+				if (!too_close) {
+					Entity* en = entity_create();
+					entity_setup(en, data.arch_id);
+					en->pos = spawn_pos;
+				}
 
-			iterations += 1;
-			if (iterations > 300) {
-				break;
+				iterations += 1;
+				if (iterations > 300) {
+					break;
+				}
 			}
+		} else {
+			log_warning("no potential tiles found for this dude");
 		}
 	}
 }
@@ -1953,7 +1958,7 @@ void world_setup() {
 	#if defined(DEV_TESTING)
 	{
 		en = entity_create();
-		setup_large_ice_vein(en);
+		setup_large_coal_depo(en);
 		en->pos.x = 50;
 		en->pos.y = 20;
 		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
@@ -3390,6 +3395,82 @@ void draw_base_sprite(Entity* en) {
 
 // update :func dump
 
+void update_conveyor(Entity* en) {
+	
+	// set proper sprite
+	if (en->dir == DIR_east) {
+		en->sprite_id = SPRITE_conveyor_right;
+	} else if (en->dir == DIR_south) {
+		en->sprite_id = SPRITE_conveyor_down;
+	} else if (en->dir == DIR_west) {
+		en->sprite_id = SPRITE_conveyor_left;
+	} else if (en->dir == DIR_north) {
+		en->sprite_id = SPRITE_conveyor_up;
+	}
+
+	Tile output_tile = v2_world_pos_to_tile_pos(en->pos);
+	if (en->dir == DIR_east) {
+		output_tile.x += 1;
+	} else if (en->dir == DIR_south) {
+		output_tile.y -= 1;
+	} else if (en->dir == DIR_west) {
+		output_tile.x -= 1;
+	} else if (en->dir == DIR_north) {
+		output_tile.y += 1;
+	}
+	TileCache* tc = tile_cache_at_tile(output_tile);
+
+	// attempt move into next tile
+	if (tc->entity && tc->entity->has_input_storage && en->input0.id) {
+		Entity* storage = tc->entity;
+
+		if (storage->arch == ARCH_conveyor) {
+			if (storage->input0.id == 0) {
+				if (en->next_update_end_time == 0) {
+					en->next_update_end_time = now() + 0.5;
+				}
+				if (has_reached_end_time(en->next_update_end_time)) {
+					en->next_update_end_time = 0;
+
+					storage->input0.id = en->input0.id;
+					storage->input0.amount = 1;
+					en->input0.amount -= 1;
+					assert(en->input0.amount == 0, "this should be 0");
+					en->input0 = (ItemAmount){0};
+				}
+			}
+		} else {
+			if (storage->input0.id == 0 || storage->input0.id == en->input0.id) {
+				if (en->next_update_end_time == 0) {
+					en->next_update_end_time = now() + 0.5;
+				}
+				if (has_reached_end_time(en->next_update_end_time)) {
+					en->next_update_end_time = 0;
+
+					storage->input0.id = en->input0.id;
+					storage->input0.amount += 1;
+					en->input0 = (ItemAmount){0};
+				}
+			}
+		}
+	}
+}
+
+void draw_sprite(SpriteID sprite_id, Vector2 pos) {
+	Sprite* sprite = get_sprite(sprite_id);
+	Vector2 draw_pos = pos;
+	draw_pos.x -= sprite->image->width * 0.5;
+	draw_image(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE);
+}
+
+void render_conveyor(Entity* en) {
+	draw_base_sprite(en);
+
+	if (en->input0.id) {
+		draw_sprite(get_item_data(en->input0.id).icon, en->pos);
+	}
+}
+
 // :nest
 void update_enemy_nest(Entity* en) {
 
@@ -4234,7 +4315,7 @@ int entry(int argc, char **argv) {
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
 				bool has_interaction = en->destroyable_world_item
-					|| en->hover_for_info
+					|| en->big_resource_drop
 					|| en->interactable_entity
 					|| en->right_click_remove;
 				// add extra :interact cases here ^^
@@ -4340,15 +4421,7 @@ int entry(int argc, char **argv) {
 			if (en->is_valid) {
 
 				if (en->arch == ARCH_conveyor) {
-					if (en->dir == DIR_east) {
-						en->sprite_id = SPRITE_conveyor_right;
-					} else if (en->dir == DIR_south) {
-						en->sprite_id = SPRITE_conveyor_down;
-					} else if (en->dir == DIR_west) {
-						en->sprite_id = SPRITE_conveyor_left;
-					} else if (en->dir == DIR_north) {
-						en->sprite_id = SPRITE_conveyor_up;
-					}
+					update_conveyor(en);
 				}
 
 				if (en->arch == ARCH_meteor) {
@@ -4359,7 +4432,6 @@ int entry(int argc, char **argv) {
 					update_turret(en);
 				}
 
-				// enemy update
 				if (en->arch == ARCH_enemy1) {
 					update_enemy(en);
 				}
@@ -4471,10 +4543,21 @@ int entry(int argc, char **argv) {
 						if (tc->entity && tc->entity->has_input_storage) {
 							Entity* storage = tc->entity;
 
-							if (storage->input0.id == 0 || storage->input0.id == en->output0.id) {
-								storage->input0.amount += en->output0.amount;
-								storage->input0.id = en->output0.id;
-								en->output0 = (ItemAmount){0};
+							if (storage->arch == ARCH_conveyor) {
+								if (storage->input0.id == 0) {
+									storage->input0.amount = 1;
+									storage->input0.id = en->output0.id;
+									en->output0.amount -= 1;
+									if (en->output0.amount <= 0) {
+										en->output0 = (ItemAmount){0};
+									}
+								}
+							} else {
+								if (storage->input0.id == 0 || storage->input0.id == en->output0.id) {
+									storage->input0.amount += en->output0.amount;
+									storage->input0.id = en->output0.id;
+									en->output0 = (ItemAmount){0};
+								}
 							}
 						}
 					}
@@ -5002,6 +5085,14 @@ int entry(int argc, char **argv) {
 					}
 				}
 
+				// big resource click error
+				if (selected_en->big_resource_drop) {
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						play_sound("event:/error");
+					}
+				}
+
 				// right click remove
 				if (selected_en->right_click_remove) {
 					if (is_key_just_pressed(MOUSE_BUTTON_RIGHT)) {
@@ -5051,6 +5142,7 @@ int entry(int argc, char **argv) {
 
 					case ARCH_player: break;
 
+					case ARCH_conveyor: render_conveyor(en); break;
 					case ARCH_enemy_nest: render_enemy_nest(en); break;
 					case ARCH_meteor: render_meteor(en); break;
 					case ARCH_turret: render_turret(en); break;
@@ -5135,7 +5227,7 @@ int entry(int argc, char **argv) {
 
 		// render :player
 		if (is_player_alive())
-		// scope_z_layer(layer_player)
+		scope_z_layer(layer_player)
 		{
 			Entity* en = get_player();
 
@@ -5195,42 +5287,74 @@ int entry(int argc, char **argv) {
 			// 	draw_rect(rect.min, range2f_size(rect), v4(1,0,0,0.8));
 			// }
 
-			float hit_every_seconds = 0.2;
-			bool should_hit = false;
+			// :glow effect thingo
 			{
-				s64 count = app_now() / hit_every_seconds;
-				local_persist s64 last_count_triggered = 0;
-				if (count > last_count_triggered) {
-					should_hit = true;
-					last_count_triggered += 1;
+				float hit_every_seconds = 0.2;
+				bool should_hit = false;
+				{
+					s64 count = app_now() / hit_every_seconds;
+					local_persist s64 last_count_triggered = 0;
+					if (count > last_count_triggered) {
+						should_hit = true;
+						last_count_triggered += 1;
+					}
+				}
+
+				if (is_night() && should_hit) {
+					Vector4 col = hex_to_rgba(0xe7c756ff);
+
+					Particle* p = particle_new();
+					p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_light;
+					p->pos.x = get_random_float32_in_range(rect.min.x, rect.max.x);
+					p->pos.y = get_random_float32_in_range(rect.min.y, rect.max.y);
+					p->velocity.x = get_random_float32_in_range(-4, 4);
+					p->velocity.y = 10;
+					p->col = col;
+					p->light_col = col;
+					p->light_col.a = 1.0; // drives effect of point light
+					p->light_intensity = 0.2;
+					p->light_radius = 10;
+					p->fade_in_pct = 0.1;
+					p->fade_out_pct = 0.2;
+					p->lifetime_length = 5;
+
+					Particle* p2 = particle_new();
+					*p2 = *p;
+					p2->light_radius = 30;
+					p2->light_col = v4(0,0,0,0);
+					p2->light_intensity = 0.5;
 				}
 			}
 
-			// :glow effect thingo
-			if (is_night() && should_hit) {
-				Vector4 col = hex_to_rgba(0xe7c756ff);
+			// daytime ambiance particles 
+			{
+				float hit_every_seconds = 0.2;
+				bool should_hit = false;
+				{
+					s64 count = app_now() / hit_every_seconds;
+					local_persist s64 last_count_triggered = 0;
+					if (count > last_count_triggered) {
+						should_hit = true;
+						last_count_triggered += 1;
+					}
+				}
 
-				Particle* p = particle_new();
-				p->flags |= PARTICLE_FLAGS_physics | PARTICLE_FLAGS_light;
-				p->pos.x = get_random_float32_in_range(rect.min.x, rect.max.x);
-				p->pos.y = get_random_float32_in_range(rect.min.y, rect.max.y);
-				p->velocity.x = get_random_float32_in_range(-4, 4);
-				p->velocity.y = 10;
-				p->col = col;
-				p->light_col = col;
-				p->light_col.a = 1.0; // drives effect of point light
-				p->light_intensity = 0.2;
-				p->light_radius = 10;
-				p->fade_in_pct = 0.1;
-				p->fade_out_pct = 0.2;
-				p->lifetime_length = 5;
+				if (should_hit) {
+					Vector4 col = hex_to_rgba(0x797979ff);
 
-				Particle* p2 = particle_new();
-				*p2 = *p;
-				p2->light_radius = 30;
-				p2->light_col = v4(0,0,0,0);
-				p2->light_intensity = 0.5;
+					Particle* p = particle_new();
+					p->flags |= PARTICLE_FLAGS_physics;
+					p->pos.x = get_random_float32_in_range(rect.min.x, rect.max.x);
+					p->pos.y = get_random_float32_in_range(rect.min.y, rect.max.y);
+					p->velocity.x = get_random_float32_in_range(-2, 2);
+					p->velocity.y = get_random_float32_in_range(5, 6);
+					p->col = col;
+					p->fade_in_pct = 0.1;
+					p->fade_out_pct = 0.2;
+					p->lifetime_length = 5;
+				}
 			}
+
 		}
 
 		// :tile :rendering
@@ -5379,6 +5503,7 @@ int entry(int argc, char **argv) {
 		}
 		if (is_key_just_pressed('K') && is_key_down(KEY_SHIFT)) {
 			memset(world, 0, sizeof(World));
+			memset(&world_frame, 0, sizeof(WorldFrame));
 			world_setup();
 			log("reset");
 		}

@@ -641,6 +641,11 @@ typedef struct Entity {
 	bool has_input_storage;
 	Direction dir;
 	float64 next_update_end_time;
+	bool o2_consume;
+	int o2_consume_amount;
+	float o2_consume_rate;
+	float64 next_consume_end_time;
+	float anti_meteor_radius;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -976,6 +981,11 @@ void setup_anti_meteor(Entity* en) {
 	entity_max_health_setter(en, 5);
 	en->has_collision = true;
 	en->enemy_target = true;
+	en->o2_consume = true;
+	en->o2_consume_rate = 1.f;
+	en->o2_consume_amount = 1;
+	en->is_oxygen_tether = true;
+	en->anti_meteor_radius = tile_width * 8;
 }
 
 void setup_large_coal_depo(Entity* en) {
@@ -1161,7 +1171,7 @@ void setup_exp_orb(Entity* en) {
 void setup_tether(Entity* en) {
 	en->arch = ARCH_tether;
 	en->pretty_name = STR("Tether");
-	en->destroyable_by_explosion = true;
+	en->destroyable_by_explosion = false; // turning this off for now so it's not annoying. maybe we want this in the early game tho, with some kind of more durable upgrade later on ?
 	en->sprite_id = SPRITE_tether;
 	en->is_oxygen_tether = true;
 	en->tether_connection_offset.y = 4;
@@ -1169,6 +1179,7 @@ void setup_tether(Entity* en) {
 
 void setup_oxygenerator(Entity* en) {
 	en->arch = ARCH_oxygenerator;
+	en->anti_meteor_radius = tile_width * 8;
 	en->has_input_storage = true;
 	en->pretty_name = STR("Emergency Oxygenerator");
 	en->sprite_id = SPRITE_oxygenerator;
@@ -1317,7 +1328,9 @@ void setup_item(Entity* en, ItemID item_id) {
 	en->arch = ARCH_item;
 	en->sprite_id = get_sprite_id_from_item(item_id);
 	en->item_id = item_id;
-	en->item_amount = 1;
+	if (en->item_amount == 0) {
+		en->item_amount = 1;
+	}
 	en->isnt_a_tile = true;
 	en->ignore_collision = true;
 }
@@ -3369,7 +3382,7 @@ void do_ui_stuff() {
 	}
 
 	// esc exit
-	if (world->ux_state != UX_nil && is_key_just_pressed(KEY_ESCAPE)) {
+	if (world->ux_state != UX_nil && world->ux_state != UX_respawn && is_key_just_pressed(KEY_ESCAPE)) {
 		consume_key_just_pressed(KEY_ESCAPE);
 		world->ux_state = 0;
 	}
@@ -3853,11 +3866,16 @@ void update_enemy(Entity* en) {
 				if (target_en->arch == ARCH_player) {
 					target_en->oxygen -= 5;
 					camera_shake(0.2);
+
+					if (target_en->oxygen <= 0) {
+						en->is_agro = false;
+					}
 				} else {
 					target_en->health -= 1;
 					if (target_en->health <= 0) {
 						do_entity_drops(target_en);
 						entity_zero_immediately(target_en);
+						en->is_agro = false;
 					}
 				}
 			}
@@ -4400,6 +4418,16 @@ int entry(int argc, char **argv) {
 					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
 				}
 
+				// draw radius stuff 
+				if (en->arch != ARCH_oxygenerator && en->anti_meteor_radius)
+				{
+					Vector2 draw_pos = en->pos;
+					draw_pos.x -= en->anti_meteor_radius;
+					draw_pos.y -= en->anti_meteor_radius;
+					draw_circle(draw_pos, v2(en->anti_meteor_radius * 2, en->anti_meteor_radius * 2), v4(1, 1, 1, 0.05));
+				}
+
+
 				// todo - draw selection corners like factorio
 				// Range2f range = get_entity_range(en);
 			}
@@ -4409,10 +4437,22 @@ int entry(int argc, char **argv) {
 		{
 			if (world->next_meteor_spawn_end_time == 0) {
 				world->next_meteor_spawn_end_time = now() + get_random_float32_in_range(100, 120);
+				// world->next_meteor_spawn_end_time = now() + 1.0f;
+			}
+
+			Entity** anti_meteor_entities;
+			growing_array_init_reserve((void**)&anti_meteor_entities, sizeof(Entity*), 1, get_temporary_allocator());
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* en = &world->entities[i];
+				if (en->is_valid && en->anti_meteor_radius != 0 && en->last_frame.is_powered) {
+					growing_array_add((void**)&anti_meteor_entities, &en);
+				}
 			}
 
 			if (has_reached_end_time(world->next_meteor_spawn_end_time)) {
 				world->next_meteor_spawn_end_time = 0;
+
+				float meteor_radius = get_archetype_data(ARCH_meteor).radius;
 
 				Vector2 spawn_pos;
 				bool found_pos = false;
@@ -4427,8 +4467,16 @@ int entry(int argc, char **argv) {
 					spawn_pos = get_player()->pos;
 					spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, max_spawn_radius)));
 
-					float spawn_safe_zone_radius = tile_width * 8 + get_archetype_data(ARCH_meteor).radius;
-					if (fabsf(v2_length(spawn_pos)) > spawn_safe_zone_radius) {
+					bool is_in_no_go_zone = false;
+					for (int i = 0; i < growing_array_get_valid_count(anti_meteor_entities); i++) {
+						Entity* en = anti_meteor_entities[i];
+						float dist = v2_dist(en->pos, spawn_pos);
+						if (dist < en->anti_meteor_radius + meteor_radius) {
+							is_in_no_go_zone = true;
+						}
+					}
+
+					if (!is_in_no_go_zone) {
 						found_pos = true;
 						break;
 					}
@@ -5048,6 +5096,25 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		// o2 consume on all other entities
+		{
+			Entity* o2_genny = entity_from_handle(world->oxygenerator);
+
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* en = &world->entities[i];
+				if (en->is_valid && en->o2_consume && en->frame.is_powered) {
+					if (en->next_consume_end_time == 0) {
+						en->next_consume_end_time = now() + en->o2_consume_rate;
+					}
+
+					if (has_reached_end_time(en->next_consume_end_time)) {
+						en->next_consume_end_time = 0;
+						o2_genny->oxygen -= 1;
+					}
+				}
+			}
+		}
+
 		// :selection :interact stuff
 		if (is_player_alive())
 		{
@@ -5263,7 +5330,7 @@ int entry(int argc, char **argv) {
 				}
 
 				// :tether draw blue thingy
-				if (en->arch != ARCH_oxygenerator && en->is_oxygen_tether && en->frame.is_powered) {
+				if (en->arch == ARCH_tether && en->is_oxygen_tether && en->frame.is_powered) {
 					Vector2 draw_pos = v2_add(en->pos, v2(-1, -1));
 					draw_pos = v2_add(draw_pos, en->tether_connection_offset);
 					draw_rect(draw_pos, v2(2, 2), col_oxygen);

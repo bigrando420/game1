@@ -231,7 +231,7 @@ float o2_fuel_length = 30.f;
 float max_cam_shake_translate = 200.0f;
 float max_cam_shake_rotate = 4.0f;
 float player_reach_radius = 50.0f;
-float tether_connection_radius = 50.0;
+float tether_connection_radius = 80.0;
 float o2_full_tank_deplete_length = 16.0f; // #volatile length of oxygen riser sfx
 float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 1.f;
@@ -382,6 +382,8 @@ typedef enum SpriteID {
 	SPRITE_conveyor_down,
 	SPRITE_conveyor_left,
 	SPRITE_conveyor_right,
+	SPRITE_large_coal_depo,
+	SPRITE_anti_meteor,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -439,6 +441,7 @@ typedef enum ItemID {
 	ITEM_red_core,
 	ITEM_wood_crate,
 	ITEM_conveyor,
+	ITEM_anti_meteor,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -486,11 +489,13 @@ typedef enum ArchetypeID {
 	ARCH_large_ice_vein = 30,
 	ARCH_wood_crate = 31,
 	ARCH_conveyor = 32,
+	ARCH_large_coal_depo = 33,
+	ARCH_anti_meteor = 34,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
 
-// :item
+// item
 typedef struct ItemData {
 	string pretty_name;
 	string description;
@@ -963,6 +968,26 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 // :arch :setup things
 
+void setup_anti_meteor(Entity* en) {
+	en->pretty_name = STR("Meteor Defense");
+	en->arch = ARCH_anti_meteor;
+	en->sprite_id = SPRITE_anti_meteor;
+	en->tile_size = v2i(2, 1);
+	entity_max_health_setter(en, 5);
+	en->has_collision = true;
+	en->enemy_target = true;
+}
+
+void setup_large_coal_depo(Entity* en) {
+	en->pretty_name = STR("Large Coal Deposit");
+	en->arch = ARCH_large_coal_depo;
+	en->sprite_id = SPRITE_large_coal_depo;
+	en->big_resource_drop = ITEM_coal;
+	entity_max_health_setter(en, 1);
+	en->has_collision = true;
+	en->tile_size = v2i(3, 2);
+}
+
 void setup_conveyor(Entity* en) {
 	en->arch = ARCH_conveyor;
 	en->pretty_name = STR("Conveyor");
@@ -985,8 +1010,6 @@ void setup_large_ice_vein(Entity* en) {
 	en->sprite_id = SPRITE_large_ice_vein;
 	en->big_resource_drop = ITEM_o2_shard;
 	entity_max_health_setter(en, 1);
-	en->destroyable_world_item = false;
-	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 	en->tile_size = v2i(3, 2);
 }
@@ -1336,6 +1359,8 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_large_ice_vein: setup_large_ice_vein(en); break;
 		case ARCH_wood_crate: setup_wood_crate(en); break;
 		case ARCH_conveyor: setup_conveyor(en); break;
+		case ARCH_large_coal_depo: setup_large_coal_depo(en); break;
+		case ARCH_anti_meteor: setup_anti_meteor(en); break;
 		// :arch :setup
 	}
 }
@@ -1697,12 +1722,14 @@ void do_entity_drops(Entity* en) {
 
 		// drop building stuff
 		ItemData item_data = get_item_data(en->item_id);
-		for (int i = 0; i < item_data.ingredients_count; i++) {
-			ItemAmount drop = item_data.ingredients[i];
-			for (int j = 0; j < drop.amount; j++) {
-				growing_array_add((void**)&drops, &drop.id);
-			}
-		}
+		growing_array_add((void**)&drops, &en->item_id);
+		// not dropping the raw materials anymore, so it's more clear that the item got destroyed.
+		// for (int i = 0; i < item_data.ingredients_count; i++) {
+		// 	ItemAmount drop = item_data.ingredients[i];
+		// 	for (int j = 0; j < drop.amount; j++) {
+		// 		growing_array_add((void**)&drops, &drop.id);
+		// 	}
+		// }
 
 		for (int j = 0; j < en->input0.amount; j++) {
 			growing_array_add((void**)&drops, &en->input0.id);
@@ -3920,6 +3947,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_conveyor_down] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_down.png"), get_heap_allocator())};
 		sprites[SPRITE_conveyor_left] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_left.png"), get_heap_allocator())};
 		sprites[SPRITE_conveyor_right] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_right.png"), get_heap_allocator())};
+		sprites[SPRITE_large_coal_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/large_coal_depo.png"), get_heap_allocator())};
+		sprites[SPRITE_anti_meteor] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/anti_meteor.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -4022,6 +4051,15 @@ int entry(int argc, char **argv) {
 		};
 
 		// :item :buildings
+
+		item_data[ITEM_anti_meteor] = (ItemData){
+			.to_build=ARCH_anti_meteor,
+			.icon=SPRITE_anti_meteor,
+			.description=STR("Redirects meteors in a radius"),
+			.exp_cost=50,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_copper_ingot, 5} }
+		};
 
 		item_data[ITEM_conveyor] = (ItemData){
 			.to_build=ARCH_conveyor,

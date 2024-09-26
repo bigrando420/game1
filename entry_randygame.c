@@ -548,6 +548,7 @@ typedef enum GameError {
 	GAME_ERR_nil,
 	GAME_ERR_no_room_in_destination,
 	GAME_ERR_no_fuel,
+	GAME_ERR_no_o2,
 } GameError;
 
 typedef struct Entity Entity; // needs forward declare
@@ -1527,8 +1528,12 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+inline float get_error_flash_frequency() {
+	return sin_breathe(os_get_elapsed_seconds(), 6.f);
+}
+
 Vector4 get_red_error_col_override() {
-	return v4(1, 0, 0, 0.8 * sin_breathe(os_get_elapsed_seconds(), 6.f));
+	return v4(1, 0, 0, 0.8 * get_error_flash_frequency());
 }
 
 Range2f get_world_rect() {
@@ -4255,7 +4260,6 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-
 		// reset appframe
 		last_app_frame = app_frame;
 		app_frame = (AppFrame){0};
@@ -4542,13 +4546,26 @@ int entry(int argc, char **argv) {
 
 				// draw basic tooltip
 				defer_scope(set_screen_space(), set_world_space())
+				scope_z_layer(layer_ui)
 				{
 					float x0 = screen_width * 0.5;
 					float y0 = screen_height;
 					y0 -= 2.f;
 
 					string txt = en->pretty_name;
-					draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
+					Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
+					y0 -= met.visual_size.y;
+					y0 -= 2;
+
+					if (en->last_frame.error) {
+						switch (en->last_frame.error) {
+							case GAME_ERR_no_fuel: txt = STR("Needs fuel"); break;
+							case GAME_ERR_no_room_in_destination: txt = STR("No room in destination"); break;
+							case GAME_ERR_no_o2: txt = STR("Needs oxygen network connection"); break;
+							default: txt = STR("");
+						}
+						draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), v4_lerp(COLOR_WHITE, COLOR_RED, get_error_flash_frequency()), PIVOT_top_center);
+					}
 				}
 
 				// draw radius stuff 
@@ -4648,6 +4665,12 @@ int entry(int argc, char **argv) {
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
+
+				if (en->arch == ARCH_anti_meteor) {
+					if (!en->frame.is_powered) {
+						en->frame.error = GAME_ERR_no_o2;
+					}
+				}
 
 				if (en->arch == ARCH_conveyor) {
 					update_conveyor(en);
@@ -5099,6 +5122,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// o2 consume on all other entities
+		// note, can move this into update now that power is above.
 		{
 			Entity* o2_genny = entity_from_handle(world->oxygenerator);
 

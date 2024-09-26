@@ -4374,6 +4374,139 @@ int entry(int argc, char **argv) {
 		do_ui_stuff();
 		do_world_entity_interaction_ui_stuff();
 
+		// :tether stuff
+		{
+			// for each tether, find all nearby tethers
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+				Entity* self_tether = &world->entities[i];
+				if (self_tether->is_valid && self_tether->is_oxygen_tether) {
+
+					Entity** nearby_tethers;
+					growing_array_init_reserve((void**)&nearby_tethers, sizeof(Entity*), 1, get_temporary_allocator());
+					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+						Entity* nearby_tether = &world->entities[j];
+						if (nearby_tether != self_tether && nearby_tether->is_valid && nearby_tether->is_oxygen_tether) {
+							if (v2_dist(nearby_tether->pos, self_tether->pos) < tether_connection_radius) {
+								growing_array_add((void**)&nearby_tethers, &nearby_tether);
+							}
+						}
+					}
+
+					self_tether->frame.connected_to_tethers = nearby_tethers;
+				}
+			}
+
+			// run through connections recursively, starting at the core tether
+			Entity* oxygenerator = entity_from_handle(world->oxygenerator);
+			if (oxygenerator->oxygen > 0)
+			{
+				Entity** connection_stack;
+				growing_array_init_reserve((void**)&connection_stack, sizeof(Entity*), 1, get_temporary_allocator());
+				growing_array_add((void**)&connection_stack, &oxygenerator);
+
+				while (growing_array_get_valid_count(connection_stack)) {
+					Entity* current = connection_stack[growing_array_get_valid_count(connection_stack)-1];
+					growing_array_pop((void**)&connection_stack);
+
+					for (int i = 0; i < growing_array_get_valid_count(current->frame.connected_to_tethers); i ++) {
+						Entity* connected_tether = current->frame.connected_to_tethers[i];
+						if (!connected_tether->frame.is_powered) {
+							growing_array_add((void**)&connection_stack, &connected_tether);
+							connected_tether->frame.is_powered = true;
+							draw_line(v2_add(connected_tether->pos, connected_tether->tether_connection_offset), v2_add(current->pos, current->tether_connection_offset), 1.0f, col_tether);
+						}
+					}
+				}
+			}
+		}
+
+		// for each o2 emitter, run through neighboring wall seals, making them powered
+		tm_scope("power algo")
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			if (en->is_valid && en->arch == ARCH_o2_emitter && en->frame.is_powered) {
+
+				Entity** stack;
+				growing_array_init_reserve((void**)&stack, sizeof(Entity*), 1, get_temporary_allocator());
+				growing_array_add((void**)&stack, &en);
+
+				while (growing_array_get_valid_count(stack)) {
+					Entity* current = stack[growing_array_get_valid_count(stack)-1];
+					growing_array_pop((void**)&stack);
+
+					current->frame.is_powered = true;
+					Tile current_tile = v2_world_pos_to_tile_pos(current->pos);
+
+					Entity* left = entity_at_tile(v2i_add(v2i(-1, 0), current_tile));
+					if (left && left->wall_seal && !left->frame.is_powered) {
+						growing_array_add((void**)&stack, &left);
+					}
+
+					Entity* right = entity_at_tile(v2i_add(v2i(1, 0), current_tile));
+					if (right && right->wall_seal && !right->frame.is_powered) {
+						growing_array_add((void**)&stack, &right);
+					}
+
+					Entity* top = entity_at_tile(v2i_add(v2i(0, 1), current_tile));
+					if (top && top->wall_seal && !top->frame.is_powered) {
+						growing_array_add((void**)&stack, &top);
+					}
+
+					Entity* bottom = entity_at_tile(v2i_add(v2i(0, -1), current_tile));
+					if (bottom && bottom->wall_seal && !bottom->frame.is_powered) {
+						growing_array_add((void**)&stack, &bottom);
+					}
+				}
+			}
+		}
+
+		// figure out if the player is inside
+		bool is_inside = true;
+		tm_scope("room flood fill")
+		{
+			Entity* player = get_player();
+
+			Vector2i* stack;
+			growing_array_init_reserve((void**)&stack, sizeof(Vector2i), map.width*map.height, get_temporary_allocator());
+
+			Vector2i start_tile = v2_world_pos_to_tile_pos(player->pos);
+			growing_array_add((void**)&stack, &start_tile);
+
+			while (growing_array_get_valid_count(stack)) {
+				Vector2i self = stack[growing_array_get_valid_count(stack)-1];
+				growing_array_pop((void**)&stack);
+
+				TileCache* self_tc = tile_cache_at_tile(self);
+				self_tc->visited = true;
+
+				for (int i = 0; i < 4; i++) {
+					Vector2i tile = self;
+					if (i == 0) {
+						tile = v2i_add(tile, v2i(-1, 0));
+					} else if (i == 1) {
+						tile = v2i_add(tile, v2i(1, 0));
+					} else if (i == 2) {
+						tile = v2i_add(tile, v2i(0, 1));
+					} else if (i == 3) {
+						tile = v2i_add(tile, v2i(0, -1));
+					}
+
+					Vector2i dist = v2i_sub(tile, start_tile);
+					float length = v2i_length(dist);
+					if (length > 40) {
+						is_inside = false;
+						continue;
+					}
+
+					TileCache* tile_cache = tile_cache_at_tile(tile);
+					bool is_wall_seal = tile_cache->entity && tile_cache->entity->wall_seal && tile_cache->entity->frame.is_powered;
+					if (!tile_cache->visited && !is_wall_seal) {
+						growing_array_add((void**)&stack, &tile);
+					}
+				}
+			}
+		}
+
 		// :select entity
 		if (!world_frame.hover_consumed)
 		{
@@ -4832,52 +4965,6 @@ int entry(int argc, char **argv) {
 		}
 		#endif
 
-		// :tether stuff
-		{
-			// for each tether, find all nearby tethers
-			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
-				Entity* self_tether = &world->entities[i];
-				if (self_tether->is_valid && self_tether->is_oxygen_tether) {
-
-					Entity** nearby_tethers;
-					growing_array_init_reserve((void**)&nearby_tethers, sizeof(Entity*), 1, get_temporary_allocator());
-					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
-						Entity* nearby_tether = &world->entities[j];
-						if (nearby_tether != self_tether && nearby_tether->is_valid && nearby_tether->is_oxygen_tether) {
-							if (v2_dist(nearby_tether->pos, self_tether->pos) < tether_connection_radius) {
-								growing_array_add((void**)&nearby_tethers, &nearby_tether);
-							}
-						}
-					}
-
-					self_tether->frame.connected_to_tethers = nearby_tethers;
-				}
-			}
-
-			// run through connections recursively, starting at the core tether
-			Entity* oxygenerator = entity_from_handle(world->oxygenerator);
-			if (oxygenerator->oxygen > 0)
-			{
-				Entity** connection_stack;
-				growing_array_init_reserve((void**)&connection_stack, sizeof(Entity*), 1, get_temporary_allocator());
-				growing_array_add((void**)&connection_stack, &oxygenerator);
-
-				while (growing_array_get_valid_count(connection_stack)) {
-					Entity* current = connection_stack[growing_array_get_valid_count(connection_stack)-1];
-					growing_array_pop((void**)&connection_stack);
-
-					for (int i = 0; i < growing_array_get_valid_count(current->frame.connected_to_tethers); i ++) {
-						Entity* connected_tether = current->frame.connected_to_tethers[i];
-						if (!connected_tether->frame.is_powered) {
-							growing_array_add((void**)&connection_stack, &connected_tether);
-							connected_tether->frame.is_powered = true;
-							draw_line(v2_add(connected_tether->pos, connected_tether->tether_connection_offset), v2_add(current->pos, current->tether_connection_offset), 1.0f, col_tether);
-						}
-					}
-				}
-			}
-		}
-
 		#if defined(MOUSE_COORDS_DEBUG)
 		{
 			Vector2 mp = get_mouse_pos_in_world_space();
@@ -4891,91 +4978,6 @@ int entry(int argc, char **argv) {
 			}
 		}
 		#endif
-
-		// for each o2 emitter, run through neighboring wall seals, making them powered
-		tm_scope("power algo")
-		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
-			Entity* en = &world->entities[i];
-			if (en->is_valid && en->arch == ARCH_o2_emitter && en->frame.is_powered) {
-
-				Entity** stack;
-				growing_array_init_reserve((void**)&stack, sizeof(Entity*), 1, get_temporary_allocator());
-				growing_array_add((void**)&stack, &en);
-
-				while (growing_array_get_valid_count(stack)) {
-					Entity* current = stack[growing_array_get_valid_count(stack)-1];
-					growing_array_pop((void**)&stack);
-
-					current->frame.is_powered = true;
-					Tile current_tile = v2_world_pos_to_tile_pos(current->pos);
-
-					Entity* left = entity_at_tile(v2i_add(v2i(-1, 0), current_tile));
-					if (left && left->wall_seal && !left->frame.is_powered) {
-						growing_array_add((void**)&stack, &left);
-					}
-
-					Entity* right = entity_at_tile(v2i_add(v2i(1, 0), current_tile));
-					if (right && right->wall_seal && !right->frame.is_powered) {
-						growing_array_add((void**)&stack, &right);
-					}
-
-					Entity* top = entity_at_tile(v2i_add(v2i(0, 1), current_tile));
-					if (top && top->wall_seal && !top->frame.is_powered) {
-						growing_array_add((void**)&stack, &top);
-					}
-
-					Entity* bottom = entity_at_tile(v2i_add(v2i(0, -1), current_tile));
-					if (bottom && bottom->wall_seal && !bottom->frame.is_powered) {
-						growing_array_add((void**)&stack, &bottom);
-					}
-				}
-			}
-		}
-
-		// figure out if the player is inside
-		bool is_inside = true;
-		tm_scope("room flood fill")
-		{
-			Vector2i* stack;
-			growing_array_init_reserve((void**)&stack, sizeof(Vector2i), map.width*map.height, get_temporary_allocator());
-
-			Vector2i start_tile = v2_world_pos_to_tile_pos(player->pos);
-			growing_array_add((void**)&stack, &start_tile);
-
-			while (growing_array_get_valid_count(stack)) {
-				Vector2i self = stack[growing_array_get_valid_count(stack)-1];
-				growing_array_pop((void**)&stack);
-
-				TileCache* self_tc = tile_cache_at_tile(self);
-				self_tc->visited = true;
-
-				for (int i = 0; i < 4; i++) {
-					Vector2i tile = self;
-					if (i == 0) {
-						tile = v2i_add(tile, v2i(-1, 0));
-					} else if (i == 1) {
-						tile = v2i_add(tile, v2i(1, 0));
-					} else if (i == 2) {
-						tile = v2i_add(tile, v2i(0, 1));
-					} else if (i == 3) {
-						tile = v2i_add(tile, v2i(0, -1));
-					}
-
-					Vector2i dist = v2i_sub(tile, start_tile);
-					float length = v2i_length(dist);
-					if (length > 40) {
-						is_inside = false;
-						continue;
-					}
-
-					TileCache* tile_cache = tile_cache_at_tile(tile);
-					bool is_wall_seal = tile_cache->entity && tile_cache->entity->wall_seal && tile_cache->entity->frame.is_powered;
-					if (!tile_cache->visited && !is_wall_seal) {
-						growing_array_add((void**)&stack, &tile);
-					}
-				}
-			}
-		}
 
 		// :player specific caveman update
 		{

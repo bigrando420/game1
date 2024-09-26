@@ -261,6 +261,7 @@ typedef enum Layers {
 // global :app stuff
 // we could move this into an AppState struct.
 // or we could just keep cavemaning it like this lol, since it's not needed.
+Gfx_Shader_Extension global_shader = {0};
 u64 frame_count = 0;
 float exp_error_flash_alpha = 0;
 float exp_error_flash_alpha_target = 0;
@@ -1559,7 +1560,15 @@ void shader_recompile() {
 	string source;
 	bool ok = os_read_entire_file("res/shader.hlsl", &source, get_heap_allocator());
 	assert(ok);
-	gfx_shader_recompile_with_extension(source, sizeof(ShaderConstBuffer));
+
+	Gfx_Shader_Extension shader;
+	ok = gfx_compile_shader_extension(source, sizeof(ShaderConstBuffer), &shader);
+	if (ok) {
+		global_shader = shader;
+	} else {
+		log_error("shader compile failed");
+	}
+
 	dealloc_string(get_heap_allocator(), source);
 }
 
@@ -4262,6 +4271,7 @@ int entry(int argc, char **argv) {
 
 		// :frame update
 		draw_frame.enable_z_sorting = true;
+		draw_frame.shader_extension = global_shader;
 		cbuffer = (ShaderConstBuffer){0};
 
 		world_frame.world_proj = m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);

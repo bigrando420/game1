@@ -384,6 +384,14 @@ typedef enum SpriteID {
 	SPRITE_conveyor_right,
 	SPRITE_large_coal_depo,
 	SPRITE_anti_meteor,
+	SPRITE_portal_icon,
+	SPRITE_portal_frame,
+	SPRITE_portal_fill,
+	SPRITE_large_iron_depo,
+	SPRITE_extractor_north,
+	SPRITE_extractor_south,
+	SPRITE_extractor_east,
+	SPRITE_extractor_west,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -442,6 +450,8 @@ typedef enum ItemID {
 	ITEM_wood_crate,
 	ITEM_conveyor,
 	ITEM_anti_meteor,
+	ITEM_portal,
+	ITEM_extractor,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -491,6 +501,9 @@ typedef enum ArchetypeID {
 	ARCH_conveyor = 32,
 	ARCH_large_coal_depo = 33,
 	ARCH_anti_meteor = 34,
+	ARCH_portal = 35,
+	ARCH_large_iron_depo = 36,
+	ARCH_extractor = 37,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -566,6 +579,13 @@ typedef struct EntityFrame {
 	// :frame
 } EntityFrame;
 
+typedef struct StorageSlot {
+	ItemAmount item;
+	bool output_only; // can only take items from here, can't put in
+	int desired_item_count;
+	ItemID desired_items[4];
+} StorageSlot;
+
 typedef struct Entity {
 	bool is_valid;
 	int id;
@@ -602,10 +622,15 @@ typedef struct Entity {
 	float64 pick_up_cooldown_end_time;
 	float white_flash_current_alpha;
 	int exp_amount;
-	// todo - turn this into an array, that way we can loop thru it and not have the drops break
+	StorageSlot storage_slots[8];
+	int storage_slot_count;
+
+	// deprecated
 	ItemAmount input0;
 	ItemAmount input1;
 	ItemAmount output0;
+	//
+
 	int anim_index;
 	float64 time_til_next_frame;
 	Vector2i last_move_dir;
@@ -974,6 +999,23 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 // :arch :setup things
 
+void setup_large_iron_depo(Entity* en) {
+	en->pretty_name = STR("Large Iron Deposit");
+	en->arch = ARCH_large_iron_depo;
+	en->sprite_id = SPRITE_large_iron_depo;
+	en->big_resource_drop = ITEM_raw_iron;
+	entity_max_health_setter(en, 1);
+	en->has_collision = true;
+	en->tile_size = v2i(3, 2);
+}
+
+// TODO - split rendering into targets n stuff, checkout bloom.c
+void setup_portal(Entity* en) {
+	en->arch = ARCH_portal;
+	en->tile_size = v2i(11, 3);
+	en->pretty_name = STR("Quantum Gate");
+}
+
 void setup_anti_meteor(Entity* en) {
 	en->pretty_name = STR("Meteor Defense");
 	en->arch = ARCH_anti_meteor;
@@ -997,6 +1039,13 @@ void setup_large_coal_depo(Entity* en) {
 	entity_max_health_setter(en, 1);
 	en->has_collision = true;
 	en->tile_size = v2i(3, 2);
+}
+
+void setup_extractor(Entity* en) {
+	en->arch = ARCH_extractor;
+	en->pretty_name = STR("Extractor");
+	en->has_input_storage = true;
+	en->sprite_id = SPRITE_extractor_east;
 }
 
 void setup_conveyor(Entity* en) {
@@ -1260,6 +1309,28 @@ void setup_furnace(Entity* en) {
 	en->interactable_entity = true;
 	en->has_collision = true;
 	entity_max_health_setter(en, 3);
+
+	en->storage_slot_count = 3;
+
+	en->storage_slots[0].desired_item_count = 2;
+	en->storage_slots[0].desired_items[0] = ITEM_coal;
+	en->storage_slots[0].desired_items[1] = ITEM_pine_wood;
+
+	{
+		// put all furance transform items into the desired slot 1
+		StorageSlot* slot = &en->storage_slots[1];
+		slot->desired_item_count = 0;
+		for (ItemID i = 0; i < ITEM_MAX; i++) {
+			ItemData item_data = get_item_data(i);
+			if (item_data.furnace_transform_into) {
+				assert(slot->desired_item_count < ARRAY_COUNT(slot->desired_items));
+				slot->desired_items[slot->desired_item_count] = i;
+				slot->desired_item_count += 1;
+			}
+		}
+	}
+
+	en->storage_slots[2].output_only = true;
 }
 
 void setup_workbench(Entity* en) {
@@ -1375,6 +1446,9 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_conveyor: setup_conveyor(en); break;
 		case ARCH_large_coal_depo: setup_large_coal_depo(en); break;
 		case ARCH_anti_meteor: setup_anti_meteor(en); break;
+		case ARCH_portal: setup_portal(en); break;
+		case ARCH_large_iron_depo: setup_large_iron_depo(en); break;
+		case ARCH_extractor: setup_extractor(en); break;
 		// :arch :setup
 	}
 }
@@ -1527,6 +1601,13 @@ bool has_reached_end_time(float64 end_time) {
 }
 
 // :func dump
+
+void draw_sprite(SpriteID sprite_id, Vector2 pos) {
+	Sprite* sprite = get_sprite(sprite_id);
+	Vector2 draw_pos = pos;
+	draw_pos.x -= sprite->image->width * 0.5;
+	draw_image(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE);
+}
 
 inline float get_error_flash_frequency() {
 	return sin_breathe(os_get_elapsed_seconds(), 6.f);
@@ -2017,7 +2098,13 @@ void world_setup() {
 		en->pos.y = 20;
 		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
 
-		player_en->exp_amount = 1000;
+		en = entity_create();
+		setup_large_iron_depo(en);
+		en->pos.x = 50;
+		en->pos.y = -5;
+		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
+
+		player_en->exp_amount = 20000;
 		
 		world->item_unlocks[ITEM_tether].research_progress = 100;
 
@@ -2225,6 +2312,78 @@ bool world_attempt_load_from_disk() {
 	}
 
 	return true;
+}
+
+void input_slot_new(Range2f rect, StorageSlot* slot) {
+
+	if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+		
+		// interact with the slot
+		{
+			bool has_desired_item_in_hand = false;
+			for (int i = 0; i < slot->desired_item_count; i++) {
+				ItemID desired_item = slot->desired_items[i];
+				if (world->mouse_cursor_item.id == desired_item) {
+					has_desired_item_in_hand = true;
+					break;
+				}
+			}
+
+			if (world->mouse_cursor_item.id) {
+				if (slot->item.id) {
+					if (slot->item.id == world->mouse_cursor_item.id) {
+						// attempt stack
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							slot->item.amount += world->mouse_cursor_item.amount;
+							world->mouse_cursor_item = (ItemAmount){0};
+						}
+					} else {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							if (has_desired_item_in_hand) {
+								// swap
+								ItemAmount temp = world->mouse_cursor_item;
+								world->mouse_cursor_item = slot->item;
+								slot->item = temp;
+							} else {
+								play_sound("event:/error");
+							}
+						}
+					}
+				} else {
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						if (has_desired_item_in_hand) {
+							// place inside
+							slot->item = world->mouse_cursor_item;
+							world->mouse_cursor_item = (ItemAmount){0};
+						} else {
+							play_sound("event:/error");
+						}
+					}
+				}
+			} else {
+				if (slot->item.id) {
+					if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+						// take into hand
+						world->mouse_cursor_item = slot->item;
+						slot->item = (ItemAmount){0};
+					}
+
+					item_tooltip(slot->item);
+				}
+			}
+		}
+	}
+
+	draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+
+	if (slot->item.id) {
+		draw_item_amount_in_rect(slot->item, rect);
+	}
+
 }
 
 void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
@@ -2481,15 +2640,12 @@ void do_world_entity_interaction_ui_stuff() {
 
 			Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
 
-			ItemID* desired_items;
-			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
-			ItemID desired_item = ITEM_coal;
-			growing_array_add((void**)&desired_items, &desired_item);
+			StorageSlot* slot = &en->storage_slots[0];
 
-			input_slot(rect, &en->input0, desired_items);
+			input_slot_new(rect, slot);
 
-			if (!en->input0.id) {
-				Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
+			if (!slot->item.id) {
+				Draw_Quad* quad = draw_sprite_in_rect(SPRITE_coal, rect, COLOR_WHITE, 0.1);
 
 				if (en->current_fuel == 0) {
 					set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
@@ -2521,20 +2677,10 @@ void do_world_entity_interaction_ui_stuff() {
 			y0 = get_entity_range(en).max.y;
 			y0 += 1.f;
 
-			ItemAmount* slot = &en->input1;
-
-			ItemID* desired_items;
-			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
-			for (ItemID i = 0; i < ITEM_MAX; i++) {
-				ItemData item_data = get_item_data(i);
-				if (item_data.furnace_transform_into) {
-					growing_array_add((void**)&desired_items, &i);
-				}
-			}
-
 			Range2f rect = range2f_make_bottom_left(v2(x0, y0), slot_size);
 
-			input_slot(rect, &en->input1, desired_items);
+			StorageSlot* slot = &en->storage_slots[1];
+			input_slot_new(rect, slot);
 
 			// craft progress bar
 			{
@@ -3296,6 +3442,18 @@ void do_ui_stuff() {
 				} else {
 					sprite_id = 0;
 				}
+			} else if (arch_id == ARCH_extractor) {
+				if (world->cursor_rotate_dir == DIR_east) {
+					sprite_id = SPRITE_extractor_east;
+				} else if (world->cursor_rotate_dir == DIR_south) {
+					sprite_id = SPRITE_extractor_south;
+				} else if (world->cursor_rotate_dir == DIR_west) {
+					sprite_id = SPRITE_extractor_west;
+				} else if (world->cursor_rotate_dir == DIR_north) {
+					sprite_id = SPRITE_extractor_north;
+				} else {
+					sprite_id = 0;
+				}
 			}
 
 			Sprite* icon = get_sprite(sprite_id);
@@ -3449,18 +3607,17 @@ void draw_base_sprite(Entity* en) {
 
 // update :func dump
 
-void update_conveyor(Entity* en) {
-	
-	// set proper sprite
-	if (en->dir == DIR_east) {
-		en->sprite_id = SPRITE_conveyor_right;
-	} else if (en->dir == DIR_south) {
-		en->sprite_id = SPRITE_conveyor_down;
-	} else if (en->dir == DIR_west) {
-		en->sprite_id = SPRITE_conveyor_left;
-	} else if (en->dir == DIR_north) {
-		en->sprite_id = SPRITE_conveyor_up;
-	}
+void render_portal(Entity* en) {
+	draw_sprite(SPRITE_portal_frame, en->pos);
+
+	Vector2 draw_pos = en->pos;
+	draw_pos.y += 2;
+	draw_pos.x -= 0.5;
+	draw_sprite(SPRITE_portal_fill, draw_pos);
+}
+
+// :conveyor
+void conveyor_move_logic(Entity* en) {
 
 	Tile output_tile = v2_world_pos_to_tile_pos(en->pos);
 	if (en->dir == DIR_east) {
@@ -3475,7 +3632,7 @@ void update_conveyor(Entity* en) {
 	TileCache* tc = tile_cache_at_tile(output_tile);
 
 	// attempt move into next tile
-	if (tc->entity && tc->entity->has_input_storage && en->input0.id) {
+	if (tc->entity && en->input0.id) {
 		Entity* storage = tc->entity;
 
 		if (storage->arch == ARCH_conveyor) {
@@ -3494,27 +3651,112 @@ void update_conveyor(Entity* en) {
 				}
 			}
 		} else {
-			if (storage->input0.id == 0 || storage->input0.id == en->input0.id) {
-				if (en->next_update_end_time == 0) {
-					en->next_update_end_time = now() + 0.5;
-				}
-				if (has_reached_end_time(en->next_update_end_time)) {
-					en->next_update_end_time = 0;
 
-					storage->input0.id = en->input0.id;
-					storage->input0.amount += 1;
-					en->input0 = (ItemAmount){0};
+			ItemAmount* item_on_conveyor = &en->input0;
+
+			// loop thru slots, checking for desired matches
+			for (int i = 0; i < storage->storage_slot_count; i++) {
+				StorageSlot* dest_slot = &storage->storage_slots[i];
+				if (dest_slot->output_only) {
+					continue;
+				}
+
+				bool is_desired_item;
+				if (dest_slot->desired_item_count) {
+					for (int j = 0; j < dest_slot->desired_item_count; j++) {
+						if (dest_slot->desired_items[j] == item_on_conveyor->id) {
+							is_desired_item = true;
+							break;
+						}
+					}
+				} else {
+					is_desired_item = true;
+				}
+
+				if (is_desired_item && (dest_slot->item.id == 0 || dest_slot->item.id == item_on_conveyor->id)) {
+
+					if (en->next_update_end_time == 0) {
+						en->next_update_end_time = now() + 0.5;
+					}
+					if (has_reached_end_time(en->next_update_end_time)) {
+						en->next_update_end_time = 0;
+
+						dest_slot->item.id = item_on_conveyor->id;
+						dest_slot->item.amount += 1;
+						*item_on_conveyor = (ItemAmount){0};
+					}
+
 				}
 			}
 		}
 	}
 }
 
-void draw_sprite(SpriteID sprite_id, Vector2 pos) {
-	Sprite* sprite = get_sprite(sprite_id);
-	Vector2 draw_pos = pos;
-	draw_pos.x -= sprite->image->width * 0.5;
-	draw_image(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE);
+void update_extractor(Entity* en) {
+
+	// set proper sprite
+	if (en->dir == DIR_east) {
+		en->sprite_id = SPRITE_extractor_east;
+	} else if (en->dir == DIR_south) {
+		en->sprite_id = SPRITE_extractor_south;
+	} else if (en->dir == DIR_west) {
+		en->sprite_id = SPRITE_extractor_west;
+	} else if (en->dir == DIR_north) {
+		en->sprite_id = SPRITE_extractor_north;
+	}
+
+	conveyor_move_logic(en);
+
+	if (!en->input0.id) {
+		Tile input_tile = v2_world_pos_to_tile_pos(en->pos);
+		if (en->dir == DIR_east) {
+			input_tile.x -= 1;
+		} else if (en->dir == DIR_south) {
+			input_tile.y += 1;
+		} else if (en->dir == DIR_west) {
+			input_tile.x += 1;
+		} else if (en->dir == DIR_north) {
+			input_tile.y -= 1;
+		}
+		TileCache* tc = tile_cache_at_tile(input_tile);
+
+		if (tc->entity) {
+			Entity* storage = tc->entity;
+
+			// #improvement - need to define a "extractor takes slot from this slot" markup in setup ?
+			ItemAmount* extraction_slot = &storage->output0;
+			if (storage->arch == ARCH_wood_crate || storage->arch == ARCH_conveyor || storage->arch == ARCH_extractor) {
+				extraction_slot = &storage->input0;
+			}
+
+			// pull from direction
+			if (extraction_slot->id) {
+				en->input0.id = extraction_slot->id;
+				en->input0.amount = 1;
+
+				extraction_slot->amount -= 1;
+				if (extraction_slot->amount <= 0) {
+					*extraction_slot = (ItemAmount){0};
+				}
+			}
+		}
+	}
+}
+
+void update_conveyor(Entity* en) {
+	
+	// set proper sprite
+	if (en->dir == DIR_east) {
+		en->sprite_id = SPRITE_conveyor_right;
+	} else if (en->dir == DIR_south) {
+		en->sprite_id = SPRITE_conveyor_down;
+	} else if (en->dir == DIR_west) {
+		en->sprite_id = SPRITE_conveyor_left;
+	} else if (en->dir == DIR_north) {
+		en->sprite_id = SPRITE_conveyor_up;
+	}
+
+	conveyor_move_logic(en);
 }
 
 void render_conveyor(Entity* en) {
@@ -3972,6 +4214,14 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_conveyor_right] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/conveyor_right.png"), get_heap_allocator())};
 		sprites[SPRITE_large_coal_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/large_coal_depo.png"), get_heap_allocator())};
 		sprites[SPRITE_anti_meteor] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/anti_meteor.png"), get_heap_allocator())};
+		sprites[SPRITE_portal_icon] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/portal_icon.png"), get_heap_allocator())};
+		sprites[SPRITE_portal_frame] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/portal_frame.png"), get_heap_allocator())};
+		sprites[SPRITE_portal_fill] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/portal_fill.png"), get_heap_allocator())};
+		sprites[SPRITE_large_iron_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/large_iron_depo.png"), get_heap_allocator())};
+		sprites[SPRITE_extractor_east] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_east.png"), get_heap_allocator())};
+		sprites[SPRITE_extractor_west] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_west.png"), get_heap_allocator())};
+		sprites[SPRITE_extractor_north] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_north.png"), get_heap_allocator())};
+		sprites[SPRITE_extractor_south] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_south.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -4075,6 +4325,15 @@ int entry(int argc, char **argv) {
 
 		// :item :buildings
 
+		item_data[ITEM_portal] = (ItemData){
+			.to_build=ARCH_portal,
+			.icon=SPRITE_portal_icon,
+			.description=STR("Quantum transportation. Use at own risk."),
+			.exp_cost=9999,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_copper_ingot, 100} }
+		};
+
 		item_data[ITEM_anti_meteor] = (ItemData){
 			.to_build=ARCH_anti_meteor,
 			.icon=SPRITE_anti_meteor,
@@ -4082,6 +4341,15 @@ int entry(int argc, char **argv) {
 			.exp_cost=50,
 			.ingredients_count=1,
 			.ingredients={ {ITEM_copper_ingot, 5} }
+		};
+
+		item_data[ITEM_extractor] = (ItemData){
+			.to_build=ARCH_extractor,
+			.icon=SPRITE_extractor_east,
+			.description=STR("Extracts items from the thing beside it"),
+			.exp_cost=50,
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 1} }
 		};
 
 		item_data[ITEM_conveyor] = (ItemData){
@@ -4208,6 +4476,7 @@ int entry(int argc, char **argv) {
 			.ingredients={ {ITEM_pine_wood, 2}, {ITEM_rock, 5} }
 		};
 		item_data[ITEM_teleporter1] = (ItemData){
+			.disabled=true,
 			.to_build=ARCH_teleporter1,
 			.icon=SPRITE_teleporter1,
 			.description=STR("A gateway to the next world."),
@@ -4659,56 +4928,55 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// :update entities
+		// update entities
 		Entity* player = get_player();
 		tm_scope("entity update")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
 			if (en->is_valid) {
 
-				if (en->arch == ARCH_anti_meteor) {
-					if (!en->frame.is_powered) {
-						en->frame.error = GAME_ERR_no_o2;
-					}
-				}
+				switch (en->arch) {
 
-				if (en->arch == ARCH_conveyor) {
-					update_conveyor(en);
-				}
+					case ARCH_anti_meteor: {
+						if (!en->frame.is_powered) {
+							en->frame.error = GAME_ERR_no_o2;
+						}
+					} break;
 
-				if (en->arch == ARCH_meteor) {
-					update_meteor(en);
-				}
+					// :update
+					case ARCH_extractor: update_extractor(en); break;
+					case ARCH_conveyor: update_conveyor(en); break;
+					case ARCH_meteor: update_meteor(en); break;
+					case ARCH_turret: update_turret(en); break;
+					case ARCH_enemy1: update_enemy(en); break;
 
-				if (en->arch == ARCH_turret) {
-					update_turret(en);
-				}
-
-				if (en->arch == ARCH_enemy1) {
-					update_enemy(en);
+					default: break;
 				}
 
 				// :furnace update
 				if (en->arch == ARCH_furnace) {
 
+					StorageSlot* fuel_slot = &en->storage_slots[0];
+					StorageSlot* resource_slot = &en->storage_slots[1];
+
 					// fuel consume
-					if (en->current_fuel <= 0 && en->input0.id && en->input1.id) {
+					if (en->current_fuel <= 0 && fuel_slot->item.id && resource_slot->item.id) {
 						en->last_fuel_max = 200;
 						en->current_fuel = 200;
 
-						en->input0.amount -= 1;
-						if (en->input0.amount <= 0) {
-							en->input0 = (ItemAmount){0};
+						fuel_slot->item.amount -= 1;
+						if (fuel_slot->item.amount <= 0) {
+							fuel_slot->item = (ItemAmount){0};
 						}
 					}
 
 					// consume crafting item to start
-					if (!en->current_crafting_item && en->current_fuel && en->input1.id) {
-						en->current_crafting_item = en->input1.id;
+					if (!en->current_crafting_item && en->current_fuel && resource_slot->item.id) {
+						en->current_crafting_item = resource_slot->item.id;
 
-						en->input1.amount -= 1;
-						if (en->input1.amount <= 0) {
-							en->input1 = (ItemAmount){0};
+						resource_slot->item.amount -= 1;
+						if (resource_slot->item.amount <= 0) {
+							resource_slot->item = (ItemAmount){0};
 						}
 					}
 
@@ -5264,7 +5532,7 @@ int entry(int argc, char **argv) {
 			}
 		}
 
-		// :render entities
+		// render entities
 		tm_scope("push render entities")
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 			Entity* en = &world->entities[i];
@@ -5283,6 +5551,9 @@ int entry(int argc, char **argv) {
 
 					case ARCH_player: break;
 
+					// :render
+					case ARCH_portal: render_portal(en); break;
+					case ARCH_extractor:
 					case ARCH_conveyor: render_conveyor(en); break;
 					case ARCH_enemy_nest: render_enemy_nest(en); break;
 					case ARCH_meteor: render_meteor(en); break;

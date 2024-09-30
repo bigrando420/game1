@@ -730,28 +730,29 @@ typedef struct WorldResourceData {
 	BiomeID biome_id;
 	ArchetypeID arch_id;
 	int dist_from_self;
+	bool respawn;
 } WorldResourceData;
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
-	{ BIOME_forest, ARCH_tree, 5 },
-	{ BIOME_forest, ARCH_grass, 3 },
+	{ BIOME_forest, ARCH_tree, 5, false },
+	{ BIOME_forest, ARCH_grass, 3, false },
 	// { BIOME_forest, ARCH_flint_depo, 20 },
 
-	{ BIOME_barren, ARCH_rock, 10 },
-	{ BIOME_barren, ARCH_coal_depo, 20 },
+	{ BIOME_barren, ARCH_rock, 10, false },
+	{ BIOME_barren, ARCH_coal_depo, 20, false },
 
-	{ BIOME_copper, ARCH_copper_depo, 10 },
+	{ BIOME_copper, ARCH_copper_depo, 10, false },
 
-	{ BIOME_copper_heavy, ARCH_copper_depo, 4 },
+	{ BIOME_copper_heavy, ARCH_copper_depo, 4, false },
 	// { BIOME_copper_heavy, ARCH_flint_depo, 20 },
-	{ BIOME_copper_heavy, ARCH_rock, 10 },
+	{ BIOME_copper_heavy, ARCH_rock, 10, false },
 
-	{ BIOME_ice, ARCH_ice_vein, 10 },
-	{ BIOME_ice_heavy, ARCH_large_ice_vein, 10 },
+	{ BIOME_ice, ARCH_ice_vein, 6, true },
+	{ BIOME_ice_heavy, ARCH_large_ice_vein, 10, false },
 
-	{ BIOME_iron, ARCH_iron_depo, 6 },
+	{ BIOME_iron, ARCH_iron_depo, 6, true },
 
-	{ BIOME_enemy_nest, ARCH_enemy_nest, 4 },
+	{ BIOME_enemy_nest, ARCH_enemy_nest, 4, false },
 	// :spawn_res system
 };
 
@@ -1603,6 +1604,10 @@ bool has_reached_end_time(float64 end_time) {
 
 // :func dump
 
+void do_resource_respawning() {
+
+}
+
 bool has_enough_for_recipe(ItemAmount* recipe, int count) {
 	for (int i = 0; i < count; i++) {
 		ItemAmount ing = recipe[i];
@@ -2128,8 +2133,6 @@ void world_setup() {
 		en->pos.y = -5;
 		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
 
-		player_en->exp_amount = 20000;
-		
 		world->item_unlocks[ITEM_tether].research_progress = 100;
 
 		world->inventory_items[ITEM_iron_ingot].amount = 100;
@@ -2138,7 +2141,7 @@ void world_setup() {
 		world->inventory_items[ITEM_coal].amount = 50;
 		world->inventory_items[ITEM_o2_shard].amount = 50;
 		world->inventory_items[ITEM_rock].amount = 1000;
-		world->inventory_items[ITEM_exp].amount = 100;
+		world->inventory_items[ITEM_exp].amount = 9999;
 		world->inventory_items[ITEM_flint_axe].amount = 1;
 		world->inventory_items[ITEM_flint].amount = 100;
 		world->inventory_items[ITEM_fiber].amount = 100;
@@ -4323,6 +4326,7 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_anti_meteor] = (ItemData){
+			.disabled=true,
 			.to_build=ARCH_anti_meteor,
 			.icon=SPRITE_anti_meteor,
 			.description=STR("Redirects meteors in a radius"),
@@ -4333,6 +4337,7 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_extractor] = (ItemData){
+			.disabled=true, 
 			.to_build=ARCH_extractor,
 			.icon=SPRITE_extractor_east,
 			.description=STR("Extracts items from the thing beside it"),
@@ -4343,6 +4348,7 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_conveyor] = (ItemData){
+			.disabled=true,
 			.to_build=ARCH_conveyor,
 			.icon=SPRITE_conveyor_right,
 			.description=STR("Moves items"),
@@ -4357,13 +4363,14 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_wood_crate,
 			.description=STR("Stores items"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{ITEM_exp, 20}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 2} }
+			.ingredients={ {ITEM_pine_wood, 5} }
 		};
 
 		// :turret
 		item_data[ITEM_turret] = (ItemData){
+			.disabled=true,
 			.to_build=ARCH_turret,
 			.icon=SPRITE_turret,
 			.description=STR("Shoot bullets at nearby enemies"),
@@ -4374,6 +4381,7 @@ int entry(int argc, char **argv) {
 		};
 		// these need to be a package deal...
 		item_data[ITEM_bullet] = (ItemData){
+			.disabled=true,
 			.pretty_name=STR("Bullet"),
 			.description=STR("Ammo for turrets"),
 			.icon=SPRITE_bullet,
@@ -4429,6 +4437,7 @@ int entry(int argc, char **argv) {
 
 		// :burner
 		item_data[ITEM_burner_drill] = (ItemData){
+			.disabled=true,
 			.to_build=ARCH_burner_drill,
 			.icon=SPRITE_burner_drill,
 			.description=STR("Burns coal to drill into large veins"),
@@ -4538,6 +4547,8 @@ int entry(int argc, char **argv) {
 		{
 			world->tick_count += 1;
 			world->time_elapsed += delta_t;
+
+			do_resource_respawning();
 
 			// setup tile entity cache for the frame
 			create_tile_entity_pair_cache();

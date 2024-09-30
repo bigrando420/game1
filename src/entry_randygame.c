@@ -1602,10 +1602,180 @@ bool has_reached_end_time(float64 end_time) {
 	return now() > end_time;
 }
 
+Tile* get_tile_list_at_pos_based_on_arch(Vector2 pos, ArchetypeID id) {
+	Entity en_data = get_archetype_data(id);
+
+	Tile* tiles;
+	growing_array_init_reserve((void**)&tiles, sizeof(Tile), 4, get_temporary_allocator());
+
+	Tile start_tile = v2_world_pos_to_tile_pos(pos);
+
+	int half_width = en_data.tile_size.x / 2;
+	int half_height = en_data.tile_size.y / 2;
+	for (int y = -half_height; y < half_height + en_data.tile_size.y % 2; y++)
+	for (int x = -half_width; x < half_width + en_data.tile_size.x % 2; x++) {
+		Tile tile = {start_tile.x + x, start_tile.y + y};
+		growing_array_add((void**)&tiles, &tile);
+	}
+
+	return tiles;
+}
+
+Vector2 v2_tile_pos_to_entity_world_pos(Vector2i tile_pos, ArchetypeID id) {
+	Vector2 pos = v2_tile_pos_to_world_pos(tile_pos);
+	pos.x += get_archetype_data(id).tile_size.x * tile_width * 0.5;
+	pos.y += get_archetype_data(id).tile_size.y * tile_width * 0.5;
+	return pos;
+}
+
+typedef struct TileCache {
+	Tile world_tile;
+	Entity* entity;
+	bool visited;
+} TileCache;
+typedef struct TileEntityCache {
+	TileCache* tiles;
+	int tile_count;
+} TileEntityCache;
+
+void add_new_entity_to_tile_cache(Entity* en) {
+	TileEntityCache* cache = world_frame.tile_entity_cache;
+
+	Tile* tiles = get_tile_list_at_pos_based_on_arch(en->pos, en->arch);
+	for (int j=0;j<growing_array_get_valid_count(tiles);j++) {
+		Tile tile = tiles[j];
+		Vector2i local_tile_pos = world_tile_to_local_map(tile);
+		int index = local_tile_pos.y * map.width + local_tile_pos.x;
+		if (index >= 0 && index < cache->tile_count) {
+			cache->tiles[index].entity = en;
+		}
+	}
+}
+
+void create_tile_entity_pair_cache() {
+	if (world_frame.tile_entity_cache != 0) {
+		return;
+	}
+
+	tm_scope("allocs")
+	{
+		world_frame.tile_entity_cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
+		TileEntityCache* cache = world_frame.tile_entity_cache;
+		cache->tile_count = map.height * map.width;
+		cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
+	}
+
+	TileEntityCache* cache = world_frame.tile_entity_cache;
+
+	tm_scope("store tiles")
+	for (int y = 0; y < map.height; y++)
+	for (int x = 0; x < map.width; x++) {
+		TileCache* tc = &cache->tiles[local_map_pos_to_index(v2i(x, y))];
+		tc->world_tile = local_map_to_world_tile(v2i(x, y));
+	}
+
+	tm_scope("add enttiy to tile cache")
+	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+		Entity* en = &world->entities[i];
+		add_new_entity_to_tile_cache(en);
+	}
+}
+
+TileCache* tile_cache_at_tile(Tile tile) {
+	TileEntityCache* cache = world_frame.tile_entity_cache;
+	Vector2i local_tile = world_tile_to_local_map(tile);
+	int index = local_tile.y * map.width + local_tile.x;
+	if (index < 0 || index > cache->tile_count) {
+		return 0;
+	} else {
+		return &cache->tiles[index];
+	}
+}
+
+Entity* entity_at_tile(Tile tile) {
+	TileEntityCache* cache = world_frame.tile_entity_cache;
+	Vector2i local_tile = world_tile_to_local_map(tile);
+	int index = local_tile.y * map.width + local_tile.x;
+	if (index < 0 || index > cache->tile_count) {
+		return 0;
+	} else {
+		return cache->tiles[index].entity;
+	}
+}
+
 // :func dump
 
 void do_resource_respawning() {
+	for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
+		WorldResourceData data = world_resources[i];
+		if (!data.respawn) {
+			continue;
+		}
 
+		Tile* potential_spawn_tiles;
+		growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
+		for (int j = 0; j < growing_array_get_valid_count(map.biome_tiles[data.biome_id]); j++) {
+			Tile t = map.biome_tiles[data.biome_id][j];
+			TileCache* tc = tile_cache_at_tile(t);
+			if (!tc->entity) {
+				growing_array_add((void**)&potential_spawn_tiles, &tc->world_tile);
+			}
+		}
+
+		// find random spot ahead of time
+		int iterations = 0;
+		int count = growing_array_get_valid_count(potential_spawn_tiles);
+		bool found_spot = false;
+		Vector2 spawn_pos = {0};
+		if (count) {
+			while (true) {
+				// pick from a random spot
+				Tile spawn_tile = potential_spawn_tiles[get_random_int_in_range(0, count-1)];
+
+				spawn_pos = v2_tile_pos_to_entity_world_pos(spawn_tile, data.arch_id);
+
+				// is it close to any entities?
+				bool too_close = false;
+				for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+					Entity* en = &world->entities[j];
+					if (en->is_valid && en->arch == data.arch_id && !en->isnt_a_tile) {
+						int tile_radius = data.dist_from_self;
+						if (v2_dist(spawn_pos, en->pos) < tile_width * tile_radius) {
+							too_close = true;
+							break;
+						}
+					}
+				}
+
+				if (!too_close) {
+					found_spot = true;
+					break;
+				}
+
+				iterations += 1;
+				if (iterations > 10) {
+					break;
+				}
+			}
+		}
+
+		// plonk down
+		if (found_spot) {
+			if (world->resource_next_spawn_end_time[i] == 0) {
+				world->resource_next_spawn_end_time[i] = now() + 2.f;
+			}
+
+			if (has_reached_end_time(world->resource_next_spawn_end_time[i])) {
+				Entity* en = entity_create();
+				entity_setup(en, data.arch_id);
+				en->pos = spawn_pos;
+				add_new_entity_to_tile_cache(en);
+
+				world->resource_next_spawn_end_time[i] = 0;
+			}
+		}
+
+	}
 }
 
 bool has_enough_for_recipe(ItemAmount* recipe, int count) {
@@ -1726,25 +1896,6 @@ void shader_recompile() {
 
 bool is_night() {
 	return almost_equals(world->night_alpha, 1.0, 0.1);
-}
-
-Tile* get_tile_list_at_pos_based_on_arch(Vector2 pos, ArchetypeID id) {
-	Entity en_data = get_archetype_data(id);
-
-	Tile* tiles;
-	growing_array_init_reserve((void**)&tiles, sizeof(Tile), 4, get_temporary_allocator());
-
-	Tile start_tile = v2_world_pos_to_tile_pos(pos);
-
-	int half_width = en_data.tile_size.x / 2;
-	int half_height = en_data.tile_size.y / 2;
-	for (int y = -half_height; y < half_height + en_data.tile_size.y % 2; y++)
-	for (int x = -half_width; x < half_width + en_data.tile_size.x % 2; x++) {
-		Tile tile = {start_tile.x + x, start_tile.y + y};
-		growing_array_add((void**)&tiles, &tile);
-	}
-
-	return tiles;
 }
 
 Range2f get_entity_collision_bounds(Entity* en) {
@@ -1878,13 +2029,6 @@ void do_entity_drops(Entity* en) {
 	}
 }
 
-Vector2 v2_tile_pos_to_entity_world_pos(Vector2i tile_pos, ArchetypeID id) {
-	Vector2 pos = v2_tile_pos_to_world_pos(tile_pos);
-	pos.x += get_archetype_data(id).tile_size.x * tile_width * 0.5;
-	pos.y += get_archetype_data(id).tile_size.y * tile_width * 0.5;
-	return pos;
-}
-
 void draw_item_amount_in_rect(ItemAmount item_amount, Range2f rect) {
 	draw_sprite_in_rect(get_sprite_id_from_item(item_amount.id), rect, COLOR_WHITE, 0.1);
 
@@ -1945,81 +2089,6 @@ void camera_shake_at_pos(float amount, Vector2 source_position, float radius, fl
 		camera_shake(adjusted_amount);
 	}
 	// Beyond radius + falloff_distance, do not apply any shake
-}
-
-typedef struct TileCache {
-	Tile world_tile;
-	Entity* entity;
-	bool visited;
-} TileCache;
-typedef struct TileEntityCache {
-	TileCache* tiles;
-	int tile_count;
-} TileEntityCache;
-
-void add_new_entity_to_tile_cache(Entity* en) {
-	TileEntityCache* cache = world_frame.tile_entity_cache;
-
-	Tile* tiles = get_tile_list_at_pos_based_on_arch(en->pos, en->arch);
-	for (int j=0;j<growing_array_get_valid_count(tiles);j++) {
-		Tile tile = tiles[j];
-		Vector2i local_tile_pos = world_tile_to_local_map(tile);
-		int index = local_tile_pos.y * map.width + local_tile_pos.x;
-		if (index >= 0 && index < cache->tile_count) {
-			cache->tiles[index].entity = en;
-		}
-	}
-}
-
-void create_tile_entity_pair_cache() {
-	if (world_frame.tile_entity_cache != 0) {
-		return;
-	}
-
-	tm_scope("allocs")
-	{
-		world_frame.tile_entity_cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
-		TileEntityCache* cache = world_frame.tile_entity_cache;
-		cache->tile_count = map.height * map.width;
-		cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
-	}
-
-	TileEntityCache* cache = world_frame.tile_entity_cache;
-
-	tm_scope("store tiles")
-	for (int y = 0; y < map.height; y++)
-	for (int x = 0; x < map.width; x++) {
-		TileCache* tc = &cache->tiles[local_map_pos_to_index(v2i(x, y))];
-		tc->world_tile = local_map_to_world_tile(v2i(x, y));
-	}
-
-	tm_scope("add enttiy to tile cache")
-	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
-		Entity* en = &world->entities[i];
-		add_new_entity_to_tile_cache(en);
-	}
-}
-
-TileCache* tile_cache_at_tile(Tile tile) {
-	TileEntityCache* cache = world_frame.tile_entity_cache;
-	Vector2i local_tile = world_tile_to_local_map(tile);
-	int index = local_tile.y * map.width + local_tile.x;
-	if (index < 0 || index > cache->tile_count) {
-		return 0;
-	} else {
-		return &cache->tiles[index];
-	}
-}
-
-Entity* entity_at_tile(Tile tile) {
-	TileEntityCache* cache = world_frame.tile_entity_cache;
-	Vector2i local_tile = world_tile_to_local_map(tile);
-	int index = local_tile.y * map.width + local_tile.x;
-	if (index < 0 || index > cache->tile_count) {
-		return 0;
-	} else {
-		return cache->tiles[index].entity;
-	}
 }
 
 bool does_overlap_existing_entities(Vector2 pos, ArchetypeID id) {
@@ -4548,8 +4617,6 @@ int entry(int argc, char **argv) {
 			world->tick_count += 1;
 			world->time_elapsed += delta_t;
 
-			do_resource_respawning();
-
 			// setup tile entity cache for the frame
 			create_tile_entity_pair_cache();
 
@@ -4560,6 +4627,8 @@ int entry(int argc, char **argv) {
 					world_frame.player = en;
 				}
 			}
+
+			do_resource_respawning();
 		}
 
 		// debug adjust zoom

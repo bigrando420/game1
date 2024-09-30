@@ -392,6 +392,7 @@ typedef enum SpriteID {
 	SPRITE_extractor_south,
 	SPRITE_extractor_east,
 	SPRITE_extractor_west,
+	SPRITE_thumper,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -452,6 +453,7 @@ typedef enum ItemID {
 	ITEM_anti_meteor,
 	ITEM_portal,
 	ITEM_extractor,
+	ITEM_thumper,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -504,6 +506,7 @@ typedef enum ArchetypeID {
 	ARCH_portal = 35,
 	ARCH_large_iron_depo = 36,
 	ARCH_extractor = 37,
+	ARCH_thumper = 38,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -672,7 +675,7 @@ typedef struct Entity {
 	int o2_consume_amount;
 	float o2_consume_rate;
 	float64 next_consume_end_time;
-	float anti_meteor_radius;
+	bool has_anti_meteor_radius;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -1001,6 +1004,18 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 // :arch :setup things
 
+// :thumper
+void setup_thumper(Entity* en) {
+	en->pretty_name = STR("Thumper");
+	en->arch = ARCH_thumper;
+	en->sprite_id = SPRITE_thumper;
+	en->interactable_entity = true;
+	entity_max_health_setter(en, 10);
+	en->has_collision = true;
+	en->tile_size = v2i(2, 2);
+	en->radius = tile_width * 10;
+}
+
 void setup_large_iron_depo(Entity* en) {
 	en->pretty_name = STR("Large Iron Deposit");
 	en->arch = ARCH_large_iron_depo;
@@ -1030,7 +1045,8 @@ void setup_anti_meteor(Entity* en) {
 	en->o2_consume_rate = 1.f;
 	en->o2_consume_amount = 1;
 	en->is_oxygen_tether = true;
-	en->anti_meteor_radius = tile_width * 8;
+	en->has_anti_meteor_radius = true;
+	en->radius = tile_width * 8;
 }
 
 void setup_large_coal_depo(Entity* en) {
@@ -1231,7 +1247,8 @@ void setup_tether(Entity* en) {
 
 void setup_oxygenerator(Entity* en) {
 	en->arch = ARCH_oxygenerator;
-	en->anti_meteor_radius = tile_width * 8;
+	en->has_anti_meteor_radius = true;
+	en->radius = tile_width * 8;
 	en->has_input_storage = true;
 	en->pretty_name = STR("Emergency Oxygenerator");
 	en->sprite_id = SPRITE_oxygenerator;
@@ -1451,6 +1468,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_portal: setup_portal(en); break;
 		case ARCH_large_iron_depo: setup_large_iron_depo(en); break;
 		case ARCH_extractor: setup_extractor(en); break;
+		case ARCH_thumper: setup_thumper(en); break;
 		// :arch :setup
 	}
 }
@@ -1705,6 +1723,8 @@ Entity* entity_at_tile(Tile tile) {
 
 // :func dump
 
+// :spawn
+float resource_respawn_length = 10.f;
 void do_resource_respawning() {
 	for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 		WorldResourceData data = world_resources[i];
@@ -1762,7 +1782,7 @@ void do_resource_respawning() {
 		// plonk down
 		if (found_spot) {
 			if (world->resource_next_spawn_end_time[i] == 0) {
-				world->resource_next_spawn_end_time[i] = now() + 2.f;
+				world->resource_next_spawn_end_time[i] = now() + resource_respawn_length;
 			}
 
 			if (has_reached_end_time(world->resource_next_spawn_end_time[i])) {
@@ -2190,6 +2210,7 @@ void world_setup() {
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
+		/*
 		en = entity_create();
 		setup_large_coal_depo(en);
 		en->pos.x = 50;
@@ -2201,6 +2222,7 @@ void world_setup() {
 		en->pos.x = 50;
 		en->pos.y = -5;
 		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
+		*/
 
 		world->item_unlocks[ITEM_tether].research_progress = 100;
 
@@ -2897,6 +2919,104 @@ void do_world_entity_interaction_ui_stuff() {
 		}
 	}
 
+	// :thumper ux
+	if (en->arch == ARCH_thumper) {
+		ItemID desired_item = ITEM_coal;
+
+		float x0 = en->pos.x;
+		float y0 = en->pos.y;
+		y0 += 10.f;
+
+		Vector2 size = v2(10, 10);
+		x0 -= size.x * 0.5;
+
+		bool do_tooltip = false;
+		Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
+		if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+			
+			// interact with the slot
+			{
+				if (world->mouse_cursor_item.id) {
+					if (en->input0.id) {
+						if (en->input0.id == world->mouse_cursor_item.id) {
+							// attempt stack
+							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+								en->input0.amount += world->mouse_cursor_item.amount;
+								world->mouse_cursor_item = (ItemAmount){0};
+							}
+						} else {
+							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+								if (world->mouse_cursor_item.id == desired_item) {
+									// swap
+									ItemAmount temp = world->mouse_cursor_item;
+									world->mouse_cursor_item = en->input0;
+									en->input0 = temp;
+								} else {
+									play_sound("event:/error");
+								}
+							}
+						}
+					} else {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							if (world->mouse_cursor_item.id == desired_item) {
+								// place inside
+								en->input0 = world->mouse_cursor_item;
+								world->mouse_cursor_item = (ItemAmount){0};
+							} else {
+								play_sound("event:/error");
+							}
+						}
+					}
+				} else {
+					if (en->input0.id) {
+						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+							// take into hand
+							world->mouse_cursor_item = en->input0;
+							en->input0 = (ItemAmount){0};
+						}
+
+						do_tooltip = true;
+					}
+				}
+			}
+		}
+
+		draw_rect(rect.min, size, COLOR_GRAY);
+
+		if (en->input0.id) {
+			draw_item_amount_in_rect(en->input0, rect);
+		} else {
+			Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(desired_item), rect, COLOR_WHITE, 0.1);
+
+			if (en->current_fuel == 0) {
+				set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
+			} else {
+				set_col_override(quad, v4(0,0,0, 0.8));
+			}
+		}
+
+		// fuel bar
+		{
+			x0 += size.x + 1.f;
+
+			Vector2 bar_size = v2(2, size.y);
+
+			draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+
+			float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
+
+			draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
+		}
+
+		if (do_tooltip) {
+			item_tooltip(en->input0);
+		}
+	}
+
 	pop_z_layer();
 }
 
@@ -3532,12 +3652,12 @@ void do_ui_stuff() {
 			}
 
 			// range preview
-			// if (arch_id == ARCH_burner_drill)
-			// {
-				// float radius = get_archetype_data(arch_id).radius;
-				// #polish - make this an outline, copy custom shader example
-				// draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.1));
-			// }
+			if (arch_data.radius)
+			{
+				float radius = arch_data.radius;
+				// #polish - make this an outline?
+				draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.05));
+			}
 
 			// draw preview
 			{
@@ -3663,6 +3783,65 @@ void draw_base_sprite(Entity* en) {
 }
 
 // update :func dump
+
+// :thumper
+void update_thumper(Entity* en) {
+
+	// fuel processing
+	if (en->current_fuel <= 0) {
+		// attempt fuel consume
+		if (en->input0.id) {
+			en->last_fuel_max = 30;
+			en->current_fuel = 30;
+
+			en->input0.amount -= 1;
+			if (en->input0.amount <= 0) {
+				en->input0 = (ItemAmount){0};
+			}
+		}
+	}
+
+	if (en->current_fuel == 0) {
+		en->frame.error = GAME_ERR_no_fuel;
+	}
+
+	// hit timer processing
+	if (en->current_fuel > 0) {
+		if (en->next_hit_end_time == 0) {
+			en->next_hit_end_time = now() + 1.f;
+		}
+		if (has_reached_end_time(en->next_hit_end_time)) {
+			en->next_hit_end_time = 0;
+
+			// get all entities in radius
+			bool did_hit_something = false;
+			for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
+				Entity* against = &world->entities[j];
+				if (against->destroyable_world_item && v2_dist(en->pos, against->pos) < en->radius) {
+					did_hit_something = true;
+
+					against->white_flash_current_alpha = 1.0;
+					particle_emit(against->pos, PFX_hit);
+					against->health -= 1;
+
+					play_sound_at_pos("event:/hit_generic", against->pos);
+
+					if (against->health <= 0) {
+						do_entity_drops(against);
+						do_entity_exp_drops(against);
+						entity_zero_immediately(against);
+					}
+				}
+			}
+
+			if (did_hit_something) {
+				camera_shake_at_pos(0.1, en->pos, 50, 50);
+				en->current_fuel -= 1;
+			}
+		}
+	}
+
+}
 
 void render_portal(Entity* en) {
 	draw_sprite(SPRITE_portal_frame, en->pos);
@@ -4281,6 +4460,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_extractor_west] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_west.png"), get_heap_allocator())};
 		sprites[SPRITE_extractor_north] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_north.png"), get_heap_allocator())};
 		sprites[SPRITE_extractor_south] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_south.png"), get_heap_allocator())};
+		sprites[SPRITE_thumper] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/thumper.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -4384,6 +4564,16 @@ int entry(int argc, char **argv) {
 
 		// :item :buildings
 
+		item_data[ITEM_thumper] = (ItemData){
+			.to_build=ARCH_thumper,
+			.icon=SPRITE_thumper,
+			.description=STR("Burns fuel to slam into the ground and destroy resources in a radius."),
+			.research_ingredients_count=1,
+			.research_ingredients={{ITEM_exp, 100}},
+			.ingredients_count=1,
+			.ingredients={ {ITEM_iron_ingot, 10} }
+		};
+
 		item_data[ITEM_portal] = (ItemData){
 			.to_build=ARCH_portal,
 			.icon=SPRITE_portal_icon,
@@ -4395,7 +4585,6 @@ int entry(int argc, char **argv) {
 		};
 
 		item_data[ITEM_anti_meteor] = (ItemData){
-			.disabled=true,
 			.to_build=ARCH_anti_meteor,
 			.icon=SPRITE_anti_meteor,
 			.description=STR("Redirects meteors in a radius"),
@@ -4918,12 +5107,12 @@ int entry(int argc, char **argv) {
 				}
 
 				// draw radius stuff 
-				if (en->arch != ARCH_oxygenerator && en->anti_meteor_radius)
+				if (en->arch != ARCH_oxygenerator && en->radius)
 				{
 					Vector2 draw_pos = en->pos;
-					draw_pos.x -= en->anti_meteor_radius;
-					draw_pos.y -= en->anti_meteor_radius;
-					draw_circle(draw_pos, v2(en->anti_meteor_radius * 2, en->anti_meteor_radius * 2), v4(1, 1, 1, 0.05));
+					draw_pos.x -= en->radius;
+					draw_pos.y -= en->radius;
+					draw_circle(draw_pos, v2(en->radius * 2, en->radius * 2), v4(1, 1, 1, 0.05));
 				}
 
 
@@ -4943,7 +5132,7 @@ int entry(int argc, char **argv) {
 			growing_array_init_reserve((void**)&anti_meteor_entities, sizeof(Entity*), 1, get_temporary_allocator());
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
-				if (en->is_valid && en->anti_meteor_radius != 0 && en->last_frame.is_powered) {
+				if (en->is_valid && en->has_anti_meteor_radius && en->radius != 0 && en->last_frame.is_powered) {
 					growing_array_add((void**)&anti_meteor_entities, &en);
 				}
 			}
@@ -4970,7 +5159,7 @@ int entry(int argc, char **argv) {
 					for (int i = 0; i < growing_array_get_valid_count(anti_meteor_entities); i++) {
 						Entity* en = anti_meteor_entities[i];
 						float dist = v2_dist(en->pos, spawn_pos);
-						if (dist < en->anti_meteor_radius + meteor_radius) {
+						if (dist < en->radius + meteor_radius) {
 							is_in_no_go_zone = true;
 						}
 					}
@@ -5024,6 +5213,7 @@ int entry(int argc, char **argv) {
 					} break;
 
 					// :update
+					case ARCH_thumper: update_thumper(en); break;
 					case ARCH_extractor: update_extractor(en); break;
 					case ARCH_conveyor: update_conveyor(en); break;
 					case ARCH_meteor: update_meteor(en); break;

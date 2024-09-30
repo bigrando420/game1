@@ -393,6 +393,11 @@ typedef enum SpriteID {
 	SPRITE_extractor_east,
 	SPRITE_extractor_west,
 	SPRITE_thumper,
+	SPRITE_rock_small,
+	SPRITE_rock_medium,
+	SPRITE_rock_large,
+	SPRITE_meteorite_depo,
+	SPRITE_raw_meteorite,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -454,6 +459,7 @@ typedef enum ItemID {
 	ITEM_portal,
 	ITEM_extractor,
 	ITEM_thumper,
+	ITEM_raw_meteorite,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -507,6 +513,10 @@ typedef enum ArchetypeID {
 	ARCH_large_iron_depo = 36,
 	ARCH_extractor = 37,
 	ARCH_thumper = 38,
+	ARCH_rock_small = 39,
+	ARCH_rock_medium = 40,
+	ARCH_rock_large = 41,
+	ARCH_meteorite_depo = 42,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -665,6 +675,7 @@ typedef struct Entity {
 	float rotation_target;
 	bool enemy_target;
 	bool destroyable_by_explosion;
+	bool meteor_destroy_without_drops;
 	EntityHandle spawned_from;
 	ItemID big_resource_drop;
 	s32 z_layer;
@@ -741,7 +752,9 @@ WorldResourceData world_resources[] = {
 	{ BIOME_forest, ARCH_grass, 3, false },
 	// { BIOME_forest, ARCH_flint_depo, 20 },
 
-	{ BIOME_barren, ARCH_rock, 10, false },
+	{ BIOME_barren, ARCH_rock_small, 10, false },
+	{ BIOME_barren, ARCH_rock_medium, 15, false },
+	{ BIOME_barren, ARCH_rock_large, 20, false },
 	{ BIOME_barren, ARCH_coal_depo, 20, false },
 
 	{ BIOME_copper, ARCH_copper_depo, 10, false },
@@ -901,7 +914,8 @@ typedef struct World {
 	ItemAmount mouse_cursor_item;
 	float night_alpha;
 	float night_alpha_target;
-	float64 next_meteor_spawn_end_time;
+	float64 next_close_meteor_spawn_end_time;
+	float64 next_far_meteor_spawn_end_time;
 	Direction cursor_rotate_dir;
 	// :world :state
 } World;
@@ -1003,6 +1017,63 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 }
 
 // :arch :setup things
+
+void setup_meteorite_depo(Entity* en) {
+	en->pretty_name = STR("Meteorite Deposit");
+	en->arch = ARCH_meteorite_depo;
+	en->sprite_id = SPRITE_meteorite_depo;
+	entity_max_health_setter(en, rock_health * 3);
+	en->destroyable_world_item = true;
+	en->drops_count = 2;
+	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=3};
+	en->drops[1] = (ItemAmount){.id=ITEM_raw_meteorite, .amount=1};
+	en->dmg_type = DMG_pickaxe;
+	en->tile_size = v2i(3, 1);
+	en->has_collision = true;
+}
+
+void setup_rock_small(Entity* en) {
+	en->pretty_name = STR("Rock");
+	en->arch = ARCH_rock_small;
+	en->sprite_id = SPRITE_rock_small;
+	entity_max_health_setter(en, rock_health);
+	en->destroyable_world_item = true;
+	en->destroyable_by_explosion = true;
+	en->meteor_destroy_without_drops = true;
+	en->drops_count = 1;
+	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=1};
+	en->dmg_type = DMG_pickaxe;
+	en->tile_size = v2i(2, 1);
+	en->has_collision = true;
+}
+void setup_rock_medium(Entity* en) {
+	en->pretty_name = STR("Rock");
+	en->arch = ARCH_rock_medium;
+	en->destroyable_by_explosion = true;
+	en->meteor_destroy_without_drops = true;
+	en->sprite_id = SPRITE_rock_medium;
+	entity_max_health_setter(en, rock_health * 1.5);
+	en->destroyable_world_item = true;
+	en->drops_count = 1;
+	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=2};
+	en->dmg_type = DMG_pickaxe;
+	en->tile_size = v2i(2, 2);
+	en->has_collision = true;
+}
+void setup_rock_large(Entity* en) {
+	en->pretty_name = STR("Rock");
+	en->arch = ARCH_rock_large;
+	en->destroyable_by_explosion = true;
+	en->meteor_destroy_without_drops = true;
+	en->sprite_id = SPRITE_rock_large;
+	entity_max_health_setter(en, rock_health * 2);
+	en->destroyable_world_item = true;
+	en->drops_count = 1;
+	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=3};
+	en->dmg_type = DMG_pickaxe;
+	en->tile_size = v2i(3, 2);
+	en->has_collision = true;
+}
 
 // :thumper
 void setup_thumper(Entity* en) {
@@ -1469,6 +1540,10 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_large_iron_depo: setup_large_iron_depo(en); break;
 		case ARCH_extractor: setup_extractor(en); break;
 		case ARCH_thumper: setup_thumper(en); break;
+		case ARCH_rock_small: setup_rock_small(en); break;
+		case ARCH_rock_medium: setup_rock_medium(en); break;
+		case ARCH_rock_large: setup_rock_large(en); break;
+		case ARCH_meteorite_depo: setup_meteorite_depo(en); break;
 		// :arch :setup
 	}
 }
@@ -1722,6 +1797,10 @@ Entity* entity_at_tile(Tile tile) {
 }
 
 // :func dump
+
+float get_world_radius() {
+	return map.width * tile_width / 2;
+}
 
 // :spawn
 float resource_respawn_length = 10.f;
@@ -2198,8 +2277,8 @@ void world_setup() {
 
 	en = entity_create();
 	setup_ice_vein(en);
-	en->pos.x = 70;
-	en->pos.y = -30;
+	en->pos.x = 50;
+	en->pos.y = 0;
 	en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
 
 	spawn_world_resources();
@@ -4046,17 +4125,30 @@ void render_enemy_nest(Entity* en) {
 float meteor_strike_length = 3.5f;
 void update_meteor(Entity* en) {
 
+	bool is_distant_meteor = v2_dist(get_player()->pos, en->pos) > 250.f;
+
 	if (en->next_hit_end_time == 0) {
 		en->next_hit_end_time = now() + meteor_strike_length;
-		play_sound_at_pos("event:/meteor_crash", en->pos);
+
+		if (is_distant_meteor) {
+			play_sound_at_pos("event:/meteor_crash_far", en->pos);
+		} else {
+			play_sound_at_pos("event:/meteor_crash", en->pos);
+		}
 	}
 
 	if (has_reached_end_time(en->next_hit_end_time)) {
 
-		// somewhat #volatile with fmod sound spatialisation range
-		float start_falloff = 80.f;
-		float end_falloff = 500.f;
-		camera_shake_at_pos(0.5, en->pos, start_falloff, end_falloff-start_falloff);
+		if (is_distant_meteor) {
+			float start_falloff = 80.f;
+			float end_falloff = 500.f;
+			camera_shake_at_pos(0.5, en->pos, start_falloff, end_falloff-start_falloff);
+		} else {
+			// somewhat #volatile with fmod sound spatialisation range
+			float start_falloff = 80.f;
+			float end_falloff = 500.f;
+			camera_shake_at_pos(0.5, en->pos, start_falloff, end_falloff-start_falloff);
+		}
 
 		// damage entities in a radius
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -4067,7 +4159,9 @@ void update_meteor(Entity* en) {
 					if (against->arch == ARCH_player) {
 						against->oxygen = 0;
 					} else {
-						do_entity_drops(against);
+						if (!against->meteor_destroy_without_drops) {
+							do_entity_drops(against);
+						}
 						entity_zero_immediately(against);
 					}
 				}
@@ -4075,21 +4169,21 @@ void update_meteor(Entity* en) {
 		}
 
 		// spawn in new resources
-		int ice_count = 0;
+		int meteorite_count = 0;
 		for (int i = 0; i < get_random_int_in_range(3, 5); i++) {
 			
 			// :meteor drops 
 			ArchetypeWeight weights[] = {
 				{ARCH_coal_depo, 2},
-				{ARCH_rock, 3},
+				{ARCH_rock_small, 3},
+				{ARCH_rock_medium, 1},
+				{ARCH_rock_large, 0.5},
+				{ARCH_meteorite_depo, 0.5},
 			};
-
 			ArchetypeID arch = random_weighted_archetype(weights, ARRAY_COUNT(weights));
-			if (ice_count < 2) {
-				arch = ARCH_ice_vein;
-			}
-			if (arch == ARCH_ice_vein) {
-				ice_count += 1;
+			if (meteorite_count == 0) {
+				arch = ARCH_meteorite_depo;
+				meteorite_count += 1;
 			}
 
 			Vector2 spawn_pos;
@@ -4461,6 +4555,11 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_extractor_north] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_north.png"), get_heap_allocator())};
 		sprites[SPRITE_extractor_south] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_south.png"), get_heap_allocator())};
 		sprites[SPRITE_thumper] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/thumper.png"), get_heap_allocator())};
+		sprites[SPRITE_rock_small] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/rock_small.png"), get_heap_allocator())};
+		sprites[SPRITE_rock_medium] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/rock_medium.png"), get_heap_allocator())};
+		sprites[SPRITE_rock_large] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/rock_large.png"), get_heap_allocator())};
+		sprites[SPRITE_meteorite_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/meteorite_depo.png"), get_heap_allocator())};
+		sprites[SPRITE_raw_meteorite] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/raw_meteorite.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -4487,6 +4586,7 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item resources
+		item_data[ITEM_raw_meteorite] = (ItemData){ .pretty_name=STR("Raw Meteorite"), .icon=SPRITE_raw_meteorite};
 		item_data[ITEM_red_core] = (ItemData){ .pretty_name=STR("Æ█Ξ2vX Core"), .icon=SPRITE_red_core};
 		item_data[ITEM_iron_ingot] = (ItemData){ .pretty_name=STR("Iron Ingot"), .icon=SPRITE_iron_ingot};
 		item_data[ITEM_raw_iron] = (ItemData){ .pretty_name=STR("Raw Iron"), .icon=SPRITE_raw_iron, .furnace_transform_into=ITEM_iron_ingot};
@@ -5123,11 +5223,6 @@ int entry(int argc, char **argv) {
 
 		// spawn :meteors
 		{
-			if (world->next_meteor_spawn_end_time == 0) {
-				world->next_meteor_spawn_end_time = now() + get_random_float32_in_range(100, 120);
-				// world->next_meteor_spawn_end_time = now() + 1.0f;
-			}
-
 			Entity** anti_meteor_entities;
 			growing_array_init_reserve((void**)&anti_meteor_entities, sizeof(Entity*), 1, get_temporary_allocator());
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
@@ -5137,50 +5232,115 @@ int entry(int argc, char **argv) {
 				}
 			}
 
-			if (has_reached_end_time(world->next_meteor_spawn_end_time)) {
-				world->next_meteor_spawn_end_time = 0;
+			// close spawn
+			// this is so we basically whack the player lol
+			{
+				if (world->next_close_meteor_spawn_end_time == 0) {
+					world->next_close_meteor_spawn_end_time = now() + get_random_float32_in_range(100, 120);
+					// world->next_close_meteor_spawn_end_time = now() + 1.0f;
+				}
 
-				float meteor_radius = get_archetype_data(ARCH_meteor).radius;
+				if (has_reached_end_time(world->next_close_meteor_spawn_end_time)) {
+					world->next_close_meteor_spawn_end_time = 0;
 
-				Vector2 spawn_pos;
-				bool found_pos = false;
-				int iterations = 0;
-				while (true) {
+					float meteor_radius = get_archetype_data(ARCH_meteor).radius;
 
-					float max_spawn_radius = 10.f;
-					if (iterations > 10) {
-						max_spawn_radius = 150.f;
-					}
+					Vector2 spawn_pos;
+					bool found_pos = false;
+					int iterations = 0;
+					while (true) {
 
-					spawn_pos = get_player()->pos;
-					spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, max_spawn_radius)));
+						float max_spawn_radius = 0.f;
+						if (iterations > 10) {
+							max_spawn_radius = 150.f;
+						}
 
-					bool is_in_no_go_zone = false;
-					for (int i = 0; i < growing_array_get_valid_count(anti_meteor_entities); i++) {
-						Entity* en = anti_meteor_entities[i];
-						float dist = v2_dist(en->pos, spawn_pos);
-						if (dist < en->radius + meteor_radius) {
-							is_in_no_go_zone = true;
+						spawn_pos = get_player()->pos;
+						spawn_pos = v2_add(spawn_pos, v2_mulf(get_random_v2(), get_random_float32_in_range(0, max_spawn_radius)));
+
+						bool is_in_no_go_zone = false;
+						for (int i = 0; i < growing_array_get_valid_count(anti_meteor_entities); i++) {
+							Entity* en = anti_meteor_entities[i];
+							float dist = v2_dist(en->pos, spawn_pos);
+							if (dist < en->radius + meteor_radius) {
+								is_in_no_go_zone = true;
+							}
+						}
+
+						if (!is_in_no_go_zone) {
+							found_pos = true;
+							break;
+						}
+
+						iterations += 1;
+						if (iterations > 100) {
+							break;
 						}
 					}
 
-					if (!is_in_no_go_zone) {
-						found_pos = true;
-						break;
-					}
-
-					iterations += 1;
-					if (iterations > 100) {
-						break;
+					if (found_pos) {
+						Entity* en = entity_create();
+						setup_meteor(en);
+						en->pos = spawn_pos;
+					} else {
+						log_warning("failed to find spawn pos for meteor");
 					}
 				}
+			}
 
-				if (found_pos) {
-					Entity* en = entity_create();
-					setup_meteor(en);
-					en->pos = spawn_pos;
-				} else {
-					log_warning("failed to find spawn pos for meteor");
+			// far spawn
+			{
+				if (world->next_far_meteor_spawn_end_time == 0) {
+					world->next_far_meteor_spawn_end_time = now() + get_random_float32_in_range(10, 30);
+					// world->next_far_meteor_spawn_end_time = now() + 1.0f;
+				}
+
+				if (has_reached_end_time(world->next_far_meteor_spawn_end_time)) {
+					world->next_far_meteor_spawn_end_time = 0;
+
+					float meteor_radius = get_archetype_data(ARCH_meteor).radius;
+
+					Vector2 spawn_pos;
+					bool found_pos = false;
+					int iterations = 0;
+					while (true) {
+
+						float start_radius = 150.f;
+						float end_radius = get_world_radius();
+						spawn_pos = v2_mulf(get_random_v2(), get_random_float32_in_range(start_radius, end_radius));
+
+						bool is_in_no_go_zone = false;
+						for (int i = 0; i < growing_array_get_valid_count(anti_meteor_entities); i++) {
+							Entity* en = anti_meteor_entities[i];
+							float dist = v2_dist(en->pos, spawn_pos);
+							if (dist < en->radius + meteor_radius) {
+								is_in_no_go_zone = true;
+							}
+						}
+
+						// don't be near player. this is a far meteor.
+						if (v2_dist(get_player()->pos, spawn_pos) < 250.f) {
+							is_in_no_go_zone = true;
+						}
+
+						if (!is_in_no_go_zone) {
+							found_pos = true;
+							break;
+						}
+
+						iterations += 1;
+						if (iterations > 100) {
+							break;
+						}
+					}
+
+					if (found_pos) {
+						Entity* en = entity_create();
+						setup_meteor(en);
+						en->pos = spawn_pos;
+					} else {
+						log_warning("failed to find spawn pos for meteor");
+					}
 				}
 			}
 		}

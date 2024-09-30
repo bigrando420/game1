@@ -398,6 +398,7 @@ typedef enum SpriteID {
 	SPRITE_rock_large,
 	SPRITE_meteorite_depo,
 	SPRITE_raw_meteorite,
+	SPRITE_meteorite_ingot,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -460,6 +461,7 @@ typedef enum ItemID {
 	ITEM_extractor,
 	ITEM_thumper,
 	ITEM_raw_meteorite,
+	ITEM_meteorite_ingot,
 	// :item
 	ITEM_MAX,
 } ItemID;
@@ -4140,9 +4142,7 @@ void update_meteor(Entity* en) {
 	if (has_reached_end_time(en->next_hit_end_time)) {
 
 		if (is_distant_meteor) {
-			float start_falloff = 80.f;
-			float end_falloff = 500.f;
-			camera_shake_at_pos(0.5, en->pos, start_falloff, end_falloff-start_falloff);
+			camera_shake(0.15);
 		} else {
 			// somewhat #volatile with fmod sound spatialisation range
 			float start_falloff = 80.f;
@@ -4560,6 +4560,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_rock_large] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/rock_large.png"), get_heap_allocator())};
 		sprites[SPRITE_meteorite_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/meteorite_depo.png"), get_heap_allocator())};
 		sprites[SPRITE_raw_meteorite] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/raw_meteorite.png"), get_heap_allocator())};
+		sprites[SPRITE_meteorite_ingot] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/meteorite_ingot.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -4586,7 +4587,8 @@ int entry(int argc, char **argv) {
 		}
 
 		// :item resources
-		item_data[ITEM_raw_meteorite] = (ItemData){ .pretty_name=STR("Raw Meteorite"), .icon=SPRITE_raw_meteorite};
+		item_data[ITEM_meteorite_ingot] = (ItemData){ .pretty_name=STR("Meteorite Ingot"), .icon=SPRITE_meteorite_ingot};
+		item_data[ITEM_raw_meteorite] = (ItemData){ .pretty_name=STR("Raw Meteorite"), .icon=SPRITE_raw_meteorite, .furnace_transform_into=ITEM_meteorite_ingot};
 		item_data[ITEM_red_core] = (ItemData){ .pretty_name=STR("Æ█Ξ2vX Core"), .icon=SPRITE_red_core};
 		item_data[ITEM_iron_ingot] = (ItemData){ .pretty_name=STR("Iron Ingot"), .icon=SPRITE_iron_ingot};
 		item_data[ITEM_raw_iron] = (ItemData){ .pretty_name=STR("Raw Iron"), .icon=SPRITE_raw_iron, .furnace_transform_into=ITEM_iron_ingot};
@@ -4690,8 +4692,8 @@ int entry(int argc, char **argv) {
 			.description=STR("Redirects meteors in a radius"),
 			.research_ingredients_count=1,
 			.research_ingredients={{ITEM_exp, 50}},
-			.ingredients_count=1,
-			.ingredients={ {ITEM_copper_ingot, 5} }
+			.ingredients_count=2,
+			.ingredients={ {ITEM_meteorite_ingot, 2}, {ITEM_iron_ingot, 2} }
 		};
 
 		item_data[ITEM_extractor] = (ItemData){
@@ -4723,7 +4725,7 @@ int entry(int argc, char **argv) {
 			.research_ingredients_count=1,
 			.research_ingredients={{ITEM_exp, 20}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_pine_wood, 5} }
+			.ingredients={ {ITEM_rock, 4} }
 		};
 
 		// :turret
@@ -4735,7 +4737,7 @@ int entry(int argc, char **argv) {
 			.research_ingredients_count=1,
 			.research_ingredients={{ITEM_exp, 50}},
 			.ingredients_count=3,
-			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_copper_ingot, 2}, {ITEM_red_core, 1} }
+			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_red_core, 1} }
 		};
 		// these need to be a package deal...
 		item_data[ITEM_bullet] = (ItemData){
@@ -4759,7 +4761,7 @@ int entry(int argc, char **argv) {
 			.research_ingredients_count=1,
 			.research_ingredients={{ITEM_exp, 100}},
 			.ingredients_count=3,
-			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_copper_ingot, 2}, {ITEM_o2_shard, 10} }
+			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_o2_shard, 10} }
 		};
 
 		// note, this should go into a "Shelter #1" grouped research unlock thingo
@@ -4813,7 +4815,7 @@ int entry(int argc, char **argv) {
 			.research_ingredients_count=1,
 			.research_ingredients={{ITEM_exp, 50}},
 			.ingredients_count=2,
-			.ingredients={ {ITEM_copper_ingot, 1}, {ITEM_fiber, 8} }
+			.ingredients={ {ITEM_meteorite_ingot, 1}, {ITEM_fiber, 8} }
 		};
 
 		item_data[ITEM_furnace] = (ItemData){
@@ -4839,8 +4841,8 @@ int entry(int argc, char **argv) {
 			.to_build=ARCH_research_station,
 			.icon=SPRITE_research_station,
 			.description=STR("Research recipes to unlock more buildings."),
-			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 2}, {ITEM_rock, 5} }
+			.ingredients_count=1,
+			.ingredients={ {ITEM_rock, 5} }
 		};
 		item_data[ITEM_teleporter1] = (ItemData){
 			.disabled=true,
@@ -5291,7 +5293,7 @@ int entry(int argc, char **argv) {
 			// far spawn
 			{
 				if (world->next_far_meteor_spawn_end_time == 0) {
-					world->next_far_meteor_spawn_end_time = now() + get_random_float32_in_range(10, 30);
+					world->next_far_meteor_spawn_end_time = now() + get_random_float32_in_range(30, 50);
 					// world->next_far_meteor_spawn_end_time = now() + 1.0f;
 				}
 

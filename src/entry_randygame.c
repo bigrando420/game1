@@ -63,29 +63,6 @@ typedef enum Pivot {
 	PIVOT_top_right,
 } Pivot;
 
-Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color, Pivot pivot) {
-	Gfx_Text_Metrics metrics = measure_text(font, text, raster_height, scale);
-	position = v2_sub(position, metrics.visual_pos_min);
-	Vector2 pivot_mul = {0};
-	switch (pivot) {
-		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
-		case PIVOT_bottom_center: pivot_mul = v2(0.5, 0.0); break;
-		case PIVOT_bottom_right: pivot_mul = v2(1.0, 0.0); break;
-		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
-		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
-		case PIVOT_center_right: pivot_mul = v2(1.0, 0.5); break;
-		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
-		case PIVOT_top_left: pivot_mul = v2(0.0, 1.0); break;
-		case PIVOT_top_right: pivot_mul = v2(1.0, 1.0); break;
-		default:
-		log_error("pivot not supported yet. fill in case at draw_text_with_pivot");
-		break;
-	}
-	position = v2_sub(position, v2_mul(metrics.visual_size, pivot_mul));
-	draw_text(font, text, raster_height, position, scale, color);
-	return metrics;
-}
-
 // ^^^ engine changes
 
 // the scuff zone
@@ -1553,33 +1530,24 @@ Vector2 get_mouse_pos_in_ndc() {
 	return (Vector2){ ndc_x, ndc_y };
 }
 
-Vector2 get_mouse_pos_in_world_space() {
+Vector2 get_mouse_pos_in_current_space() {
 	float mouse_x = input_frame.mouse_x;
 	float mouse_y = input_frame.mouse_y;
-	Matrix4 proj = world_frame.world_proj;
-	Matrix4 view = world_frame.world_view;
-	float window_w = window.width;
-	float window_h = window.height;
 
-	// Normalize the mouse coordinates
-	float ndc_x = (mouse_x / (window_w * 0.5f)) - 1.0f;
-	float ndc_y = (mouse_y / (window_h * 0.5f)) - 1.0f;
+	// this is a bit icky, but we're using the draw frame's matricies if valid. If not, we default to world space
+	Matrix4 proj;
+	if (current_draw_frame) {
+		proj = current_draw_frame->projection;
+	} else {
+		proj = world_frame.world_proj;
+	}
+	Matrix4 view;
+	if (current_draw_frame) {
+		view = current_draw_frame->camera_xform;
+	} else {
+		view = world_frame.world_view;
+	}
 
-	// Transform to world coordinates
-	Vector4 world_pos = v4(ndc_x, ndc_y, 0, 1);
-	world_pos = m4_transform(m4_inverse(proj), world_pos);
-	world_pos = m4_transform(view, world_pos);
-	// log("%f, %f", world_pos.x, world_pos.y);
-
-	// Return as 2D vector
-	return (Vector2){ world_pos.x, world_pos.y };
-}
-
-Vector2 get_mouse_pos_in_screen_space() {
-	float mouse_x = input_frame.mouse_x;
-	float mouse_y = input_frame.mouse_y;
-	Matrix4 proj = world_frame.screen_proj;
-	Matrix4 view = world_frame.screen_view;
 	float window_w = window.width;
 	float window_h = window.height;
 
@@ -1792,6 +1760,29 @@ Entity* entity_at_tile(Tile tile) {
 	} else {
 		return cache->tiles[index].entity;
 	}
+}
+
+Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color, Pivot pivot) {
+	Gfx_Text_Metrics metrics = measure_text(font, text, raster_height, scale);
+	position = v2_sub(position, metrics.visual_pos_min);
+	Vector2 pivot_mul = {0};
+	switch (pivot) {
+		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
+		case PIVOT_bottom_center: pivot_mul = v2(0.5, 0.0); break;
+		case PIVOT_bottom_right: pivot_mul = v2(1.0, 0.0); break;
+		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
+		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
+		case PIVOT_center_right: pivot_mul = v2(1.0, 0.5); break;
+		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
+		case PIVOT_top_left: pivot_mul = v2(0.0, 1.0); break;
+		case PIVOT_top_right: pivot_mul = v2(1.0, 1.0); break;
+		default:
+		log_error("pivot not supported yet. fill in case at draw_text_with_pivot");
+		break;
+	}
+	position = v2_sub(position, v2_mul(metrics.visual_size, pivot_mul));
+	draw_text_in_frame(font, text, raster_height, position, scale, color, current_draw_frame);
+	return metrics;
 }
 
 // :func dump
@@ -2158,7 +2149,7 @@ void item_tooltip(ItemAmount item_amount) {
 	ItemData item_data = get_item_data(item_amount.id);
 
 	Vector2 size = v2(40, 20);
-	Vector2 pos = get_mouse_pos_in_screen_space();
+	Vector2 pos = get_mouse_pos_in_current_space();
 	pos.y -= size.y;
 
 	draw_rect_in_frame(pos, size, COLOR_BLACK, current_draw_frame);
@@ -2515,7 +2506,7 @@ bool world_attempt_load_from_disk() {
 
 void input_slot_new(Range2f rect, StorageSlot* slot) {
 
-	if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+	if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 		
 		// interact with the slot
 		{
@@ -2586,7 +2577,7 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 }
 
 void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
-	if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+	if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 		
 		// interact with the slot
 		{
@@ -2788,7 +2779,7 @@ void do_world_entity_interaction_ui_stuff() {
 			{
 				ItemAmount* slot = &en->output0;
 
-				if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+				if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 					// interact with the slot
 					{
 						if (world->mouse_cursor_item.id) {
@@ -2952,7 +2943,7 @@ void do_world_entity_interaction_ui_stuff() {
 
 			ItemAmount* slot = &en->input0;
 
-			if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+			if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 				if (world->mouse_cursor_item.id) {
 					if (slot->id) {
 						if (slot->id == world->mouse_cursor_item.id) {
@@ -3013,7 +3004,7 @@ void do_world_entity_interaction_ui_stuff() {
 
 		bool do_tooltip = false;
 		Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
-		if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+		if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 			
 			// interact with the slot
 			{
@@ -3217,7 +3208,7 @@ void do_ui_stuff() {
 				// put :cursor item back
 				if (world->mouse_cursor_item.id) {
 					is_inventory_enabled = false;
-					if (range2f_contains(box, get_mouse_pos_in_world_space())) {
+					if (range2f_contains(box, get_mouse_pos_in_current_space())) {
 						world_frame.hover_consumed = true;
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
@@ -3245,7 +3236,7 @@ void do_ui_stuff() {
 
 					draw_rect_in_frame(box.min, range2f_size(box), v4(1, 1, 1, 0.2), current_draw_frame);
 
-					if (is_inventory_enabled && range2f_contains(box, get_mouse_pos_in_world_space())) {
+					if (is_inventory_enabled && range2f_contains(box, get_mouse_pos_in_current_space())) {
 						is_selected_alpha = 1.0;
 						hovered_item = i;
 					}
@@ -3297,7 +3288,7 @@ void do_ui_stuff() {
 		float x_middle = x0 + pane_size.x * 0.5;
 
 		Range2f rect = range2f_make_bottom_left(v2(x0, y0), pane_size);
-		if (range2f_contains(rect, get_mouse_pos_in_world_space())) {
+		if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 			world_frame.hover_consumed = true;
 		}
 
@@ -3334,7 +3325,7 @@ void do_ui_stuff() {
 				Matrix4 xform = m4_identity;
 
 				float scale = 1.f;
-				if (unlocked && range2f_contains(box, get_mouse_pos_in_world_space())) {
+				if (unlocked && range2f_contains(box, get_mouse_pos_in_current_space())) {
 					scale = 1.2f;
 					selected = i;
 				}
@@ -3404,8 +3395,8 @@ void do_ui_stuff() {
 				{
 					float width = 40.f;
 
-					float x_left = get_mouse_pos_in_world_space().x;
-					float y_top = get_mouse_pos_in_world_space().y;
+					float x_left = get_mouse_pos_in_current_space().x;
+					float y_top = get_mouse_pos_in_current_space().y;
 
 					float x_middle = x_left + width * 0.5;
 
@@ -3536,7 +3527,7 @@ void do_ui_stuff() {
 				Matrix4 xform = m4_identity;
 
 				float scale = 1.f;
-				if (range2f_contains(box, get_mouse_pos_in_world_space())) {
+				if (range2f_contains(box, get_mouse_pos_in_current_space())) {
 					scale = 1.2f;
 					selected = i;
 				}
@@ -3580,8 +3571,8 @@ void do_ui_stuff() {
 
 			Vector2 size = v2(40, 30);
 
-			float x_left = get_mouse_pos_in_world_space().x;
-			float y_top = get_mouse_pos_in_world_space().y;
+			float x_left = get_mouse_pos_in_current_space().x;
+			float y_top = get_mouse_pos_in_current_space().y;
 			float x_middle = x_left + size.x * 0.5;
 			float y_bottom = y_top - size.y;
 
@@ -3666,7 +3657,7 @@ void do_ui_stuff() {
 		if (!item_data.to_build || world_frame.hover_consumed) {
 			// it's just an item
 			Sprite* sprite = get_sprite(get_sprite_id_from_item(world->mouse_cursor_item.id));
-			Range2f rect = range2f_make_center_center(get_mouse_pos_in_world_space(), v2(10, 10));
+			Range2f rect = range2f_make_center_center(get_mouse_pos_in_current_space(), v2(10, 10));
 			draw_item_amount_in_rect(world->mouse_cursor_item, rect);
 		} else
 			defer_scope(set_world_space(), set_screen_space())
@@ -3716,7 +3707,7 @@ void do_ui_stuff() {
 
 			Sprite* icon = get_sprite(sprite_id);
 
-			Vector2 pos = get_mouse_pos_in_world_space();
+			Vector2 pos = get_mouse_pos_in_current_space();
 			pos = snap_position_to_nearest_tile_based_on_arch(pos, arch_id);
 
 			bool has_room_to_place = true;
@@ -4323,7 +4314,7 @@ void update_turret(Entity* en) {
 void render_turret(Entity* en) {
 	draw_base_sprite(en);
 
-	Vector2 mouse_dir = v2_normalize(v2_sub(get_mouse_pos_in_world_space(), en->pos));
+	Vector2 mouse_dir = v2_normalize(v2_sub(get_mouse_pos_in_current_space(), en->pos));
 
 	Vector2 dir = en->last_shoot_dir;
 	dir.y *= -1; // for some reason this needs to be flipped.
@@ -5167,6 +5158,18 @@ int entry(int argc, char **argv) {
 		os_update();
 		current_draw_frame = 0;
 
+		local_persist Gfx_Image *game_image = 0;
+		local_persist Gfx_Image *ui_image = 0;
+		local_persist Os_Window last_window;
+		if ((last_window.width != window.width || last_window.height != window.height || !game_image) && window.width > 0 && window.height > 0) {
+			if (game_image)  delete_image(game_image);
+			if (ui_image)  delete_image(ui_image);
+			
+			game_image = make_image_render_target(window.width, window.height, 4, 0, get_heap_allocator());
+			ui_image = make_image_render_target(window.width, window.height, 4, 0, get_heap_allocator());
+		}
+		last_window = window;
+
 		// zero entity frame state
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++)
 		{
@@ -5284,23 +5287,27 @@ int entry(int argc, char **argv) {
 		world_frame.screen_proj = m4_make_orthographic_projection(0.0, screen_width, 0.0, screen_height, -1, 10);
 		world_frame.screen_view = m4_identity;
 
-		// #fix
-		// set_world_space();
-		// push_z_layer_in_frame(layer_world, current_draw_frame);
-
-		Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
-		int mouse_tile_x = world_pos_to_tile_pos(mouse_pos_world.x);
-		int mouse_tile_y = world_pos_to_tile_pos(mouse_pos_world.y);
-
 		if (world->ux_state == UX_entity_interaction) {
 			world_frame.show_inventory = true;
 		}
 
-		/*
-		// #fix
-		do_ui_stuff();
-		do_world_entity_interaction_ui_stuff();
-		*/
+		// :ui draw to image
+		{
+			draw_frame_reset(&offscreen_draw_frame);
+			gfx_clear_render_target(ui_image, v4(0,0,0,0));
+
+			offscreen_draw_frame.enable_z_sorting = true;
+			offscreen_draw_frame.shader_extension = global_shader;
+			offscreen_draw_frame.cbuffer = &(ShaderConstBuffer){0};
+			current_draw_frame = &offscreen_draw_frame;
+
+			do_ui_stuff();
+			do_world_entity_interaction_ui_stuff();
+
+			gfx_render_draw_frame(&offscreen_draw_frame, ui_image);
+
+			current_draw_frame = 0;
+		}
 
 		// :tether stuff
 		{
@@ -5454,7 +5461,7 @@ int entry(int argc, char **argv) {
 					int entity_tile_x = world_pos_to_tile_pos(en->pos.x);
 					int entity_tile_y = world_pos_to_tile_pos(en->pos.y);
 
-					float dist = fabsf(v2_dist(en->pos, mouse_pos_world));
+					float dist = fabsf(v2_dist(en->pos, get_mouse_pos_in_current_space()));
 					if (dist < cursor_selection_slop_radius) {
 						if (!world_frame.selected_entity || (dist < smallest_dist)) {
 							world_frame.selected_entity = en;
@@ -5934,7 +5941,7 @@ int entry(int argc, char **argv) {
 		// #fix
 		#if defined(MOUSE_COORDS_DEBUG)
 		{
-			Vector2 mp = get_mouse_pos_in_world_space();
+			Vector2 mp = get_mouse_pos_in_current_space();
 			Tile mp_tile = v2_world_pos_to_tile_pos(mp);
 			Vector2i local = world_tile_to_local_map(mp_tile);
 			scope_z_layer(10000)
@@ -6328,15 +6335,6 @@ int entry(int argc, char **argv) {
 
 		// :rendering pipeline
 		{
-			local_persist Gfx_Image *game_image = 0;
-			local_persist Os_Window last_window;
-			if ((last_window.width != window.width || last_window.height != window.height || !game_image) && window.width > 0 && window.height > 0) {
-				if (game_image)  delete_image(game_image);
-				
-				game_image = make_image_render_target(window.width, window.height, 4, 0, get_heap_allocator());
-			}
-			last_window = window;
-
 			cbuffer = (ShaderConstBuffer){0};
 
 			assert(growing_array_get_valid_count(draw_frame.quad_buffer) == 0, "submitted quads prior??");
@@ -6353,8 +6351,12 @@ int entry(int argc, char **argv) {
 
 			gfx_render_draw_frame(&offscreen_draw_frame, game_image);
 
-			current_draw_frame = &draw_frame;
-			Draw_Quad *q = draw_image_in_frame(game_image, v2(-window.width/2, -window.height/2), v2(window.width, window.height), COLOR_WHITE, current_draw_frame);
+			current_draw_frame = 0;
+
+			Draw_Quad *q = draw_image(game_image, v2(-window.width/2, -window.height/2), v2(window.width, window.height), COLOR_WHITE);
+			swap(q->uv.y, q->uv.w, float); // swap y so it's upwards
+
+			q = draw_image(ui_image, v2(-window.width/2, -window.height/2), v2(window.width, window.height), COLOR_WHITE);
 			swap(q->uv.y, q->uv.w, float); // swap y so it's upwards
 		}
 

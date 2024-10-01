@@ -15,7 +15,7 @@
 // got this from ryan fleury's codebase, https://www.rfleury.com/ (originally called DeferLoop)
 #define defer_scope(start, end) for(int _i_ = ((start), 0); _i_ == 0; _i_ += 1, (end))
 
-#define scope_z_layer(Z) defer_scope(push_z_layer(Z), pop_z_layer())
+#define scope_z_layer(Z) defer_scope(push_z_layer_in_frame(Z, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 
 Vector2 get_random_v2() {
 	Vector2 vec = v2(get_random_float32_in_range(-1, 1), get_random_float32_in_range(-1, 1));
@@ -99,36 +99,6 @@ float float_alpha(float x, float min, float max) {
 	float res = (x-min) / (max-min);
 	res = clamp(res, 0.0, 1.0);
 	return res;
-}
-
-Draw_Quad ndc_quad_to_screen_quad(Draw_Quad ndc_quad) {
-
-	// NOTE: we're assuming these are the screen space matricies.
-	Matrix4 proj = draw_frame.projection;
-	Matrix4 view = draw_frame.camera_xform;
-
-	Matrix4 ndc_to_screen_space = m4_identity;
-	ndc_to_screen_space = m4_mul(ndc_to_screen_space, m4_inverse(proj));
-	ndc_to_screen_space = m4_mul(ndc_to_screen_space, view);
-
-	ndc_quad.bottom_left = m4_transform(ndc_to_screen_space, v4(v2_expand(ndc_quad.bottom_left), 0, 1)).xy;
-	ndc_quad.bottom_right = m4_transform(ndc_to_screen_space, v4(v2_expand(ndc_quad.bottom_right), 0, 1)).xy;
-	ndc_quad.top_left = m4_transform(ndc_to_screen_space, v4(v2_expand(ndc_quad.top_left), 0, 1)).xy;
-	ndc_quad.top_right = m4_transform(ndc_to_screen_space, v4(v2_expand(ndc_quad.top_right), 0, 1)).xy;
-
-	return ndc_quad;
-}
-
-Vector2 world_pos_to_ndc(Vector2 world_pos) {
-
-	Matrix4 proj = draw_frame.projection;
-	Matrix4 view = draw_frame.camera_xform;
-
-	Matrix4 world_space_to_ndc = m4_identity;
-	world_space_to_ndc = m4_mul(proj, m4_inverse(view));
-
-	Vector2 ndc = m4_transform(world_space_to_ndc, v4(v2_expand(world_pos), 0, 1)).xy;
-	return ndc;
 }
 
 Vector2 ndc_pos_to_screen_pos(Vector2 ndc) {
@@ -261,6 +231,7 @@ typedef enum Layers {
 // global :app stuff
 // we could move this into an AppState struct.
 // or we could just keep cavemaning it like this lol, since it's not needed.
+Draw_Frame* current_draw_frame = 0;
 Gfx_Shader_Extension global_shader = {0};
 u64 frame_count = 0;
 float exp_error_flash_alpha = 0;
@@ -929,6 +900,8 @@ typedef struct WorldFrame {
 	Entity* selected_entity;
 	Matrix4 world_proj;
 	Matrix4 world_view;
+	Matrix4 screen_proj;
+	Matrix4 screen_view;
 	bool hover_consumed;
 	bool show_inventory;
 	Entity* player;
@@ -1583,8 +1556,30 @@ Vector2 get_mouse_pos_in_ndc() {
 Vector2 get_mouse_pos_in_world_space() {
 	float mouse_x = input_frame.mouse_x;
 	float mouse_y = input_frame.mouse_y;
-	Matrix4 proj = draw_frame.projection;
-	Matrix4 view = draw_frame.camera_xform;
+	Matrix4 proj = world_frame.world_proj;
+	Matrix4 view = world_frame.world_view;
+	float window_w = window.width;
+	float window_h = window.height;
+
+	// Normalize the mouse coordinates
+	float ndc_x = (mouse_x / (window_w * 0.5f)) - 1.0f;
+	float ndc_y = (mouse_y / (window_h * 0.5f)) - 1.0f;
+
+	// Transform to world coordinates
+	Vector4 world_pos = v4(ndc_x, ndc_y, 0, 1);
+	world_pos = m4_transform(m4_inverse(proj), world_pos);
+	world_pos = m4_transform(view, world_pos);
+	// log("%f, %f", world_pos.x, world_pos.y);
+
+	// Return as 2D vector
+	return (Vector2){ world_pos.x, world_pos.y };
+}
+
+Vector2 get_mouse_pos_in_screen_space() {
+	float mouse_x = input_frame.mouse_x;
+	float mouse_y = input_frame.mouse_y;
+	Matrix4 proj = world_frame.screen_proj;
+	Matrix4 view = world_frame.screen_view;
 	float window_w = window.width;
 	float window_h = window.height;
 
@@ -1604,13 +1599,14 @@ Vector2 get_mouse_pos_in_world_space() {
 
 float screen_width = 240.0;
 float screen_height = 135.0;
+// this is icky
 void set_screen_space() {
-	draw_frame.camera_xform = m4_scalar(1.0);
-	draw_frame.projection = m4_make_orthographic_projection(0.0, screen_width, 0.0, screen_height, -1, 10);
+	current_draw_frame->camera_xform = world_frame.screen_view;
+	current_draw_frame->projection = world_frame.screen_proj;
 }
 void set_world_space() {
-	draw_frame.projection = world_frame.world_proj;
-	draw_frame.camera_xform = world_frame.world_view;
+	current_draw_frame->projection = world_frame.world_proj;
+	current_draw_frame->camera_xform = world_frame.world_view;
 }
 
 Draw_Quad* draw_sprite_in_rect_with_xform(SpriteID sprite_id, Range2f rect, Vector4 col, float pad_pct, Matrix4 xform) {
@@ -1674,7 +1670,7 @@ Draw_Quad* draw_sprite_in_rect_with_xform(SpriteID sprite_id, Range2f rect, Vect
 	// apply xform
 	rect = m4_transform_range2f(xform, rect);
 
-	return draw_image(sprite->image, rect.min, range2f_size(rect), col);
+	return draw_image_in_frame(sprite->image, rect.min, range2f_size(rect), col, current_draw_frame);
 }
 
 // pad_pct just shrinks the rect by a % of itself ... 0.2 is a nice default
@@ -1800,6 +1796,18 @@ Entity* entity_at_tile(Tile tile) {
 
 // :func dump
 
+Vector2 world_pos_to_ndc(Vector2 world_pos) {
+
+	Matrix4 proj = world_frame.world_proj;
+	Matrix4 view = world_frame.world_view;
+
+	Matrix4 world_space_to_ndc = m4_identity;
+	world_space_to_ndc = m4_mul(proj, m4_inverse(view));
+
+	Vector2 ndc = m4_transform(world_space_to_ndc, v4(v2_expand(world_pos), 0, 1)).xy;
+	return ndc;
+}
+
 float get_world_radius() {
 	return map.width * tile_width / 2;
 }
@@ -1905,7 +1913,7 @@ void draw_sprite(SpriteID sprite_id, Vector2 pos) {
 	Sprite* sprite = get_sprite(sprite_id);
 	Vector2 draw_pos = pos;
 	draw_pos.x -= sprite->image->width * 0.5;
-	draw_image(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE);
+	draw_image_in_frame(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE, current_draw_frame);
 }
 
 inline float get_error_flash_frequency() {
@@ -2144,16 +2152,16 @@ void draw_item_amount_in_rect(ItemAmount item_amount, Range2f rect) {
 }
 
 void item_tooltip(ItemAmount item_amount) {
-	push_z_layer(layer_tooltip);
+	push_z_layer_in_frame(layer_tooltip, current_draw_frame);
 
 	Vector2 text_scale = v2(0.1, 0.1);
 	ItemData item_data = get_item_data(item_amount.id);
 
 	Vector2 size = v2(40, 20);
-	Vector2 pos = get_mouse_pos_in_world_space();
+	Vector2 pos = get_mouse_pos_in_screen_space();
 	pos.y -= size.y;
 
-	draw_rect(pos, size, COLOR_BLACK);
+	draw_rect_in_frame(pos, size, COLOR_BLACK, current_draw_frame);
 
 	float x0, y0;
 	x0 = pos.x + size.x * 0.5;
@@ -2162,7 +2170,7 @@ void item_tooltip(ItemAmount item_amount) {
 
 	Gfx_Text_Metrics met = draw_text_with_pivot(font, item_data.pretty_name, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 
-	pop_z_layer();
+	pop_z_layer_in_frame(current_draw_frame);
 }
 
 float max_trauma = 0.6;
@@ -2434,7 +2442,7 @@ void particle_render() {
 		Vector2 size = v2(1, 1);
 		Vector2 draw_pos = v2_sub(p->pos, v2_mulf(size, 0.5));
 
-		draw_rect(draw_pos, size, col);
+		draw_rect_in_frame(draw_pos, size, col, current_draw_frame);
 
 		if (p->flags & PARTICLE_FLAGS_light) {
 			add_point_light(p->pos, p->light_col, p->light_radius, p->light_intensity * col.a);
@@ -2569,7 +2577,7 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 		}
 	}
 
-	draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+	draw_rect_in_frame(rect.min, range2f_size(rect), COLOR_GRAY, current_draw_frame);
 
 	if (slot->item.id) {
 		draw_item_amount_in_rect(slot->item, rect);
@@ -2641,7 +2649,7 @@ void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
 		}
 	}
 
-	draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+	draw_rect_in_frame(rect.min, range2f_size(rect), COLOR_GRAY, current_draw_frame);
 
 	if (slot->id) {
 		draw_item_amount_in_rect(*slot, rect);
@@ -2666,7 +2674,7 @@ void do_world_entity_interaction_ui_stuff() {
 		return;
 	}
 
-	push_z_layer(layer_ui);
+	push_z_layer_in_frame(layer_ui, current_draw_frame);
 
 	Entity* en = entity_from_handle(world->interacting_with_entity);
 
@@ -2744,11 +2752,11 @@ void do_world_entity_interaction_ui_stuff() {
 
 				Vector2 bar_size = v2(2, slot_size);
 
-				draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+				draw_rect_in_frame(v2(x0, y0), bar_size, COLOR_BLACK, current_draw_frame);
 
 				float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
 
-				draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
+				draw_rect_in_frame(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire, current_draw_frame);
 			}
 		}
 
@@ -2765,11 +2773,11 @@ void do_world_entity_interaction_ui_stuff() {
 			{
 				Vector2 bar_size = v2(slot_size, 2);
 
-				draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+				draw_rect_in_frame(v2(x0, y0), bar_size, COLOR_BLACK, current_draw_frame);
 
 				float alpha = float_alpha(en->progress, 0, en->progress_max);
 
-				draw_rect(v2(x0, y0), v2(bar_size.x * alpha, bar_size.y), col_oxygen);
+				draw_rect_in_frame(v2(x0, y0), v2(bar_size.x * alpha, bar_size.y), col_oxygen, current_draw_frame);
 
 				y0 += bar_size.y + 1;
 			}
@@ -2803,7 +2811,7 @@ void do_world_entity_interaction_ui_stuff() {
 					}
 				}
 
-				Draw_Quad* q = draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+				Draw_Quad* q = draw_rect_in_frame(rect.min, range2f_size(rect), COLOR_GRAY, current_draw_frame);
 				if (en->last_frame.error == GAME_ERR_no_room_in_destination) {
 					set_col_override(q, get_red_error_col_override());
 				}
@@ -2851,11 +2859,11 @@ void do_world_entity_interaction_ui_stuff() {
 
 				Vector2 bar_size = v2(2, slot_size.y);
 
-				draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+				draw_rect_in_frame(v2(x0, y0), bar_size, COLOR_BLACK, current_draw_frame);
 
 				float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
 
-				draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
+				draw_rect_in_frame(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire, current_draw_frame);
 			}
 		}
 
@@ -2879,11 +2887,11 @@ void do_world_entity_interaction_ui_stuff() {
 
 				Vector2 bar_size = v2(slot_size.y, 2);
 
-				draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+				draw_rect_in_frame(v2(x0, y0), bar_size, COLOR_BLACK, current_draw_frame);
 
 				float alpha = float_alpha(en->progress_on_crafting, 0, 100);
 
-				draw_rect(v2(x0, y0), v2(bar_size.x * alpha, bar_size.y), col_oxygen);
+				draw_rect_in_frame(v2(x0, y0), v2(bar_size.x * alpha, bar_size.y), col_oxygen, current_draw_frame);
 			}
 		}
 
@@ -2984,7 +2992,7 @@ void do_world_entity_interaction_ui_stuff() {
 				}
 			}
 
-			draw_rect(rect.min, range2f_size(rect), COLOR_GRAY);
+			draw_rect_in_frame(rect.min, range2f_size(rect), COLOR_GRAY, current_draw_frame);
 
 			if (slot->id) {
 				draw_item_amount_in_rect(*slot, rect);
@@ -3058,7 +3066,7 @@ void do_world_entity_interaction_ui_stuff() {
 			}
 		}
 
-		draw_rect(rect.min, size, COLOR_GRAY);
+		draw_rect_in_frame(rect.min, size, COLOR_GRAY, current_draw_frame);
 
 		if (en->input0.id) {
 			draw_item_amount_in_rect(en->input0, rect);
@@ -3078,11 +3086,11 @@ void do_world_entity_interaction_ui_stuff() {
 
 			Vector2 bar_size = v2(2, size.y);
 
-			draw_rect(v2(x0, y0), bar_size, COLOR_BLACK);
+			draw_rect_in_frame(v2(x0, y0), bar_size, COLOR_BLACK, current_draw_frame);
 
 			float alpha = float_alpha(en->current_fuel, 0, en->last_fuel_max);
 
-			draw_rect(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire);
+			draw_rect_in_frame(v2(x0, y0), v2(bar_size.x, bar_size.y * alpha), col_fire, current_draw_frame);
 		}
 
 		if (do_tooltip) {
@@ -3090,13 +3098,13 @@ void do_world_entity_interaction_ui_stuff() {
 		}
 	}
 
-	pop_z_layer();
+	pop_z_layer_in_frame(current_draw_frame);
 }
 
 // :ui
 void do_ui_stuff() {
 	set_screen_space();
-	push_z_layer(layer_ui);
+	push_z_layer_in_frame(layer_ui, current_draw_frame);
 
 	// "screen space"
 	Vector2 text_scale = v2(0.1, 0.1);
@@ -3204,7 +3212,7 @@ void do_ui_stuff() {
 			// bg box rendering thing
 			{
 				Range2f box = range2f_make_bottom_left(v2(x0, y0), bg_box_size);
-				draw_rect(box.min, bg_box_size, bg_col);
+				draw_rect_in_frame(box.min, bg_box_size, bg_col, current_draw_frame);
 
 				// put :cursor item back
 				if (world->mouse_cursor_item.id) {
@@ -3235,7 +3243,7 @@ void do_ui_stuff() {
 
 					float is_selected_alpha = 0.0;
 
-					draw_rect(box.min, range2f_size(box), v4(1, 1, 1, 0.2));
+					draw_rect_in_frame(box.min, range2f_size(box), v4(1, 1, 1, 0.2), current_draw_frame);
 
 					if (is_inventory_enabled && range2f_contains(box, get_mouse_pos_in_world_space())) {
 						is_selected_alpha = 1.0;
@@ -3293,7 +3301,7 @@ void do_ui_stuff() {
 			world_frame.hover_consumed = true;
 		}
 
-		draw_rect(v2(x0, y0), pane_size, bg_col);
+		draw_rect_in_frame(v2(x0, y0), pane_size, bg_col, current_draw_frame);
 
 		y0 += pane_size.y;
 
@@ -3353,7 +3361,7 @@ void do_ui_stuff() {
 		}
 
 		if (selected)
-		defer_scope(push_z_layer(layer_tooltip), pop_z_layer()) {
+		defer_scope(push_z_layer_in_frame(layer_tooltip, current_draw_frame), pop_z_layer_in_frame(current_draw_frame)) {
 			UnlockState unlock_state = world->item_unlocks[selected];
 			ItemData item_data = get_item_data(selected);
 
@@ -3475,7 +3483,7 @@ void do_ui_stuff() {
 
 					float height = y0 - y_top;
 
-					Draw_Quad* quad = draw_rect(v2(x_left, y_top), v2(width, height), v4(0.2, 0.2, 0.2, 1.));
+					Draw_Quad* quad = draw_rect_in_frame(v2(x_left, y_top), v2(width, height), v4(0.2, 0.2, 0.2, 1.), current_draw_frame);
 					quad->z = layer_tooltip-1;
 				}
 			}
@@ -3495,7 +3503,7 @@ void do_ui_stuff() {
 		float x_left = x0;
 		float x_middle = x0 + pane_size.x * 0.5;
 
-		draw_rect(v2(x0, y0), pane_size, bg_col);
+		draw_rect_in_frame(v2(x0, y0), pane_size, bg_col, current_draw_frame);
 
 		y0 += pane_size.y;
 
@@ -3581,7 +3589,7 @@ void do_ui_stuff() {
 			float y0 = y_top;
 
 			y0 = y_bottom;
-			draw_rect(v2(x0, y0), size, v4(0.2, 0.2, 0.2, 1.));
+			draw_rect_in_frame(v2(x0, y0), size, v4(0.2, 0.2, 0.2, 1.), current_draw_frame);
 
 			x0 = x_left + size.x * 0.5;
 			y0 = y_top;
@@ -3652,7 +3660,7 @@ void do_ui_stuff() {
 
 	// :cursor item drawing
 	if (world->mouse_cursor_item.id)
-	defer_scope(push_z_layer(layer_cursor_item), pop_z_layer())
+	defer_scope(push_z_layer_in_frame(layer_cursor_item, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 	{
 		ItemData item_data = get_item_data(world->mouse_cursor_item.id);
 		if (!item_data.to_build || world_frame.hover_consumed) {
@@ -3662,7 +3670,7 @@ void do_ui_stuff() {
 			draw_item_amount_in_rect(world->mouse_cursor_item, rect);
 		} else
 			defer_scope(set_world_space(), set_screen_space())
-			defer_scope(push_z_layer(layer_buildings), pop_z_layer())
+			defer_scope(push_z_layer_in_frame(layer_buildings, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 		{
 			// :place building
 			world_frame.hover_consumed = true;
@@ -3729,7 +3737,7 @@ void do_ui_stuff() {
 			{
 				float radius = arch_data.radius;
 				// #polish - make this an outline?
-				draw_circle(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.05));
+				draw_circle_in_frame(v2_sub(pos, v2(radius, radius)), v2(radius*2, radius*2), v4(1, 1, 1, 0.05), current_draw_frame);
 			}
 
 			// draw preview
@@ -3746,7 +3754,7 @@ void do_ui_stuff() {
 					col_override.a = 0.4;
 				}
 
-				Draw_Quad* quad = draw_image_xform(icon->image, xform, get_sprite_size(icon), COLOR_WHITE);
+				Draw_Quad* quad = draw_image_xform_in_frame(icon->image, xform, get_sprite_size(icon), COLOR_WHITE, current_draw_frame);
 				set_col_override(quad, col_override);
 			}
 
@@ -3801,7 +3809,7 @@ void do_ui_stuff() {
 	}
 
 	set_world_space();
-	pop_z_layer();
+	pop_z_layer_in_frame(current_draw_frame);
 }
 
 void draw_base_sprite(Entity* en) {
@@ -3833,7 +3841,7 @@ void draw_base_sprite(Entity* en) {
 		animate_f32_to_target(&en->white_flash_current_alpha, 0, delta_t, 20.0f);
 	}
 
-	Draw_Quad* q = draw_image_xform(sprite->image, xform, get_sprite_size(sprite), col);
+	Draw_Quad* q = draw_image_xform_in_frame(sprite->image, xform, get_sprite_size(sprite), col, current_draw_frame);
 	set_col_override(q, v4(1, 1, 1, en->white_flash_current_alpha));
 
 	// :error flash
@@ -4228,7 +4236,7 @@ void render_meteor(Entity* en) {
 	Vector4 col = COLOR_RED;
 	col.a = 0.7 * alpha;
 
-	Draw_Quad* quad = draw_circle(draw_pos, v2(radius * 2, radius * 2), col);
+	Draw_Quad* quad = draw_circle_in_frame(draw_pos, v2(radius * 2, radius * 2), col, current_draw_frame);
 	quad->z = layer_background+1;
 
 }
@@ -4359,7 +4367,7 @@ void render_turret(Entity* en) {
 		}
 	}
 
-	draw_rect_xform(xform, size, COLOR_BLACK);
+	draw_rect_xform_in_frame(xform, size, COLOR_BLACK, current_draw_frame);
 }
 
 // :enemy
@@ -4454,7 +4462,11 @@ void update_enemy(Entity* en) {
 	}
 }
 
-void render_world() {
+void draw_world_in_frame() {
+
+	set_world_space();
+
+	push_z_layer_in_frame(layer_world, current_draw_frame);
 
 	// render entities
 	tm_scope("push render entities")
@@ -4469,10 +4481,10 @@ void render_world() {
 					z_layer = layer_buildings;
 				}
 			}
-			push_z_layer(z_layer);
+			push_z_layer_in_frame(z_layer, current_draw_frame);
 
 			if (en->item_id == ITEM_exp) {
-				draw_rect(en->pos, v2(1, 1), col_exp);
+				draw_rect_in_frame(en->pos, v2(1, 1), col_exp, current_draw_frame);
 			}
 
 			switch (en->arch) {
@@ -4504,7 +4516,7 @@ void render_world() {
 						col = v4_mul(col, v4(0.5, 0.5, 0.5, 1.f));
 					}
 
-					draw_rect(draw_pos, size, col);
+					draw_rect_in_frame(draw_pos, size, col, current_draw_frame);
 
 					if (en->frame.target_en->is_valid) {
 						add_point_light(center, v4(1,0,0,0.5), 20, 1);
@@ -4528,7 +4540,7 @@ void render_world() {
 
 				size.y = size.y * ((float)en->oxygen / (float)en->oxygen_max);
 
-				draw_rect(draw_pos, v2(size.x, size.y), col_oxygen);
+				draw_rect_in_frame(draw_pos, v2(size.x, size.y), col_oxygen, current_draw_frame);
 			}
 
 			// :health bar
@@ -4540,7 +4552,7 @@ void render_world() {
 				draw_pos.y += get_offset_for_rendering(en->arch).y;
 				draw_pos.y -= 2;
 
-				draw_rect(draw_pos, size, COLOR_BLACK);
+				draw_rect_in_frame(draw_pos, size, COLOR_BLACK, current_draw_frame);
 
 				float target_alpha = (float)en->health / (float)en->max_health;
 
@@ -4549,17 +4561,17 @@ void render_world() {
 				}
 				animate_f32_to_target(&en->health_bar_current_alpha, target_alpha, delta_t, 30.0f);
 
-				draw_rect(draw_pos, v2(size.x * en->health_bar_current_alpha, size.y), COLOR_WHITE);
+				draw_rect_in_frame(draw_pos, v2(size.x * en->health_bar_current_alpha, size.y), COLOR_WHITE, current_draw_frame);
 			}
 
 			// :tether draw blue thingy
 			if (en->arch == ARCH_tether && en->is_oxygen_tether && en->frame.is_powered) {
 				Vector2 draw_pos = v2_add(en->pos, v2(-1, -1));
 				draw_pos = v2_add(draw_pos, en->tether_connection_offset);
-				draw_rect(draw_pos, v2(2, 2), col_oxygen);
+				draw_rect_in_frame(draw_pos, v2(2, 2), col_oxygen, current_draw_frame);
 			}
 
-			pop_z_layer();
+			pop_z_layer_in_frame(current_draw_frame);
 		}
 	}
 
@@ -4601,7 +4613,7 @@ void render_world() {
 		xform         = m4_translate(xform, v3(size.x * -0.5, 0.0, 0));
 
 		Vector4 col = COLOR_WHITE;
-		Draw_Quad* quad = draw_image_xform(sprite->image, xform, v2(size.x, size.y), col);
+		Draw_Quad* quad = draw_image_xform_in_frame(sprite->image, xform, v2(size.x, size.y), col, current_draw_frame);
 
 		u32 anim_sheet_pos_x = en->anim_index * size.x;
 		u32 anim_sheet_pos_y = 0;
@@ -4634,14 +4646,14 @@ void render_world() {
 				col = v4_lerp(col, biome_col_hex_to_rgba(biome_colors[biome]), 0.1f);
 				float x_pos = x * tile_width;
 				float y_pos = y * tile_width;
-				Draw_Quad* quad = draw_rect(v2(x_pos, y_pos), v2(tile_width, tile_width), col);
+				Draw_Quad* quad = draw_rect_in_frame(v2(x_pos, y_pos), v2(tile_width, tile_width), col, current_draw_frame);
 
 				// TileCache* tc = tile_cache_at_tile(v2i(x, y));
 				// set_col_override(quad, tc->debug_col_override);
 			}
 		}
 
-		// draw_rect(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y) + tile_width * -0.5), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5));
+		// draw_rect_in_frame(v2(tile_pos_to_world_pos(mouse_tile_x) + tile_width * -0.5, tile_pos_to_world_pos(mouse_tile_y) + tile_width * -0.5), v2(tile_width, tile_width), v4(0.5, 0.5, 0.5, 0.5), current_draw_frame);
 	}
 
 	tm_scope("particle render") {
@@ -4659,10 +4671,68 @@ void render_world() {
 			Vector2 draw_pos = player->pos;
 			draw_pos.x -= size.x * 0.5;
 			draw_pos.y -= 6.0;
-			draw_rect(draw_pos, size, COLOR_BLACK);
+			draw_rect_in_frame(draw_pos, size, COLOR_BLACK, current_draw_frame);
 			float alpha = (float)player->oxygen / (float)player->oxygen_max;
-			draw_rect(draw_pos, v2(size.x * alpha, size.y), col_oxygen);
+			draw_rect_in_frame(draw_pos, v2(size.x * alpha, size.y), col_oxygen, current_draw_frame);
 		}
+	}
+
+	// :select entity UI
+	if (world_frame.selected_entity) {
+		Entity* en = world_frame.selected_entity;
+
+		// draw basic tooltip
+		defer_scope(set_screen_space(), set_world_space())
+		scope_z_layer(layer_ui)
+		{
+			float x0 = screen_width * 0.5;
+			float y0 = screen_height;
+			y0 -= 2.f;
+
+			string txt = en->pretty_name;
+			Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
+			y0 -= met.visual_size.y;
+			y0 -= 2;
+
+			if (en->last_frame.error) {
+				switch (en->last_frame.error) {
+					case GAME_ERR_no_fuel: txt = STR("Needs fuel"); break;
+					case GAME_ERR_no_room_in_destination: txt = STR("No room in destination"); break;
+					case GAME_ERR_no_o2: txt = STR("Needs oxygen network connection"); break;
+					default: txt = STR("");
+				}
+				draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), v4_lerp(COLOR_WHITE, COLOR_RED, get_error_flash_frequency()), PIVOT_top_center);
+			}
+		}
+
+		// draw radius stuff 
+		if (en->arch != ARCH_oxygenerator && en->radius)
+		{
+			Vector2 draw_pos = en->pos;
+			draw_pos.x -= en->radius;
+			draw_pos.y -= en->radius;
+			draw_circle_in_frame(draw_pos, v2(en->radius * 2, en->radius * 2), v4(1, 1, 1, 0.05), current_draw_frame);
+		}
+
+		// todo - draw selection corners like factorio
+		// Range2f range = get_entity_range(en);
+	}
+
+	// :shader cbuffer update
+	{
+		#if CONFIGURATION == DEBUG
+		if (is_key_just_pressed('U')) {
+			world->night_alpha_target = world->night_alpha_target == 0 ? 1.0 : 0.0;
+			log("%f", world->night_alpha_target);
+		}
+		#endif
+
+		cbuffer.night_alpha = world->night_alpha;
+		// cbuffer.night_alpha = sin_breathe(world->time_elapsed, 2.f);
+		// log("%f", cbuffer.night_alpha);
+
+		// player light
+		add_point_light(get_player()->pos, v4(0,0,0,0), 100, 1);
 	}
 }
 
@@ -5078,10 +5148,14 @@ int entry(int argc, char **argv) {
 	}
 	world_save_to_disk();
 
+	Draw_Frame offscreen_draw_frame;
+	draw_frame_init(&offscreen_draw_frame);
+
 	float64 seconds_counter = 0.0;
 
 	float64 last_time = os_get_elapsed_seconds();
 	
+	// :loop
 	while (!window.should_close)
 	tm_scope("frame")
 	{
@@ -5091,6 +5165,7 @@ int entry(int argc, char **argv) {
 		delta_t = current_time - last_time;
 		last_time = current_time;
 		os_update();
+		current_draw_frame = 0;
 
 		// zero entity frame state
 		for (int i = 0; i < MAX_ENTITY_COUNT; i++)
@@ -5174,10 +5249,6 @@ int entry(int argc, char **argv) {
 		}
 
 		// :frame update
-		draw_frame.enable_z_sorting = true;
-		draw_frame.shader_extension = global_shader;
-		cbuffer = (ShaderConstBuffer){0};
-
 		world_frame.world_proj = m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
 		// :camera
 		{
@@ -5208,8 +5279,14 @@ int entry(int argc, char **argv) {
 			// scale the zoom
 			world_frame.world_view = m4_scale(world_frame.world_view, v3(1.0/zoom, 1.0/zoom, 1.0));
 		}
-		set_world_space();
-		push_z_layer(layer_world);
+
+		// this is kinda yuck...
+		world_frame.screen_proj = m4_make_orthographic_projection(0.0, screen_width, 0.0, screen_height, -1, 10);
+		world_frame.screen_view = m4_identity;
+
+		// #fix
+		// set_world_space();
+		// push_z_layer_in_frame(layer_world, current_draw_frame);
 
 		Vector2 mouse_pos_world = get_mouse_pos_in_world_space();
 		int mouse_tile_x = world_pos_to_tile_pos(mouse_pos_world.x);
@@ -5219,8 +5296,11 @@ int entry(int argc, char **argv) {
 			world_frame.show_inventory = true;
 		}
 
+		/*
+		// #fix
 		do_ui_stuff();
 		do_world_entity_interaction_ui_stuff();
+		*/
 
 		// :tether stuff
 		{
@@ -5382,48 +5462,6 @@ int entry(int argc, char **argv) {
 						}
 					}
 				}
-			}
-
-			// :select entity UI
-			if (world_frame.selected_entity) {
-				Entity* en = world_frame.selected_entity;
-
-				// draw basic tooltip
-				defer_scope(set_screen_space(), set_world_space())
-				scope_z_layer(layer_ui)
-				{
-					float x0 = screen_width * 0.5;
-					float y0 = screen_height;
-					y0 -= 2.f;
-
-					string txt = en->pretty_name;
-					Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
-					y0 -= met.visual_size.y;
-					y0 -= 2;
-
-					if (en->last_frame.error) {
-						switch (en->last_frame.error) {
-							case GAME_ERR_no_fuel: txt = STR("Needs fuel"); break;
-							case GAME_ERR_no_room_in_destination: txt = STR("No room in destination"); break;
-							case GAME_ERR_no_o2: txt = STR("Needs oxygen network connection"); break;
-							default: txt = STR("");
-						}
-						draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), v4_lerp(COLOR_WHITE, COLOR_RED, get_error_flash_frequency()), PIVOT_top_center);
-					}
-				}
-
-				// draw radius stuff 
-				if (en->arch != ARCH_oxygenerator && en->radius)
-				{
-					Vector2 draw_pos = en->pos;
-					draw_pos.x -= en->radius;
-					draw_pos.y -= en->radius;
-					draw_circle(draw_pos, v2(en->radius * 2, en->radius * 2), v4(1, 1, 1, 0.05));
-				}
-
-
-				// todo - draw selection corners like factorio
-				// Range2f range = get_entity_range(en);
 			}
 		}
 
@@ -5876,19 +5914,24 @@ int entry(int argc, char **argv) {
 		}
 
 		// debug draw collision bounds
+		// #fix
+		/*
 		#if defined(DRAW_BOUNDS)
 		{
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
 				if (en->is_valid && en->has_collision || en->arch == ARCH_player) {
 					Range2f rect = range2f_shift(get_entity_collision_bounds(en), en->pos);
-					Draw_Quad* quad = draw_rect(rect.min, range2f_size(rect), v4(1, 0, 0, 0.3));
+					Draw_Quad* quad = draw_rect_in_frame(rect.min, range2f_size(rect), v4(1, 0, 0, 0.3), current_draw_frame);
 					quad->z = 1000;
 				}
 			}
 		}
 		#endif
+		*/
 
+		/*
+		// #fix
 		#if defined(MOUSE_COORDS_DEBUG)
 		{
 			Vector2 mp = get_mouse_pos_in_world_space();
@@ -5902,6 +5945,7 @@ int entry(int argc, char **argv) {
 			}
 		}
 		#endif
+		*/
 
 		// :player specific caveman update
 		{
@@ -5971,11 +6015,14 @@ int entry(int argc, char **argv) {
 			}
 
 			// player tether line
+			// #fix
+			/*
 			if (connected_to_tether && !is_inside) {
 				if (!is_inside) {
 					draw_line(v2_add(closest_tether->pos, closest_tether->tether_connection_offset), player->pos, 1.0f, col_tether);
 				}
 			}
+			*/
 
 			player->oxygen = clamp(player->oxygen, 0, player->oxygen_max);
 
@@ -6176,7 +6223,7 @@ int entry(int argc, char **argv) {
 			rect = m4_transform_range2f(m4_inverse(world_frame.world_proj), rect);
 			rect = m4_transform_range2f(world_frame.world_view, rect);
 			// {
-			// 	draw_rect(rect.min, range2f_size(rect), v4(1,0,0,0.8));
+			// 	draw_rect_in_frame(rect.min, range2f_size(rect), v4(1,0,0,0.8), current_draw_frame);
 			// }
 
 			// :glow effect thingo
@@ -6249,9 +6296,7 @@ int entry(int argc, char **argv) {
 
 		}
 
-		particle_update();
-
-		render_world();
+		particle_update();		
 
 		// day/night :cycle
 		{
@@ -6281,23 +6326,38 @@ int entry(int argc, char **argv) {
 			animate_f32_to_target_linear_with_epsilon(&world->night_alpha, world->night_alpha_target, delta_t, 1.0/transition_length, 0.001);
 		}
 
-		// :shader cbuffer update
+		// :rendering pipeline
 		{
-			#if CONFIGURATION == DEBUG
-			if (is_key_just_pressed('U')) {
-				world->night_alpha_target = world->night_alpha_target == 0 ? 1.0 : 0.0;
-				log("%f", world->night_alpha_target);
+			local_persist Gfx_Image *game_image = 0;
+			local_persist Os_Window last_window;
+			if ((last_window.width != window.width || last_window.height != window.height || !game_image) && window.width > 0 && window.height > 0) {
+				if (game_image)  delete_image(game_image);
+				
+				game_image = make_image_render_target(window.width, window.height, 4, 0, get_heap_allocator());
 			}
-			#endif
+			last_window = window;
 
-			cbuffer.night_alpha = world->night_alpha;
-			// cbuffer.night_alpha = sin_breathe(world->time_elapsed, 2.f);
-			// log("%f", cbuffer.night_alpha);
+			cbuffer = (ShaderConstBuffer){0};
 
-			// player light
-			add_point_light(get_player()->pos, v4(0,0,0,0), 100, 1);
+			assert(growing_array_get_valid_count(draw_frame.quad_buffer) == 0, "submitted quads prior??");
+
+			draw_frame_reset(&offscreen_draw_frame);
+			gfx_clear_render_target(game_image, COLOR_BLACK);
+
+			current_draw_frame = &offscreen_draw_frame;
+			draw_world_in_frame();
+
+			offscreen_draw_frame.enable_z_sorting = true;
+			offscreen_draw_frame.shader_extension = global_shader;
+			offscreen_draw_frame.cbuffer = &cbuffer;
+
+			gfx_render_draw_frame(&offscreen_draw_frame, game_image);
+
+			current_draw_frame = &draw_frame;
+			Draw_Quad *q = draw_image_in_frame(game_image, v2(-window.width/2, -window.height/2), v2(window.width, window.height), COLOR_WHITE, current_draw_frame);
+			swap(q->uv.y, q->uv.w, float); // swap y so it's upwards
 		}
-		draw_frame.cbuffer = &cbuffer;
+
 
 		tm_scope("gfx_update") {
 			gfx_update();

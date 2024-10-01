@@ -1,4 +1,7 @@
 
+// :shader stuff 
+// this drives an array of Vector4's in the user_data of Draw_Quad
+#define VERTEX_USER_DATA_COUNT 2
 
 ///
 // Build config stuff

@@ -372,7 +372,13 @@ d3d11_compile_pixel_shader(string source, ID3D11PixelShader **ps) {
     // Compile pixel shader
     ID3DBlob* ps_blob = NULL;
     ID3DBlob* err_blob = NULL;
-    hr = D3DCompile((char*)source.data, source.count, 0, 0, 0, "ps_main", "ps_5_0", 0, 0, &ps_blob, &err_blob);
+
+		UINT flags = 0;
+		#if CONFIGURATION == DEBUG
+		flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+		#endif
+
+    hr = D3DCompile((char*)source.data, source.count, 0, 0, 0, "ps_main", "ps_5_0", flags, 0, &ps_blob, &err_blob);
 	if (!SUCCEEDED(hr)) {
 		log_error("Fragment Shader Compilation Error: %cs\n", (char*)ID3D10Blob_GetBufferPointer(err_blob));
 		return false;

@@ -78,15 +78,6 @@ float float_alpha(float x, float min, float max) {
 	return res;
 }
 
-Vector2 ndc_pos_to_screen_pos(Vector2 ndc) {
-	float w = window.width;
-	float h = window.height;
-	Vector2 screen = ndc;
-	screen.x = (ndc.x * 0.5f + 0.5f) * w;
-	screen.y = (1.0f - (ndc.y * 0.5f + 0.5f)) * h;
-	return screen;
-}
-
 // :utils
 
 bool get_random_bool() {
@@ -214,7 +205,7 @@ u64 frame_count = 0;
 float exp_error_flash_alpha = 0;
 float exp_error_flash_alpha_target = 0;
 float camera_trauma = 0;
-float zoom = 5.3;
+float camera_zoom = 5.3;
 Vector2 camera_pos = {0};
 float64 delta_t;
 Gfx_Font* font;
@@ -250,6 +241,13 @@ ShaderConstBuffer cbuffer = {0};
 // #volatile
 void set_col_override(Draw_Quad* q, Vector4 col_override) {
 	q->userdata[0] = col_override;
+}
+
+// #volatile with shader
+#define QUAD_TYPE_portal 1
+// note, this couldn't be bitflags, because trying to use a float to store flags is error prone...
+void set_quad_type(Draw_Quad* q, float type) {
+	q->userdata[1].x = type;
 }
 
 int world_pos_to_tile_pos(float world_pos) {
@@ -334,7 +332,6 @@ typedef enum SpriteID {
 	SPRITE_anti_meteor,
 	SPRITE_portal_icon,
 	SPRITE_portal_frame,
-	SPRITE_portal_fill,
 	SPRITE_large_iron_depo,
 	SPRITE_extractor_north,
 	SPRITE_extractor_south,
@@ -637,6 +634,8 @@ typedef struct Entity {
 	float o2_consume_rate;
 	float64 next_consume_end_time;
 	bool has_anti_meteor_radius;
+	Gfx_Image* render_target_image;
+	Vector2 portal_view_pos;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -874,7 +873,10 @@ World* world = 0;
 typedef struct TileEntityCache TileEntityCache; // forward declr
 
 typedef struct WorldFrame {
+	int render_target_w;
+	int render_target_h;
 	Entity* selected_entity;
+	Vector2 camera_pos_copy; // this is kinda jank, but it's here so we can pass down the camera position to the rendering, instead of extracting it from the view matrix
 	Matrix4 world_proj;
 	Matrix4 world_view;
 	Matrix4 screen_proj;
@@ -884,6 +886,7 @@ typedef struct WorldFrame {
 	Entity* player;
 	TileEntityCache* tile_entity_cache;
 	bool is_creation;
+	bool draw_portals;
 	// :frame state
 } WorldFrame;
 WorldFrame world_frame;
@@ -946,8 +949,11 @@ Entity* entity_create() {
 	return entity_found;
 }
 
-void entity_zero_immediately(Entity* entity) {
-	memset(entity, 0, sizeof(Entity));
+void entity_zero_immediately(Entity* en) {
+	if (en->render_target_image) {
+		delete_image(en->render_target_image);
+	}
+	memset(en, 0, sizeof(Entity));
 }
 
 void entity_max_health_setter(Entity* en, int new_max_health) {
@@ -1049,11 +1055,15 @@ void setup_large_iron_depo(Entity* en) {
 	en->tile_size = v2i(3, 2);
 }
 
-// TODO - split rendering into targets n stuff, checkout bloom.c
+// :portal
 void setup_portal(Entity* en) {
 	en->arch = ARCH_portal;
 	en->tile_size = v2i(11, 3);
 	en->pretty_name = STR("Quantum Gate");
+
+	Vector2 size = get_sprite_size(get_sprite(SPRITE_portal_frame));
+	float resolution_scale = 2;
+	en->render_target_image = make_image_render_target(size.x * resolution_scale, size.y * resolution_scale, 4, 0, get_heap_allocator());
 }
 
 void setup_anti_meteor(Entity* en) {
@@ -1787,10 +1797,58 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 
 // :func dump
 
+// :camera
+Matrix4 construct_view_matrix(Vector2 pos, float zoom, float trauma) {
+
+	float cam_shake = clamp_top(pow(trauma, 3), 1);
+
+	Matrix4 view = m4_identity;
+
+	view = m4_identity;
+
+	// randy: these might be ordered incorrectly for the camera shake. Not sure.
+
+	// translate into position
+	view = m4_translate(view, v3(pos.x, pos.y, 0));
+
+	// translational shake
+	float shake_x = max_cam_shake_translate * cam_shake * get_random_float32_in_range(-1, 1);
+	float shake_y = max_cam_shake_translate * cam_shake * get_random_float32_in_range(-1, 1);
+	view = m4_translate(view, v3(shake_x, shake_y, 0));
+
+	// rotational shake
+	// float shake_rotate = max_cam_shake_rotate * cam_shake * get_random_float32_in_range(-1, 1);
+	// view = m4_rotate_z(view, shake_rotate);
+
+	// scale the zoom
+	view = m4_scale(view, v3(1.0/zoom, 1.0/zoom, 1.0));
+
+	return view;
+}
+
+Vector2 ndc_pos_to_screen_pos(Vector2 ndc) {
+	float w = world_frame.render_target_w;
+	float h = world_frame.render_target_h;
+	Vector2 screen = ndc;
+	screen.x = (ndc.x * 0.5f + 0.5f) * w;
+	screen.y = (1.0f - (ndc.y * 0.5f + 0.5f)) * h;
+	return screen;
+}
+
 Vector2 world_pos_to_ndc(Vector2 world_pos) {
 
-	Matrix4 proj = world_frame.world_proj;
-	Matrix4 view = world_frame.world_view;
+	Matrix4 proj;
+	if (current_draw_frame) {
+		proj = current_draw_frame->projection;
+	} else {
+		proj = world_frame.world_proj;
+	}
+	Matrix4 view;
+	if (current_draw_frame) {
+		view = current_draw_frame->camera_xform;
+	} else {
+		view = world_frame.world_view;
+	}
 
 	Matrix4 world_space_to_ndc = m4_identity;
 	world_space_to_ndc = m4_mul(proj, m4_inverse(view));
@@ -1900,11 +1958,11 @@ void consume_recipe(ItemAmount* recipe, int count) {
 	}
 }
 
-void draw_sprite(SpriteID sprite_id, Vector2 pos) {
+Draw_Quad* draw_sprite(SpriteID sprite_id, Vector2 pos) {
 	Sprite* sprite = get_sprite(sprite_id);
 	Vector2 draw_pos = pos;
 	draw_pos.x -= sprite->image->width * 0.5;
-	draw_image_in_frame(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE, current_draw_frame);
+	return draw_image_in_frame(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE, current_draw_frame);
 }
 
 inline float get_error_flash_frequency() {
@@ -1973,9 +2031,23 @@ void add_point_light(Vector2 world_pos, Vector4 col, float radius, float intensi
 
 	pl->color = col;
 	pl->intensity = intensity;
-	pl->radius = radius;
-	pl->radius = pl->radius * zoom;
 	pl->position = ndc_pos_to_screen_pos(world_pos_to_ndc(world_pos));
+
+	{
+		// Transform the light's position to screen space
+    pl->position = ndc_pos_to_screen_pos(world_pos_to_ndc(world_pos));
+
+    // Compute an offset position in world space
+    Vector2 offset_world_pos = v2_add(world_pos, v2(radius, 0.0f));
+
+    // Transform the offset position to screen space
+    Vector2 offset_screen_pos = ndc_pos_to_screen_pos(world_pos_to_ndc(offset_world_pos));
+
+    // Calculate the radius in screen space
+    float screen_radius = v2_length(v2_sub(offset_screen_pos, pl->position));
+
+		pl->radius = screen_radius;
+	}
 }
 
 void shader_recompile() {
@@ -3916,12 +3988,14 @@ void update_thumper(Entity* en) {
 }
 
 void render_portal(Entity* en) {
-	draw_sprite(SPRITE_portal_frame, en->pos);
 
-	Vector2 draw_pos = en->pos;
-	draw_pos.y += 2;
-	draw_pos.x -= 0.5;
-	draw_sprite(SPRITE_portal_fill, draw_pos);
+	// Vector2 size = get_sprite_size(get_sprite(SPRITE_portal_frame));
+	// Vector2 draw_pos = en->pos;
+	// draw_pos.x -= size.x * 0.5;
+	// draw_image_in_frame(en->render_target_image, draw_pos, size, v4(1,1,1,1), current_draw_frame);
+
+	Draw_Quad* q = draw_sprite(SPRITE_portal_frame, en->pos);
+	set_quad_type(q, QUAD_TYPE_portal);
 }
 
 // :conveyor
@@ -4483,7 +4557,7 @@ void draw_world_in_frame() {
 				case ARCH_player: break;
 
 				// :render
-				case ARCH_portal: render_portal(en); break;
+				case ARCH_portal: if (world_frame.draw_portals) render_portal(en); break;
 				case ARCH_extractor:
 				case ARCH_conveyor: render_conveyor(en); break;
 				case ARCH_enemy_nest: render_enemy_nest(en); break;
@@ -4617,8 +4691,8 @@ void draw_world_in_frame() {
 	// :tile :rendering
 	scope_z_layer(layer_background)
 	{
-		int player_tile_x = world_pos_to_tile_pos(get_player()->pos.x);
-		int player_tile_y = world_pos_to_tile_pos(get_player()->pos.y);
+		int player_tile_x = world_pos_to_tile_pos(world_frame.camera_pos_copy.x);
+		int player_tile_y = world_pos_to_tile_pos(world_frame.camera_pos_copy.y);
 		int tile_radius_x = 40;
 		int tile_radius_y = 30;
 		for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
@@ -4666,47 +4740,6 @@ void draw_world_in_frame() {
 			float alpha = (float)player->oxygen / (float)player->oxygen_max;
 			draw_rect_in_frame(draw_pos, v2(size.x * alpha, size.y), col_oxygen, current_draw_frame);
 		}
-	}
-
-	// :select entity UI
-	if (world_frame.selected_entity) {
-		Entity* en = world_frame.selected_entity;
-
-		// draw basic tooltip
-		defer_scope(set_screen_space(), set_world_space())
-		scope_z_layer(layer_ui)
-		{
-			float x0 = screen_width * 0.5;
-			float y0 = screen_height;
-			y0 -= 2.f;
-
-			string txt = en->pretty_name;
-			Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
-			y0 -= met.visual_size.y;
-			y0 -= 2;
-
-			if (en->last_frame.error) {
-				switch (en->last_frame.error) {
-					case GAME_ERR_no_fuel: txt = STR("Needs fuel"); break;
-					case GAME_ERR_no_room_in_destination: txt = STR("No room in destination"); break;
-					case GAME_ERR_no_o2: txt = STR("Needs oxygen network connection"); break;
-					default: txt = STR("");
-				}
-				draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), v4_lerp(COLOR_WHITE, COLOR_RED, get_error_flash_frequency()), PIVOT_top_center);
-			}
-		}
-
-		// draw radius stuff 
-		if (en->arch != ARCH_oxygenerator && en->radius)
-		{
-			Vector2 draw_pos = en->pos;
-			draw_pos.x -= en->radius;
-			draw_pos.y -= en->radius;
-			draw_circle_in_frame(draw_pos, v2(en->radius * 2, en->radius * 2), v4(1, 1, 1, 0.05), current_draw_frame);
-		}
-
-		// todo - draw selection corners like factorio
-		// Range2f range = get_entity_range(en);
 	}
 
 	// :shader cbuffer update
@@ -4813,7 +4846,6 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_anti_meteor] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/anti_meteor.png"), get_heap_allocator())};
 		sprites[SPRITE_portal_icon] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/portal_icon.png"), get_heap_allocator())};
 		sprites[SPRITE_portal_frame] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/portal_frame.png"), get_heap_allocator())};
-		sprites[SPRITE_portal_fill] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/portal_fill.png"), get_heap_allocator())};
 		sprites[SPRITE_large_iron_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/large_iron_depo.png"), get_heap_allocator())};
 		sprites[SPRITE_extractor_east] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_east.png"), get_heap_allocator())};
 		sprites[SPRITE_extractor_west] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/extractor_west.png"), get_heap_allocator())};
@@ -5142,6 +5174,9 @@ int entry(int argc, char **argv) {
 	Draw_Frame offscreen_draw_frame;
 	draw_frame_init(&offscreen_draw_frame);
 
+	Draw_Frame ui_draw_frame;
+	draw_frame_init(&ui_draw_frame);
+
 	float64 seconds_counter = 0.0;
 
 	float64 last_time = os_get_elapsed_seconds();
@@ -5209,11 +5244,11 @@ int entry(int argc, char **argv) {
 		{
 			if (is_key_down(KEY_SHIFT)) {
 				if (is_key_down('Q')) {
-					zoom += 0.1;
+					camera_zoom += 0.1;
 				}
 				if (is_key_down('E')) {
-					zoom -= 0.1;
-					zoom = clamp_bottom(zoom, 0.4);
+					camera_zoom -= 0.1;
+					camera_zoom = clamp_bottom(camera_zoom, 0.4);
 				}
 			}
 		}
@@ -5258,34 +5293,20 @@ int entry(int argc, char **argv) {
 			// camera shake - https://www.youtube.com/watch?v=tu-Qe66AvtY
 			camera_trauma -= delta_t;
 			camera_trauma = clamp_bottom(camera_trauma, 0);
-			float cam_shake = clamp_top(pow(camera_trauma, 3), 1);
 
 			Vector2 target_pos = get_player()->pos;
 			animate_v2_to_target(&camera_pos, target_pos, delta_t, 30.0f);
 
-			world_frame.world_view = m4_identity;
-
-			// randy: these might be ordered incorrectly for the camera shake. Not sure.
-
-			// translate into position
-			world_frame.world_view = m4_translate(world_frame.world_view, v3(camera_pos.x, camera_pos.y, 0));
-
-			// translational shake
-			float shake_x = max_cam_shake_translate * cam_shake * get_random_float32_in_range(-1, 1);
-			float shake_y = max_cam_shake_translate * cam_shake * get_random_float32_in_range(-1, 1);
-			world_frame.world_view = m4_translate(world_frame.world_view, v3(shake_x, shake_y, 0));
-
-			// rotational shake
-			// float shake_rotate = max_cam_shake_rotate * cam_shake * get_random_float32_in_range(-1, 1);
-			// world_frame.world_view = m4_rotate_z(world_frame.world_view, shake_rotate);
-
-			// scale the zoom
-			world_frame.world_view = m4_scale(world_frame.world_view, v3(1.0/zoom, 1.0/zoom, 1.0));
+			world_frame.world_view = construct_view_matrix(camera_pos, camera_zoom, camera_trauma);
+			world_frame.camera_pos_copy = camera_pos;
 		}
 
 		// this is kinda yuck...
 		world_frame.screen_proj = m4_make_orthographic_projection(0.0, screen_width, 0.0, screen_height, -1, 10);
 		world_frame.screen_view = m4_identity;
+
+		world_frame.render_target_h = window.height;
+		world_frame.render_target_w = window.width;
 
 		if (world->ux_state == UX_entity_interaction) {
 			world_frame.show_inventory = true;
@@ -5293,18 +5314,16 @@ int entry(int argc, char **argv) {
 
 		// :ui draw to image
 		{
-			draw_frame_reset(&offscreen_draw_frame);
+			draw_frame_reset(&ui_draw_frame);
 			gfx_clear_render_target(ui_image, v4(0,0,0,0));
 
-			offscreen_draw_frame.enable_z_sorting = true;
-			offscreen_draw_frame.shader_extension = global_shader;
-			offscreen_draw_frame.cbuffer = &(ShaderConstBuffer){0};
-			current_draw_frame = &offscreen_draw_frame;
+			ui_draw_frame.enable_z_sorting = true;
+			ui_draw_frame.shader_extension = global_shader;
+			ui_draw_frame.cbuffer = &(ShaderConstBuffer){0};
+			current_draw_frame = &ui_draw_frame;
 
 			do_ui_stuff();
 			do_world_entity_interaction_ui_stuff();
-
-			gfx_render_draw_frame(&offscreen_draw_frame, ui_image);
 
 			current_draw_frame = 0;
 		}
@@ -5470,6 +5489,54 @@ int entry(int argc, char **argv) {
 					}
 				}
 			}
+
+			// :select entity UI
+			{
+				current_draw_frame = &ui_draw_frame;
+
+				if (world_frame.selected_entity) {
+					Entity* en = world_frame.selected_entity;
+
+					// draw basic tooltip
+					defer_scope(set_screen_space(), set_world_space())
+					scope_z_layer(layer_ui)
+					{
+						float x0 = screen_width * 0.5;
+						float y0 = screen_height;
+						y0 -= 2.f;
+
+						string txt = en->pretty_name;
+						Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), COLOR_WHITE, PIVOT_top_center);
+						y0 -= met.visual_size.y;
+						y0 -= 2;
+
+						if (en->last_frame.error) {
+							switch (en->last_frame.error) {
+								case GAME_ERR_no_fuel: txt = STR("Needs fuel"); break;
+								case GAME_ERR_no_room_in_destination: txt = STR("No room in destination"); break;
+								case GAME_ERR_no_o2: txt = STR("Needs oxygen network connection"); break;
+								default: txt = STR("");
+							}
+							draw_text_with_pivot(font, txt, font_height, v2(x0, y0), v2(0.1, 0.1), v4_lerp(COLOR_WHITE, COLOR_RED, get_error_flash_frequency()), PIVOT_top_center);
+						}
+					}
+
+					// draw radius stuff 
+					if (en->arch != ARCH_oxygenerator && en->radius)
+					{
+						Vector2 draw_pos = en->pos;
+						draw_pos.x -= en->radius;
+						draw_pos.y -= en->radius;
+						draw_circle_in_frame(draw_pos, v2(en->radius * 2, en->radius * 2), v4(1, 1, 1, 0.05), current_draw_frame);
+					}
+
+					// todo - draw selection corners like factorio
+					// Range2f range = get_entity_range(en);
+				}
+
+				current_draw_frame = 0;
+			}
+
 		}
 
 		// spawn :meteors
@@ -6335,23 +6402,108 @@ int entry(int argc, char **argv) {
 
 		// :rendering pipeline
 		{
-			cbuffer = (ShaderConstBuffer){0};
+			assert(growing_array_get_valid_count(draw_frame.quad_buffer) == 0, "submitting quads prior to the rendering pass is a no go");
 
-			assert(growing_array_get_valid_count(draw_frame.quad_buffer) == 0, "submitted quads prior??");
+			// :portal rendering
+			Gfx_Image** target_portals;
+			growing_array_init_reserve((void**)&target_portals, sizeof(Gfx_Image*), 1, get_temporary_allocator());
 
-			draw_frame_reset(&offscreen_draw_frame);
-			gfx_clear_render_target(game_image, COLOR_BLACK);
+			for (int i = 0; i < MAX_ENTITY_COUNT; i++)
+			tm_scope("portal render")
+			{
+				Entity* portal = &world->entities[i];
+				if (!(is_valid(portal) && portal->arch == ARCH_portal)) continue;
 
-			current_draw_frame = &offscreen_draw_frame;
-			draw_world_in_frame();
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+					portal->portal_view_pos = get_mouse_pos_in_current_space();
+				}
 
-			offscreen_draw_frame.enable_z_sorting = true;
-			offscreen_draw_frame.shader_extension = global_shader;
-			offscreen_draw_frame.cbuffer = &cbuffer;
+				Gfx_Image* target_image = portal->render_target_image;
 
-			gfx_render_draw_frame(&offscreen_draw_frame, game_image);
+				current_draw_frame = &offscreen_draw_frame;
+				draw_frame_reset(&offscreen_draw_frame);
+				gfx_clear_render_target(target_image, COLOR_BLACK);
 
-			current_draw_frame = 0;
+				WorldFrame prev_world_frame = world_frame;
+
+				// setup the camera
+				{
+					Vector2 frame_size = get_sprite_size(get_sprite(SPRITE_portal_frame));
+
+					Vector2 dest_pos = portal->portal_view_pos;
+
+					// these are in the world space
+					Vector2 bottom_left = v2_add(dest_pos, v2(frame_size.x * -0.5, 0));
+					Vector2 top_right = v2_add(dest_pos, v2(frame_size.x * 0.5, frame_size.y));
+					Range2f rect = (Range2f){.min=bottom_left, .max=top_right};
+
+					// Compute the center and size of the rectangle
+					Vector2 rect_center = v2_mulf(v2_add(rect.min, rect.max), 0.5f);
+					Vector2 rect_size = v2_sub(rect.max, rect.min);
+
+					// Calculate scaling factors based on the window size
+					float scale_x = window.width / rect_size.x;
+					float scale_y = window.height / rect_size.y;
+
+					// Create scaling and translation matrices
+					Matrix4 S = m4_make_scale(v3(scale_x, scale_y, 1.0f));
+					Matrix4 T = m4_make_translation(v3(-rect_center.x, -rect_center.y, 0.0f));
+
+					// Combine to form the view matrix
+					Matrix4 view = m4_mul(S, T);
+
+					world_frame.camera_pos_copy = dest_pos;
+					world_frame.world_view = m4_inverse(view);
+
+					world_frame.render_target_w = target_image->width;
+					world_frame.render_target_h = target_image->height;
+				}
+
+				cbuffer = (ShaderConstBuffer){0};
+				draw_world_in_frame();
+
+				offscreen_draw_frame.enable_z_sorting = true;
+				offscreen_draw_frame.shader_extension = global_shader;
+				offscreen_draw_frame.cbuffer = &cbuffer;
+
+				gfx_render_draw_frame(&offscreen_draw_frame, target_image);
+				current_draw_frame = 0;
+
+				world_frame = prev_world_frame;
+
+				growing_array_add((void**)&target_portals, &target_image);
+			}
+
+			{
+				draw_frame_reset(&offscreen_draw_frame);
+				gfx_clear_render_target(game_image, COLOR_BLACK);
+
+				cbuffer = (ShaderConstBuffer){0};
+				{
+					current_draw_frame = &offscreen_draw_frame;
+
+					world_frame.draw_portals = true;
+					for (int i = 0; i < growing_array_get_valid_count(target_portals); i++) {
+						Gfx_Image* img = target_portals[i];
+						// todo, make this actually work with multiple lol
+						draw_frame_bind_image_to_shader(&offscreen_draw_frame, img, 0);
+					}
+
+					draw_world_in_frame();
+					current_draw_frame = 0;
+				}
+
+				offscreen_draw_frame.enable_z_sorting = true;
+				offscreen_draw_frame.shader_extension = global_shader;
+				offscreen_draw_frame.cbuffer = &cbuffer;
+
+				gfx_render_draw_frame(&offscreen_draw_frame, game_image);
+			}
+
+			{
+				gfx_render_draw_frame(&ui_draw_frame, ui_image);
+			}
 
 			Draw_Quad *q = draw_image(game_image, v2(-window.width/2, -window.height/2), v2(window.width, window.height), COLOR_WHITE);
 			swap(q->uv.y, q->uv.w, float); // swap y so it's upwards

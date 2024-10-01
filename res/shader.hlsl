@@ -16,6 +16,26 @@ struct PS_INPUT
 };
 */
 
+/*
+	Samplers:
+	
+	image_sampler_0 // near POINT,  far POINT
+	image_sampler_1 // near LINEAR, far LINEAR
+	image_sampler_2 // near POINT,  far LINEAR
+	image_sampler_3 // near LINEAR, far POINT
+
+*/
+
+/*
+
+userdata layout
+[0] = col override
+[1].x = 32 bits of flags
+
+*/
+
+#define QUAD_TYPE_portal 1
+
 struct PointLight {
 	float2 position;
 	float radius;
@@ -32,10 +52,27 @@ cbuffer some_cbuffer : register(b0) {
 	int point_light_count;
 }
 
+Texture2D portal_tex: register(t0);
+
 float4 pixel_shader_extension(PS_INPUT input, float4 color) {
 
 	// Store the original color before night shading
 	float3 original_color = color.rgb;
+
+	float type = input.userdata[1].x;
+	if (type == QUAD_TYPE_portal) {
+
+		float3 mask_col = float3(239.0 / 255.0, 106.0 / 255.0, 216.0 / 255.0);
+		if (all(abs(original_color - mask_col) < 0.01)) {
+			// sample into portal tex
+			float2 uv = input.uv;
+			uv.y = 1.0-uv.y;
+			original_color = portal_tex.Sample(image_sampler_0, uv).xyz;
+
+			// I think we can just return dis bc lighting was already done?
+			return float4(original_color.xyz, 1);
+		}
+	}
 
 	// Override color
 	float4 col_override = input.userdata[0];

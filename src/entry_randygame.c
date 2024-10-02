@@ -922,6 +922,17 @@ Entity* get_player() {
 // I <3 C
 #include "fmod_sound.c"
 
+// top level :func dump
+
+Range2f get_camera_view_rect_in_world_space() {
+	Range2f rect;
+	rect.min = v2(-1, -1);
+	rect.max = v2(1, 1);
+	rect = m4_transform_range2f(m4_inverse(world_frame.world_proj), rect);
+	rect = m4_transform_range2f(world_frame.world_view, rect);
+	return rect;
+}
+
 bool is_player_alive() {
 	return get_player()->health > 0;
 }
@@ -1061,10 +1072,7 @@ void setup_portal(Entity* en) {
 	en->arch = ARCH_portal;
 	en->tile_size = v2i(11, 3);
 	en->pretty_name = STR("Quantum Gate");
-
-	Vector2 size = get_sprite_size(get_sprite(SPRITE_portal_frame));
-	float resolution_scale = 2;
-	en->render_target_image = make_image_render_target(size.x * resolution_scale, size.y * resolution_scale, 4, 0, get_heap_allocator());
+	en->render_target_image = 0;
 }
 
 void setup_anti_meteor(Entity* en) {
@@ -1827,6 +1835,11 @@ Matrix4 construct_view_matrix(Vector2 pos, float zoom, float trauma) {
 	return view;
 }
 
+void set_world_view() {
+	world_frame.world_view = construct_view_matrix(camera_pos, camera_zoom, camera_trauma);
+	world_frame.camera_pos_copy = camera_pos;
+}
+
 Vector2 ndc_pos_to_screen_pos(Vector2 ndc) {
 	float w = world_frame.render_target_w;
 	float h = world_frame.render_target_h;
@@ -2005,15 +2018,6 @@ ArchetypeID random_weighted_archetype(ArchetypeWeight* weights, int weights_coun
 	}
 
 	return 0;
-}
-
-Range2f get_camera_view_rect_in_world_space() {
-	Range2f rect;
-	rect.min = v2(-1, -1);
-	rect.max = v2(1, 1);
-	rect = m4_transform_range2f(m4_inverse(world_frame.world_proj), rect);
-	rect = m4_transform_range2f(world_frame.world_view, rect);
-	return rect;
 }
 
 // 1.0 is medium intensity
@@ -4009,8 +4013,24 @@ void do_portal_thing (Entity* player) {
 
 			Vector2 relative_cam_pos = v2_sub(camera_pos, old_player_pos);
 			camera_pos = v2_add(player->pos, relative_cam_pos);
+
+			set_world_view();
 		}
 	}
+}
+void update_portal(Entity* en) {
+
+	if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+		consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+		en->portal_view_pos = get_mouse_pos_in_current_space();
+	}
+
+	if (!en->render_target_image) {
+		Vector2 sprite_size = get_sprite_size(get_sprite(SPRITE_portal_frame));
+		float res = 10.f;
+		en->render_target_image = make_image_render_target(sprite_size.x * res, sprite_size.y * res, 4, 0, get_heap_allocator());
+	}
+
 }
 void render_portal(Entity* en) {
 
@@ -5322,8 +5342,7 @@ int entry(int argc, char **argv) {
 			Vector2 target_pos = get_player()->pos;
 			animate_v2_to_target(&camera_pos, target_pos, delta_t, 30.0f);
 
-			world_frame.world_view = construct_view_matrix(camera_pos, camera_zoom, camera_trauma);
-			world_frame.camera_pos_copy = camera_pos;
+			set_world_view();
 		}
 
 		// this is kinda yuck...
@@ -5716,6 +5735,7 @@ int entry(int argc, char **argv) {
 					} break;
 
 					// :update
+					case ARCH_portal: update_portal(en); break;
 					case ARCH_thumper: update_thumper(en); break;
 					case ARCH_extractor: update_extractor(en); break;
 					case ARCH_conveyor: update_conveyor(en); break;
@@ -6442,11 +6462,6 @@ int entry(int argc, char **argv) {
 			{
 				Entity* portal = &world->entities[i];
 				if (!(is_valid(portal) && portal->arch == ARCH_portal)) continue;
-
-				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-					portal->portal_view_pos = get_mouse_pos_in_current_space();
-				}
 
 				Gfx_Image* target_image = portal->render_target_image;
 

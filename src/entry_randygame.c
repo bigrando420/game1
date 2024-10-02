@@ -4015,13 +4015,15 @@ void do_portal_thing (Entity* player) {
 			camera_pos = v2_add(player->pos, relative_cam_pos);
 
 			set_world_view();
+
+			play_sound_at_pos("event:/teleport", player->pos);
+			camera_shake(0.2);
 		}
 	}
 }
 void update_portal(Entity* en) {
 
-	if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
-		consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+	if (is_key_down(MOUSE_BUTTON_RIGHT)) {
 		en->portal_view_pos = get_mouse_pos_in_current_space();
 	}
 

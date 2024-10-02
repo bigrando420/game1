@@ -637,6 +637,7 @@ typedef struct Entity {
 	bool has_anti_meteor_radius;
 	Gfx_Image* render_target_image;
 	Vector2 portal_view_pos;
+	float64 teleported_at_time;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -4018,6 +4019,8 @@ void do_portal_thing (Entity* player) {
 
 			play_sound_at_pos("event:/teleport", player->pos);
 			camera_shake(0.2);
+
+			portal->teleported_at_time = now();
 		}
 	}
 }
@@ -4043,6 +4046,26 @@ void render_portal(Entity* en) {
 
 	Draw_Quad* q = draw_sprite(SPRITE_portal_frame, en->pos);
 	set_quad_type(q, QUAD_TYPE_portal);
+
+	// afterimage effect
+	// if (false)
+	{
+		float tp_length = 0.3f;
+		float time_ago = now() - en->teleported_at_time;
+
+		if (en->teleported_at_time && time_ago > tp_length) {
+			en->teleported_at_time = 0;
+		}
+
+		if (en->teleported_at_time) {
+			float alpha = alpha_from_end_time(en->teleported_at_time + tp_length, tp_length);
+
+			q = draw_sprite(SPRITE_portal_frame, en->portal_view_pos);
+			set_quad_type(q, QUAD_TYPE_portal);
+
+			q->color.a = ease_in_exp(1.0-alpha, 15);
+		}
+	}
 }
 
 // :conveyor

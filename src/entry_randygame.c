@@ -537,6 +537,7 @@ typedef struct EntityFrame {
 	bool did_shoot;
 	bool is_awake;
 	GameError error;
+	Vector2 last_pos;
 	// :frame
 } EntityFrame;
 
@@ -3987,6 +3988,30 @@ void update_thumper(Entity* en) {
 
 }
 
+// :portal
+void do_portal_thing (Entity* player) {
+	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+		Entity* portal = &world->entities[i];
+		if (!(portal->is_valid && portal->arch == ARCH_portal)) continue;
+
+		float portal_width = 77;
+
+		float y_thres = portal->pos.y;
+		float x_min = portal->pos.x - portal_width * 0.5;
+		float x_max = portal->pos.x + portal_width * 0.5;
+
+		if (player->pos.x > x_min && player->pos.x < x_max
+		&& player->frame.last_pos.y < y_thres && player->pos.y >= y_thres) {
+			Vector2 old_player_pos = player->pos;
+			
+			Vector2 relative_to_portal = v2_sub(player->pos, portal->pos);
+			player->pos = v2_add(portal->portal_view_pos, relative_to_portal);
+
+			Vector2 relative_cam_pos = v2_sub(camera_pos, old_player_pos);
+			camera_pos = v2_add(player->pos, relative_cam_pos);
+		}
+	}
+}
 void render_portal(Entity* en) {
 
 	// Vector2 size = get_sprite_size(get_sprite(SPRITE_portal_frame));
@@ -5984,8 +6009,12 @@ int entry(int argc, char **argv) {
 				}
 			}
 
+			en->frame.last_pos = en->pos;
+
 			en->pos = next_pos;
 		}
+
+		do_portal_thing(get_player());
 
 		// debug draw collision bounds
 		// #fix

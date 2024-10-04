@@ -364,145 +364,83 @@ Vector2 get_sprite_size(Sprite* sprite) {
 	return (Vector2) { sprite->image->width, sprite->image->height };
 }
 
-// #refactor_idea_that_is_purely_aesthetic
 // could we merge itemid into archid? and just use a flag to represent it?
 // I remember trying this a while back. I got frustated with it being too overloaded I think.
 //
 // I guess probably not, because there's a distinction from an item on the ground, and the placed big chungus entity?
+// ^ can easily be solved with a bool...
 //
-typedef enum ItemID {
-	ITEM_nil,
-	ITEM_rock,
-	ITEM_pine_wood,
-	ITEM_exp,
-	ITEM_raw_copper,
-	ITEM_copper_ingot,
-	ITEM_fiber,
-	ITEM_flint,
-	ITEM_flint_axe,
-	ITEM_flint_pickaxe,
-	ITEM_flint_scythe,
-	ITEM_coal,
-	ITEM_o2_shard,
-	ITEM_raw_iron,
-	ITEM_iron_ingot,
-	ITEM_furnace,
-	ITEM_workbench,
-	ITEM_research_station,
-	ITEM_tether,
-	ITEM_burner_drill,
-	ITEM_longboi_test,
-	ITEM_wall,
-	ITEM_wall_gate,
-	ITEM_o2_emitter,
-	ITEM_turret,
-	ITEM_bullet,
-	ITEM_red_core,
-	ITEM_wood_crate,
-	ITEM_conveyor,
-	ITEM_anti_meteor,
-	ITEM_portal,
-	ITEM_extractor,
-	ITEM_thumper,
-	ITEM_raw_meteorite,
-	ITEM_meteorite_ingot,
-	ITEM_tp_focus,
-	// :item
-	ITEM_MAX,
-} ItemID;
+// #item
+// I'm gonna try this out and see what happens lol.
+//
+
+typedef enum ArchetypeID {
+	ARCH_nil = 0,
+	ARCH_tree,
+	ARCH_player,
+	ARCH_furnace,
+	ARCH_workbench,
+	ARCH_research_station,
+	ARCH_exp_vein,
+	ARCH_copper_depo,
+	ARCH_flint_depo,
+	ARCH_grass,
+	ARCH_oxygenerator,
+	ARCH_tether,
+	ARCH_ice_vein,
+	ARCH_tile_resource,
+	ARCH_burner_drill,
+	ARCH_coal_depo,
+	ARCH_iron_depo,
+	ARCH_wall,
+	ARCH_wall_gate,
+	ARCH_o2_emitter,
+	ARCH_enemy1,
+	ARCH_turret,
+	ARCH_meteor,
+	ARCH_enemy_nest,
+	ARCH_large_ice_vein,
+	ARCH_wood_crate,
+	ARCH_conveyor,
+	ARCH_large_coal_depo,
+	ARCH_anti_meteor,
+	ARCH_portal,
+	ARCH_large_iron_depo,
+	ARCH_extractor,
+	ARCH_thumper,
+	ARCH_rock_small,
+	ARCH_rock_medium,
+	ARCH_rock_large,
+	ARCH_meteorite_depo,
+	ARCH_portal_controller,
+
+	// these were items
+	ARCH_rock,
+	ARCH_exp,
+	ARCH_raw_copper,
+	ARCH_copper_ingot,
+	ARCH_fiber,
+	ARCH_coal,
+	ARCH_o2_shard,
+	ARCH_raw_iron,
+	ARCH_iron_ingot,
+	ARCH_bullet,
+	ARCH_red_core,
+	ARCH_raw_meteorite,
+	ARCH_meteorite_ingot,
+	ARCH_tp_focus,
+
+	// :arch
+	ARCH_MAX,
+} ArchetypeID;
 
 typedef struct ItemInstanceData {
-	ItemID id;
+	ArchetypeID id;
 	int amount;
 	bool has_focus_target;
 	Vector2 focus_target_pos;
 } ItemInstanceData; 
 const ItemInstanceData empty_item = {0};
-
-typedef enum ArchetypeID {
-	ARCH_nil = 0,
-	ARCH_rock = 1,
-	ARCH_tree = 2,
-	ARCH_player = 3,
-	ARCH_item = 4,
-	// 5
-	ARCH_furnace = 6,
-	ARCH_workbench = 7,
-	ARCH_research_station = 8,
-	ARCH_exp_vein = 9,
-	// ARCH_ = 10,
-	ARCH_copper_depo = 11,
-	ARCH_flint_depo = 12,
-	ARCH_grass = 13,
-	ARCH_oxygenerator = 14,
-	ARCH_tether = 15,
-	ARCH_exp_orb = 16,
-	ARCH_ice_vein = 17,
-	ARCH_tile_resource = 18,
-	ARCH_burner_drill = 19,
-	ARCH_longboi_test = 20,
-	ARCH_coal_depo = 21,
-	ARCH_iron_depo = 22,
-	ARCH_wall = 23,
-	ARCH_wall_gate = 24,
-	ARCH_o2_emitter = 25,
-	ARCH_enemy1 = 26,
-	ARCH_turret = 27,
-	ARCH_meteor = 28,
-	ARCH_enemy_nest = 29,
-	ARCH_large_ice_vein = 30,
-	ARCH_wood_crate = 31,
-	ARCH_conveyor = 32,
-	ARCH_large_coal_depo = 33,
-	ARCH_anti_meteor = 34,
-	ARCH_portal = 35,
-	ARCH_large_iron_depo = 36,
-	ARCH_extractor = 37,
-	ARCH_thumper = 38,
-	ARCH_rock_small = 39,
-	ARCH_rock_medium = 40,
-	ARCH_rock_large = 41,
-	ARCH_meteorite_depo = 42,
-	ARCH_portal_controller = 43,
-	// :arch
-	ARCH_MAX,
-} ArchetypeID;
-
-// item
-typedef struct ItemData {
-	string pretty_name;
-	string description;
-	SpriteID icon;
-	int extra_axe_dmg; // #extend_dmg_type_here
-	int extra_pickaxe_dmg;
-	int extra_sickle_dmg;
-	ArchetypeID for_structure;
-	float craft_length;
-	ItemID furnace_transform_into;
-	bool disabled;
-	bool used_in_turret;
-	// merged in from building.
-	ArchetypeID to_build;
-	int exp_cost;
-	ItemInstanceData ingredients[8];
-	int ingredients_count;
-	ItemInstanceData research_ingredients[4];
-	int research_ingredients_count;
-	int stack_size;
-} ItemData;
-ItemData item_data[ITEM_MAX] = {0};
-ItemData get_item_data(ItemID id) {
-	return item_data[id];
-}
-SpriteID get_sprite_id_from_item(ItemID id) {
-	return get_item_data(id).icon;
-}
-SpriteID get_sprite_id_from_item_instance(ItemInstanceData item) {
-	if (item.id == ITEM_tp_focus) {
-		return (item.has_focus_target ? SPRITE_charged_tp_focus : SPRITE_blank_tp_focus);
-	}
-	return get_item_data(item.id).icon;
-}
 
 typedef enum DamageType {
 	DMG_nil,
@@ -552,15 +490,14 @@ typedef struct StorageSlot {
 	ItemInstanceData item;
 	bool output_only; // can only take items from here, can't put in
 	int desired_item_count;
-	ItemID desired_items[4];
+	ArchetypeID desired_items[4];
 } StorageSlot;
 
 typedef struct Entity {
 	bool is_valid;
 	int id;
 	ArchetypeID arch;
-	ItemID item_id;
-	int item_amount;
+	int item_amount; // #item, need to yeet this.
 	ItemInstanceData new_item_thing;
 	Vector2 pos;
 	bool render_sprite;
@@ -573,7 +510,7 @@ typedef struct Entity {
 	ItemInstanceData drops[4];
 	int drops_count;
 	DamageType dmg_type;
-	ItemID selected_crafting_item;
+	ArchetypeID selected_crafting_item;
 	int oxygen;
 	int oxygen_max;
 	float64 oxygen_deplete_end_time;
@@ -610,7 +547,7 @@ typedef struct Entity {
 	int last_fuel_max;
 	int current_fuel;
 	bool offset_based_on_tile_height;
-	ItemID current_crafting_item;
+	ArchetypeID current_crafting_item;
 	int progress_on_crafting; // this goes up to 100 (deprecated)
 	int progress; // use this now
 	int progress_max;
@@ -633,7 +570,7 @@ typedef struct Entity {
 	bool destroyable_by_explosion;
 	bool meteor_destroy_without_drops;
 	EntityHandle spawned_from;
-	ItemID big_resource_drop;
+	ArchetypeID big_resource_drop;
 	s32 z_layer;
 	bool has_input_storage;
 	Direction dir;
@@ -646,6 +583,8 @@ typedef struct Entity {
 	Gfx_Image* render_target_image;
 	Vector2 portal_view_pos;
 	float64 teleported_at_time;
+	bool is_item;
+	bool can_be_placed;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -655,6 +594,27 @@ typedef struct Entity {
 	string pretty_name;
 	//
 
+
+	// #item
+	// copied from the old ItemData struct
+	string description;
+	SpriteID icon;
+	int extra_axe_dmg; // #extend_dmg_type_here
+	int extra_pickaxe_dmg;
+	int extra_sickle_dmg;
+	ArchetypeID for_structure;
+	float craft_length;
+	ArchetypeID furnace_transform_into;
+	bool disabled;
+	bool used_in_turret;
+	// merged in from building.
+	int exp_cost;
+	ItemInstanceData ingredients[8];
+	int ingredients_count;
+	ItemInstanceData research_ingredients[4];
+	int research_ingredients_count;
+	int stack_size;
+
 	// #continualsound
 	// FMOD_STUDIO_EVENTINSTANCE* continual_sound;
 
@@ -662,6 +622,34 @@ typedef struct Entity {
 	EntityFrame last_frame;
 } Entity;
 #define MAX_ENTITY_COUNT 1024
+
+typedef Entity ItemData;
+// #item
+Entity entity_archetype_data[ARCH_MAX] = {0};
+Entity get_archetype_data(ArchetypeID id) {
+	return entity_archetype_data[id];
+}
+string get_archetype_pretty_name(ArchetypeID id) {
+	return get_archetype_data(id).pretty_name;
+}
+
+SpriteID get_icon_from_arch_id(ArchetypeID id) {
+	Entity data = get_archetype_data(id);
+	return data.icon ? data.icon : data.sprite_id;
+}
+SpriteID get_sprite_id_from_item(ArchetypeID id) {
+	return get_icon_from_arch_id(id);
+}
+
+Entity get_item_data(ArchetypeID id) {
+	return get_archetype_data(id);
+}
+SpriteID get_sprite_id_from_item_instance(ItemInstanceData item) {
+	if (item.id == ARCH_tp_focus) {
+		return (item.has_focus_target ? SPRITE_charged_tp_focus : SPRITE_blank_tp_focus);
+	}
+	return get_icon_from_arch_id(item.id);
+}
 
 typedef enum UXState {
 	UX_nil,
@@ -866,10 +854,10 @@ typedef struct World {
 	float inventory_alpha_target;
 	float building_alpha;
 	float building_alpha_target;
-	ItemID placing_building;
+	ArchetypeID placing_building;
 	EntityHandle interacting_with_entity;
-	ItemID selected_research_thing;
-	UnlockState item_unlocks[ITEM_MAX];
+	ArchetypeID selected_research_thing;
+	UnlockState item_unlocks[ARCH_MAX];
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	EntityHandle oxygenerator;
 	ItemInstanceData mouse_cursor_item;
@@ -948,8 +936,10 @@ bool is_player_alive() {
 	return get_player()->health > 0;
 }
 
+// :defaults
 void entity_apply_defaults(Entity* en) {
 	en->tile_size = v2i(1, 1);
+	en->stack_size = 64;
 }
 
 Entity* entity_create() {
@@ -999,6 +989,109 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 
 // :arch :setup things
 
+// :item setup
+
+void setup_rock(Entity* en) {
+	en->arch = ARCH_rock;
+	en->pretty_name = STR("Rock");
+	en->icon = SPRITE_item_rock;
+}
+
+void setup_raw_copper(Entity* en) {
+	en->arch = ARCH_raw_copper;
+	en->pretty_name = STR("Raw Copper");
+	en->icon=SPRITE_raw_copper;
+	en->furnace_transform_into=ARCH_copper_ingot;
+}
+void setup_copper_ingot(Entity* en) {
+	en->arch = ARCH_copper_ingot;
+	en->pretty_name = STR("Copper Ingot");
+	en->icon=SPRITE_copper_ingot;
+}
+void setup_fiber(Entity* en) {
+	en->arch = ARCH_fiber;
+	en->pretty_name = STR("Fiber");
+	en->icon=SPRITE_fiber;
+}
+void setup_coal(Entity* en) {
+	en->arch = ARCH_coal;
+	en->pretty_name = STR("Coal");
+	en->icon=SPRITE_coal;
+}
+void setup_o2_shard(Entity* en) {
+	en->arch = ARCH_o2_shard;
+	en->pretty_name = STR("Oxygen Shard");
+	en->icon=SPRITE_o2_shard;
+}
+void setup_raw_iron(Entity* en) {
+	en->arch = ARCH_raw_iron;
+	en->pretty_name = STR("Raw Iron");
+	en->icon=SPRITE_raw_iron;
+	en->furnace_transform_into=ARCH_iron_ingot;
+}
+void setup_iron_ingot(Entity* en) {
+	en->arch = ARCH_iron_ingot;
+	en->pretty_name = STR("Iron Ingot");
+	en->icon=SPRITE_iron_ingot;
+}
+void setup_bullet(Entity* en) {
+	en->arch = ARCH_bullet;
+	en->pretty_name = STR("Bullet");
+	en->icon=SPRITE_bullet;
+
+	en->disabled = true; 
+	en->can_be_placed = true;
+		// 	item_data[ARCH_wood_crate] = (ItemData){
+		// 	.to_build=ARCH_wood_crate,
+		// 	.icon=SPRITE_wood_crate,
+		// 	.description=STR("Stores items"),
+		// 	.research_ingredients_count=1,
+		// 	.research_ingredients={{.id=ARCH_exp, .amount=20}},
+		// 	.ingredients_count=1,
+		// 	.ingredients={ {.id=ARCH_rock, .amount=4} }
+		// };
+}
+void setup_red_core(Entity* en) {
+	en->arch = ARCH_red_core;
+	en->pretty_name = STR("Æ█Ξ2vX Core");
+	en->icon=SPRITE_red_core;
+}
+void setup_raw_meteorite(Entity* en) {
+	en->arch = ARCH_raw_meteorite;
+	en->pretty_name = STR("Raw Meteorite");
+	en->icon=SPRITE_raw_meteorite;
+	en->furnace_transform_into=ARCH_meteorite_ingot;
+}
+void setup_meteorite_ingot(Entity* en) {
+	en->arch = ARCH_meteorite_ingot;
+	en->pretty_name = STR("Meteorite Ingot");
+	en->icon=SPRITE_meteorite_ingot;
+}
+void setup_tp_focus(Entity* en) {
+	en->arch = ARCH_tp_focus;
+	en->pretty_name = STR("Quantum Lens");
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=100};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=20};
+	en->stack_size=1;
+	en->sprite_id = SPRITE_charged_tp_focus;
+}
+
+// #item, merged the exp_orb
+void setup_exp(Entity* en) {
+	en->arch = ARCH_exp;
+
+	// in-world thingo
+	en->exp_amount = 1;
+	en->ignore_collision = true;
+
+	// #item 
+	en->pretty_name = STR("Experience");
+	en->icon = SPRITE_exp;
+	en->stack_size = 999;
+}
+
 void setup_meteorite_depo(Entity* en) {
 	en->pretty_name = STR("Meteorite Deposit");
 	en->arch = ARCH_meteorite_depo;
@@ -1006,8 +1099,8 @@ void setup_meteorite_depo(Entity* en) {
 	entity_max_health_setter(en, rock_health * 3);
 	en->destroyable_world_item = true;
 	en->drops_count = 2;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=3};
-	en->drops[1] = (ItemInstanceData){.id=ITEM_raw_meteorite, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_rock, .amount=3};
+	en->drops[1] = (ItemInstanceData){.id=ARCH_raw_meteorite, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(3, 1);
 	en->has_collision = true;
@@ -1022,7 +1115,7 @@ void setup_rock_small(Entity* en) {
 	en->destroyable_by_explosion = true;
 	en->meteor_destroy_without_drops = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_rock, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(2, 1);
 	en->has_collision = true;
@@ -1036,7 +1129,7 @@ void setup_rock_medium(Entity* en) {
 	entity_max_health_setter(en, rock_health * 1.5);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=2};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_rock, .amount=2};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(2, 2);
 	en->has_collision = true;
@@ -1050,7 +1143,7 @@ void setup_rock_large(Entity* en) {
 	entity_max_health_setter(en, rock_health * 2);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=3};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_rock, .amount=3};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(3, 2);
 	en->has_collision = true;
@@ -1066,13 +1159,24 @@ void setup_thumper(Entity* en) {
 	en->has_collision = true;
 	en->tile_size = v2i(2, 2);
 	en->radius = tile_width * 10;
+
+	// item stuff
+	// #item - this seems kinda fine
+	// We're overloaded with the item and the placed building, but that should be alright I think?
+	en->can_be_placed = true;
+	en->icon = SPRITE_thumper;
+	en->description = STR("Burns fuel to slam into the ground and destroy resources in a radius.");
+	en->research_ingredients_count=1;
+	en->research_ingredients[0] = (ItemInstanceData){.id=ARCH_exp, .amount=100};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=10};
 }
 
 void setup_large_iron_depo(Entity* en) {
 	en->pretty_name = STR("Large Iron Deposit");
 	en->arch = ARCH_large_iron_depo;
 	en->sprite_id = SPRITE_large_iron_depo;
-	en->big_resource_drop = ITEM_raw_iron;
+	en->big_resource_drop = ARCH_raw_iron;
 	entity_max_health_setter(en, 1);
 	en->has_collision = true;
 	en->tile_size = v2i(3, 2);
@@ -1086,7 +1190,7 @@ void setup_portal_controller(Entity* en) {
 
 	en->storage_slot_count = 1;
 	en->storage_slots[0].desired_item_count = 1;
-	en->storage_slots[0].desired_items[0] = ITEM_tp_focus;
+	en->storage_slots[0].desired_items[0] = ARCH_tp_focus;
 }
 void setup_portal(Entity* en) {
 	en->arch = ARCH_portal;
@@ -1094,6 +1198,14 @@ void setup_portal(Entity* en) {
 	en->pretty_name = STR("Quantum Gate");
 	en->render_target_image = 0;
 	en->interactable_entity = true;
+
+	en->icon=SPRITE_portal_icon;
+	en->description=STR("Quantum transportation. Use at own risk.");
+	en->can_be_placed = true;
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=9999};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=100};
 }
 
 void setup_anti_meteor(Entity* en) {
@@ -1110,13 +1222,21 @@ void setup_anti_meteor(Entity* en) {
 	en->is_oxygen_tether = true;
 	en->has_anti_meteor_radius = true;
 	en->radius = tile_width * 8;
+
+	en->description=STR("Redirects meteors in a radius");
+	en->can_be_placed = true;
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=50};
+	en->ingredients_count=2;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_meteorite_ingot, .amount=2};
+	en->ingredients[1]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=2};
 }
 
 void setup_large_coal_depo(Entity* en) {
 	en->pretty_name = STR("Large Coal Deposit");
 	en->arch = ARCH_large_coal_depo;
 	en->sprite_id = SPRITE_large_coal_depo;
-	en->big_resource_drop = ITEM_coal;
+	en->big_resource_drop = ARCH_coal;
 	entity_max_health_setter(en, 1);
 	en->has_collision = true;
 	en->tile_size = v2i(3, 2);
@@ -1127,6 +1247,17 @@ void setup_extractor(Entity* en) {
 	en->pretty_name = STR("Extractor");
 	en->has_input_storage = true;
 	en->sprite_id = SPRITE_extractor_east;
+
+	en->disabled=true;
+	en->can_be_placed = true;
+	// 	.disabled=true, 
+	// .to_build=ARCH_extractor,
+	// .icon=SPRITE_extractor_east,
+	// .description=STR("Extracts items from the thing beside it"),
+	// .research_ingredients_count=1,
+	// .research_ingredients={{.id=ARCH_exp, .amount=50}},
+	// .ingredients_count=1,
+	// .ingredients={ {.id=ARCH_iron_ingot, .amount=1} }
 }
 
 void setup_conveyor(Entity* en) {
@@ -1134,6 +1265,17 @@ void setup_conveyor(Entity* en) {
 	en->pretty_name = STR("Conveyor");
 	en->has_input_storage = true;
 	en->sprite_id = SPRITE_conveyor_right;
+
+	en->disabled=true;
+	en->can_be_placed = true;
+	// 	.disabled=true,
+	// .to_build=ARCH_conveyor,
+	// .icon=SPRITE_conveyor_right,
+	// .description=STR("Moves items"),
+	// .research_ingredients_count=1,
+	// .research_ingredients={{.id=ARCH_exp, .amount=50}},
+	// .ingredients_count=1,
+	// .ingredients={ {.id=ARCH_iron_ingot, .amount=1} }
 }
 
 void setup_wood_crate(Entity* en) {
@@ -1143,13 +1285,20 @@ void setup_wood_crate(Entity* en) {
 	en->has_collision = true;
 	en->interactable_entity = true;
 	en->has_input_storage = true;
+
+	en->description=STR("Stores a single item with an infinite stack size.");
+	en->can_be_placed = true;
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=20};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_rock, .amount=4};
 }
 
 void setup_large_ice_vein(Entity* en) {
 	en->pretty_name = STR("Large Ice Vein");
 	en->arch = ARCH_large_ice_vein;
 	en->sprite_id = SPRITE_large_ice_vein;
-	en->big_resource_drop = ITEM_o2_shard;
+	en->big_resource_drop = ARCH_o2_shard;
 	entity_max_health_setter(en, 1);
 	en->has_collision = true;
 	en->tile_size = v2i(3, 2);
@@ -1177,6 +1326,19 @@ void setup_turret(Entity* en) {
 	en->interactable_entity = true;
 	en->enemy_target = true;
 	entity_max_health_setter(en, 10);
+
+	en->disabled=true;
+	en->can_be_placed = true;
+		// item_data[ARCH_turret] = (ItemData){
+		// 	.disabled=true,
+		// 	.to_build=ARCH_turret,
+		// 	.icon=SPRITE_turret,
+		// 	.description=STR("Shoot bullets at nearby enemies"),
+		// 	.research_ingredients_count=1,
+		// 	.research_ingredients={{.id=ARCH_exp, .amount=50}},
+		// 	.ingredients_count=3,
+		// 	.ingredients={ {.id=ARCH_iron_ingot, .amount=2}, {.id=ARCH_red_core, .amount=1} }
+		// };
 }
 
 // :enemy
@@ -1190,7 +1352,7 @@ void setup_enemy1(Entity* en) {
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), enemy_size);
 	en->is_enemy = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_red_core, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_red_core, .amount=1};
 	entity_max_health_setter(en, 20);
 }
 
@@ -1206,6 +1368,14 @@ void setup_o2_emitter(Entity* en) {
 	en->wall_seal = true;
 	en->enemy_target = true;
 	entity_max_health_setter(en, 3);
+
+	en->description=STR("Feed oxygen into a sealed room with 3x more efficency");
+	en->can_be_placed = true;
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=100};
+	en->ingredients_count=2;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=5};
+	en->ingredients[1]=(ItemInstanceData){.id=ARCH_o2_shard, .amount=10};
 }
 
 void setup_wall(Entity* en) {
@@ -1217,6 +1387,13 @@ void setup_wall(Entity* en) {
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), v2(tile_width, tile_width));
 	en->wall_seal = true;
+
+	en->description=STR("Can be used to build a sealed Oxygen room");
+	en->can_be_placed = true;
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=50};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_rock, .amount=1};
 }
 void setup_wall_gate(Entity* en) {
 	en->arch = ARCH_wall_gate;
@@ -1225,6 +1402,13 @@ void setup_wall_gate(Entity* en) {
 	en->tile_size = v2i(1, 1);
 	en->sprite_id = SPRITE_wall_gate;
 	en->wall_seal = true;
+
+	en->description=STR("Allows travel into a sealed room");
+	en->can_be_placed = true;
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=50};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_rock, .amount=1};
 }
 
 void setup_iron_depo(Entity* en) {
@@ -1236,7 +1420,7 @@ void setup_iron_depo(Entity* en) {
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_raw_iron, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_raw_iron, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1250,16 +1434,9 @@ void setup_coal_depo(Entity* en) {
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_coal, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_coal, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
-}
-
-void setup_longboi_test(Entity* en) {
-	en->arch = ARCH_longboi_test;
-	en->pretty_name = STR("asdf");
-	en->tile_size = v2i(3, 1);
-	en->sprite_id = SPRITE_longboi_test;
 }
 
 // :burner 
@@ -1273,6 +1450,19 @@ void setup_burner_drill(Entity* en) {
 	en->has_collision = true;
 	en->enemy_target = true;
 	entity_max_health_setter(en, 5);
+
+	en->disabled=true;
+	en->can_be_placed = true;
+		// 	item_data[ARCH_burner_drill] = (ItemData){
+		// 	.disabled=true,
+		// 	.to_build=ARCH_burner_drill,
+		// 	.icon=SPRITE_burner_drill,
+		// 	.description=STR("Burns coal to drill into large veins"),
+		// 	.research_ingredients_count=1,
+		// 	.research_ingredients={{.id=ARCH_exp, .amount=200}},
+		// 	.ingredients_count=2,
+		// 	.ingredients={ {.id=ARCH_iron_ingot, .amount=4}, {.id=ARCH_rock, .amount=4} }
+		// };
 }
 
 void setup_tile_resource(Entity* en) {
@@ -1288,15 +1478,9 @@ void setup_ice_vein(Entity* en) {
 	entity_max_health_setter(en, ice_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_o2_shard, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_o2_shard, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
-}
-
-void setup_exp_orb(Entity* en) {
-	en->arch = ARCH_exp_orb;
-	en->exp_amount = 1;
-	en->ignore_collision = true;
 }
 
 void setup_tether(Entity* en) {
@@ -1306,6 +1490,14 @@ void setup_tether(Entity* en) {
 	en->sprite_id = SPRITE_tether;
 	en->is_oxygen_tether = true;
 	en->tether_connection_offset.y = 4;
+
+	en->can_be_placed = true;
+	en->description=STR("Extends oxygen range");
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=50};
+	en->ingredients_count=2;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_meteorite_ingot, .amount=1};
+	en->ingredients[1]=(ItemInstanceData){.id=ARCH_fiber, .amount=8};
 }
 
 void setup_oxygenerator(Entity* en) {
@@ -1334,7 +1526,7 @@ void setup_grass(Entity* en) {
 	entity_max_health_setter(en, grass_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_fiber, .amount=get_random_int_in_range(1, 2)};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_fiber, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_sickle;
 }
 
@@ -1346,8 +1538,8 @@ void setup_flint_depo(Entity* en) {
 	// en->destroyable_by_explosion = true;
 	entity_max_health_setter(en, flint_depo_health);
 	en->destroyable_world_item = true;
-	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_flint, .amount=get_random_int_in_range(1, 2)};
+	// en->drops_count = 1;
+	// en->drops[0] = (ItemInstanceData){.id=ARCH_flint, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1360,7 +1552,7 @@ void setup_copper_depo(Entity* en) {
 	entity_max_health_setter(en, copper_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_raw_copper, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_raw_copper, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1371,7 +1563,7 @@ void setup_exp_vein(Entity* en) {
 	entity_max_health_setter(en, exp_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_exp, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemInstanceData){.id=ARCH_exp, .amount=get_random_int_in_range(2, 3)};
 	en->dmg_type = DMG_pickaxe;
 }
 
@@ -1386,17 +1578,23 @@ void setup_furnace(Entity* en) {
 	en->has_collision = true;
 	entity_max_health_setter(en, 3);
 
+	en->can_be_placed = true;
+	en->description=STR("Can burn stuff into something more useful.");
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=20};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_rock, .amount=5};
+
 	en->storage_slot_count = 3;
 
 	en->storage_slots[0].desired_item_count = 2;
-	en->storage_slots[0].desired_items[0] = ITEM_coal;
-	en->storage_slots[0].desired_items[1] = ITEM_pine_wood;
+	en->storage_slots[0].desired_items[0] = ARCH_coal;
 
 	{
 		// put all furance transform items into the desired slot 1
 		StorageSlot* slot = &en->storage_slots[1];
 		slot->desired_item_count = 0;
-		for (ItemID i = 0; i < ITEM_MAX; i++) {
+		for (ArchetypeID i = 0; i < ARCH_MAX; i++) {
 			ItemData item_data = get_item_data(i);
 			if (item_data.furnace_transform_into) {
 				assert(slot->desired_item_count < ARRAY_COUNT(slot->desired_items));
@@ -1416,6 +1614,19 @@ void setup_workbench(Entity* en) {
 	en->interactable_entity = true;
 	en->tile_size = v2i(2,2);
 	en->has_collision = true;
+
+	// fabricator not craftable atm
+	en->disabled=true;
+	en->can_be_placed = true;
+
+		// 	item_data[ARCH_workbench] = (ItemData){
+		// 	.disabled=true,
+		// 	.to_build=ARCH_workbench,
+		// 	.icon=SPRITE_fabricator,
+		// 	.description=STR("Crafts things."),
+		// 	.ingredients_count=2,
+		// 	.ingredients={ {.id=ARCH_pine_wood, .amount=10}, {.id=ARCH_fiber, .amount=5} }
+		// };
 }
 
 void setup_research_station(Entity* en) {
@@ -1425,6 +1636,11 @@ void setup_research_station(Entity* en) {
 	en->sprite_id = SPRITE_research_station;
 	en->interactable_entity = true;
 	en->has_collision = true;
+
+	en->can_be_placed = true;
+	en->description=STR("Research recipes to unlock more buildings."),
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_rock, .amount=5};
 }
 
 void setup_player(Entity* en) {
@@ -1442,18 +1658,6 @@ void setup_player(Entity* en) {
 	en->collision_bounds = range2f_make_center_center(v2(0,0), v2(6, 7));
 }
 
-void setup_rock(Entity* en) {
-	en->pretty_name = STR("Rock");
-	en->arch = ARCH_rock;
-	// en->destroyable_by_explosion = true;
-	en->sprite_id = SPRITE_rock0;
-	entity_max_health_setter(en, rock_health);
-	en->destroyable_world_item = true;
-	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=1};
-	en->dmg_type = DMG_pickaxe;
-}
-
 void setup_tree(Entity* en) {
 	en->arch = ARCH_tree;
 	en->pretty_name = STR("Pine Tree");
@@ -1464,23 +1668,12 @@ void setup_tree(Entity* en) {
 	// en->sprite_id = SPRITE_tree1;
 	entity_max_health_setter(en, tree_health);
 	en->destroyable_world_item = true;
-	en->drops_count = 1;
-	en->drops[0] = (ItemInstanceData){.id=ITEM_pine_wood, .amount=1};
+	// en->drops_count = 1;
+	// en->drops[0] = (ItemInstanceData){.id=ARCH_pine_wood, .amount=1};
 	en->dmg_type = DMG_axe;
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_bottom_center(v2(4, 4));
 	en->collision_bounds = range2f_shift(en->collision_bounds, v2(0, -tile_width));
-}
-
-void setup_item(Entity* en, ItemID item_id) {
-	en->arch = ARCH_item;
-	en->sprite_id = get_sprite_id_from_item(item_id);
-	en->item_id = item_id;
-	if (en->item_amount == 0) {
-		en->item_amount = 1;
-	}
-	en->isnt_a_tile = true;
-	en->ignore_collision = true;
 }
 
 void entity_setup(Entity* en, ArchetypeID id) {
@@ -1489,8 +1682,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_nil: break;
 		case ARCH_MAX: break;
 		//
-		case ARCH_item: setup_item(en, en->item_id); break;
-		case ARCH_exp_orb: setup_exp_orb(en); break;
+		case ARCH_exp: setup_exp(en); break;
 		case ARCH_player: setup_player(en); break;
 		case ARCH_furnace: setup_furnace(en); break;
 		case ARCH_workbench: setup_workbench(en); break;
@@ -1506,7 +1698,6 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_ice_vein: setup_ice_vein(en); break;
 		case ARCH_tile_resource: setup_tile_resource(en); break;
 		case ARCH_burner_drill: setup_burner_drill(en); break;
-		case ARCH_longboi_test: setup_longboi_test(en); break;
 		case ARCH_coal_depo: setup_coal_depo(en); break;
 		case ARCH_iron_depo: setup_iron_depo(en); break;
 		case ARCH_wall: setup_wall(en); break;
@@ -1530,23 +1721,39 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_rock_large: setup_rock_large(en); break;
 		case ARCH_meteorite_depo: setup_meteorite_depo(en); break;
 		case ARCH_portal_controller: setup_portal_controller(en); break;
+		case ARCH_raw_copper: setup_raw_copper(en); break;
+		case ARCH_copper_ingot: setup_copper_ingot(en); break;
+		case ARCH_fiber: setup_fiber(en); break;
+		case ARCH_coal: setup_coal(en); break;
+		case ARCH_o2_shard: setup_o2_shard(en); break;
+		case ARCH_raw_iron: setup_raw_iron(en); break;
+		case ARCH_iron_ingot: setup_iron_ingot(en); break;
+		case ARCH_bullet: setup_bullet(en); break;
+		case ARCH_red_core: setup_red_core(en); break;
+		case ARCH_raw_meteorite: setup_raw_meteorite(en); break;
+		case ARCH_meteorite_ingot: setup_meteorite_ingot(en); break;
+		case ARCH_tp_focus: setup_tp_focus(en); break;
 		// :arch :setup
+	}
+
+	assert(en->arch, "Archetype not setup in function.");
+}
+
+// #item
+void setup_item(Entity* en, ArchetypeID id) {
+	entity_setup(en, id);
+	en->is_item = true;
+	if (en->item_amount == 0) {
+		en->item_amount = 1;
 	}
 }
 
-Entity entity_archetype_data[ARCH_MAX] = {0};
 void setup_entity_archetype_data_cache() {
 	for (ArchetypeID i = 1; i < ARCH_MAX; i++) {
 		Entity* en = &entity_archetype_data[i];
 		entity_apply_defaults(en);
 		entity_setup(en, i);
 	}
-}
-Entity get_archetype_data(ArchetypeID id) {
-	return entity_archetype_data[id];
-}
-string get_archetype_pretty_name(ArchetypeID id) {
-	return get_archetype_data(id).pretty_name;
 }
 
 Vector2 get_mouse_pos_in_ndc() {
@@ -1821,22 +2028,81 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 
 // :func dump
 
+bool move_item_instance_to_inv(ItemInstanceData* item) {
+	ItemData item_data = get_item_data(item->id);
+
+	// First pass: Try to stack into existing items
+	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
+		ItemInstanceData* inv_item = &world->inventory_items[i];
+
+		if (inv_item->id == item->id) {
+			int space_left = item_data.stack_size - inv_item->amount;
+			if (space_left > 0) {
+				int amount_to_add = (item->amount < space_left) ? item->amount : space_left;
+				inv_item->amount += amount_to_add;
+				item->amount -= amount_to_add;
+
+				if (item->amount == 0) {
+					*item = empty_item;
+					return true;
+				}
+			}
+		}
+	}
+
+	// Second pass: Try to find empty slots
+	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
+		ItemInstanceData* inv_item = &world->inventory_items[i];
+		if (inv_item->id == 0) {
+			int amount_to_add = (item->amount < item_data.stack_size) ? item->amount : item_data.stack_size;
+			inv_item->id = item->id;
+			inv_item->amount = amount_to_add;
+			item->amount -= amount_to_add;
+
+			if (item->amount == 0) {
+				*item = empty_item;
+				return true;
+			}
+		}
+	}
+
+	assert(item->amount != 0);
+
+	// couldn't add all amount to inventory
+	return false;
+}
+
 bool attempt_add_item_to_inv(ItemInstanceData item) {
 	ItemData item_data = get_item_data(item.id);
 
 	int amount_left = item.amount;
+
+	// First pass: Try to stack into existing items
 	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
 		ItemInstanceData* inv_item = &world->inventory_items[i];
 
 		if (inv_item->id == item.id) {
-			// add remaining amount to existing item
-			inv_item->amount += amount_left;
-			amount_left = 0;
+			int space_left = item_data.stack_size - inv_item->amount;
+			if (space_left > 0) {
+				int amount_to_add = (amount_left < space_left) ? amount_left : space_left;
+				inv_item->amount += amount_to_add;
+				amount_left -= amount_to_add;
 
-			if (inv_item->amount > item_data.stack_size) {
-				amount_left = inv_item->amount - item_data.stack_size;
-				inv_item->amount = item_data.stack_size;
+				if (amount_left == 0) {
+					return true;
+				}
 			}
+		}
+	}
+
+	// Second pass: Try to find empty slots
+	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
+		ItemInstanceData* inv_item = &world->inventory_items[i];
+		if (inv_item->id == 0) {
+			int amount_to_add = (amount_left < item_data.stack_size) ? amount_left : item_data.stack_size;
+			inv_item->id = item.id;
+			inv_item->amount = amount_to_add;
+			amount_left -= amount_to_add;
 
 			if (amount_left == 0) {
 				return true;
@@ -1844,16 +2110,7 @@ bool attempt_add_item_to_inv(ItemInstanceData item) {
 		}
 	}
 
-	// still left? try find empty slot for it.
-	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
-		ItemInstanceData* inv_item = &world->inventory_items[i];
-		if (inv_item->id == 0) {
-			*inv_item = item;
-			item.amount = amount_left;
-			return true;
-		}
-	}
-
+	// If we still have amount_left, we couldn't add all items
 	return false;
 }
 
@@ -2223,7 +2480,8 @@ void do_entity_exp_drops(Entity* en) {
 	}
 	for (int i = 0; i < get_random_int_in_range(exp_amount-1, exp_amount); i++) {
 		Entity* orb = entity_create();
-		setup_item(orb, ITEM_exp);
+		setup_item(orb, ARCH_exp);
+		orb->is_item = true;
 		orb->pos = en->pos;
 		orb->has_physics = true;
 		orb->friction = 20.f;
@@ -2233,18 +2491,20 @@ void do_entity_exp_drops(Entity* en) {
 	}
 }
 
-void drop_item_at_pos(ItemID drop_id, Vector2 pos) {
+void drop_item_at_pos(ItemInstanceData item, Vector2 pos) {
 	Entity* drop = entity_create();
-	setup_item(drop, drop_id);
+	setup_item(drop, item.id);
 	drop->pos = pos;
 	drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
 	drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
+	// #item - make this copy the entire item...
+	drop->item_amount = item.amount;
 }
 
 void do_entity_drops(Entity* en) {
-	ItemID *drops;
+	ArchetypeID *drops;
 	// purposefully making the reserve 2 items, to prove the resizing works, and that you don't have to worry about the size of the array.
-	growing_array_init_reserve((void**)&drops, sizeof(ItemID), 2, get_temporary_allocator());
+	growing_array_init_reserve((void**)&drops, sizeof(ArchetypeID), 2, get_temporary_allocator());
 
 	if (en->drops_count) {
 		// drops from entity data
@@ -2259,8 +2519,8 @@ void do_entity_drops(Entity* en) {
 	if (en->right_click_remove) {
 
 		// drop building stuff
-		ItemData item_data = get_item_data(en->item_id);
-		growing_array_add((void**)&drops, &en->item_id);
+		ItemData item_data = get_item_data(en->arch);
+		growing_array_add((void**)&drops, &en->arch);
 		// not dropping the raw materials anymore, so it's more clear that the item got destroyed.
 		// for (int i = 0; i < item_data.ingredients_count; i++) {
 		// 	ItemInstanceData drop = item_data.ingredients[i];
@@ -2280,7 +2540,7 @@ void do_entity_drops(Entity* en) {
 
 	// create all the item drops
 	for (int i = 0; i < growing_array_get_valid_count(drops); i++) {
-		ItemID drop_id = drops[i];
+		ArchetypeID drop_id = drops[i];
 		Entity* drop = entity_create();
 		setup_item(drop, drop_id);
 		drop->pos = en->pos;
@@ -2330,7 +2590,7 @@ void item_tooltip(ItemInstanceData item) {
 		y0 -= 2.f;
 	}
 
-	if (item.id == ITEM_tp_focus) {
+	if (item.id == ARCH_tp_focus) {
 		string txt;
 		if (item.has_focus_target) {
 			txt = tprint("Target Position: x%i, y%i", (int)item.focus_target_pos.x, (int)item.focus_target_pos.y);
@@ -2466,8 +2726,8 @@ void world_setup() {
 
 	spawn_world_resources();
 
-	world->item_unlocks[ITEM_research_station].research_progress = 100;
-	world->item_unlocks[ITEM_workbench].research_progress = 100;
+	world->item_unlocks[ARCH_research_station].research_progress = 100;
+	world->item_unlocks[ARCH_workbench].research_progress = 100;
 
 	// :test stuff
 	#if defined(DEV_TESTING)
@@ -2478,26 +2738,27 @@ void world_setup() {
 		en->pos.y = 20;
 		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
 
-		world->item_unlocks[ITEM_tether].research_progress = 100;
+		world->item_unlocks[ARCH_tether].research_progress = 100;
 
-		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_iron_ingot, .amount=100});
-		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_o2_shard, .amount=100});
-		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_rock, .amount=100});
-		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_exp, .amount=9999});
-		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_copper_ingot, .amount=100});
-		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_fiber, .amount=100});
+		world->inventory_items[0] = (ItemInstanceData){.id=ARCH_exp, .amount=9999};
+		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_iron_ingot, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_o2_shard, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_rock, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_copper_ingot, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_fiber, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_meteorite_ingot, .amount=100});
 
 		/*
-		world->inventory_items[ITEM_raw_copper].amount = 50;
-		world->inventory_items[ITEM_pine_wood].amount = 50;
-		world->inventory_items[ITEM_coal].amount = 50;
-		world->inventory_items[ITEM_o2_shard].amount = 50;
-		world->inventory_items[ITEM_rock].amount = 1000;
-		world->inventory_items[ITEM_exp].amount = 9999;
-		world->inventory_items[ITEM_flint_axe].amount = 1;
-		world->inventory_items[ITEM_flint].amount = 100;
-		world->inventory_items[ITEM_fiber].amount = 100;
-		world->inventory_items[ITEM_copper_ingot].amount = 100;
+		world->inventory_items[ARCH_raw_copper].amount = 50;
+		world->inventory_items[ARCH_pine_wood].amount = 50;
+		world->inventory_items[ARCH_coal].amount = 50;
+		world->inventory_items[ARCH_o2_shard].amount = 50;
+		world->inventory_items[ARCH_rock].amount = 1000;
+		world->inventory_items[ARCH_exp].amount = 9999;
+		world->inventory_items[ARCH_flint_axe].amount = 1;
+		world->inventory_items[ARCH_flint].amount = 100;
+		world->inventory_items[ARCH_fiber].amount = 100;
+		world->inventory_items[ARCH_copper_ingot].amount = 100;
 		*/
 
 		// en = entity_create();
@@ -2702,7 +2963,7 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 		{
 			bool has_desired_item_in_hand = false;
 			for (int i = 0; i < slot->desired_item_count; i++) {
-				ItemID desired_item = slot->desired_items[i];
+				ArchetypeID desired_item = slot->desired_items[i];
 				if (world->mouse_cursor_item.id == desired_item) {
 					has_desired_item_in_hand = true;
 					break;
@@ -2766,7 +3027,7 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 
 }
 
-void input_slot(Range2f rect, ItemInstanceData* slot, ItemID* desired_items) {
+void input_slot(Range2f rect, ItemInstanceData* slot, ArchetypeID* desired_items) {
 	if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 		
 		// interact with the slot
@@ -2774,7 +3035,7 @@ void input_slot(Range2f rect, ItemInstanceData* slot, ItemID* desired_items) {
 
 			bool has_desired_item_in_hand = false;
 			for (int i = 0; i < growing_array_get_valid_count(desired_items); i++) {
-				ItemID desired_item = desired_items[i];
+				ArchetypeID desired_item = desired_items[i];
 				if (world->mouse_cursor_item.id == desired_item) {
 					has_desired_item_in_hand = true;
 					break;
@@ -2873,15 +3134,15 @@ void do_world_entity_interaction_ui_stuff() {
 
 		Range2f rect = range2f_make_bottom_left(v2(x0, y0), size);
 
-		ItemID* desired_items;
-		growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
-		ItemID desired_item = ITEM_o2_shard;
+		ArchetypeID* desired_items;
+		growing_array_init_reserve((void**)&desired_items, sizeof(ArchetypeID), 1, get_temporary_allocator());
+		ArchetypeID desired_item = ARCH_o2_shard;
 		growing_array_add((void**)&desired_items, &desired_item);
 
 		input_slot(rect, &en->input0, desired_items);
 
 		if (!en->input0.id) {
-			Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_o2_shard), rect, COLOR_WHITE, 0.1);
+			Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ARCH_o2_shard), rect, COLOR_WHITE, 0.1);
 
 			if (do_oxygenerator_error(en)) {
 				set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
@@ -2911,9 +3172,9 @@ void do_world_entity_interaction_ui_stuff() {
 
 			Range2f rect = range2f_make_bottom_left(v2(x0, y0), v2(slot_size, slot_size));
 
-			ItemID* desired_items;
-			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
-			ItemID desired_item = ITEM_coal;
+			ArchetypeID* desired_items;
+			growing_array_init_reserve((void**)&desired_items, sizeof(ArchetypeID), 1, get_temporary_allocator());
+			ArchetypeID desired_item = ARCH_coal;
 			growing_array_add((void**)&desired_items, &desired_item);
 
 			input_slot(rect, &en->input0, desired_items);
@@ -3097,9 +3358,9 @@ void do_world_entity_interaction_ui_stuff() {
 
 			ItemInstanceData* slot = &en->input0;
 
-			ItemID* desired_items;
-			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
-			for (ItemID i = 0; i < ITEM_MAX; i++) {
+			ArchetypeID* desired_items;
+			growing_array_init_reserve((void**)&desired_items, sizeof(ArchetypeID), 1, get_temporary_allocator());
+			for (ArchetypeID i = 0; i < ARCH_MAX; i++) {
 				ItemData item_data = get_item_data(i);
 				if (item_data.used_in_turret) {
 					growing_array_add((void**)&desired_items, &i);
@@ -3110,7 +3371,7 @@ void do_world_entity_interaction_ui_stuff() {
 
 			input_slot(rect, slot, desired_items);
 			if (!slot->id) {
-				Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ITEM_bullet), rect, COLOR_WHITE, 0.1);
+				Draw_Quad* quad = draw_sprite_in_rect(get_sprite_id_from_item(ARCH_bullet), rect, COLOR_WHITE, 0.1);
 
 				set_col_override(quad, v4(sin_breathe(os_get_elapsed_seconds(), 6.f),0,0, 0.8));
 			}
@@ -3183,7 +3444,7 @@ void do_world_entity_interaction_ui_stuff() {
 
 	// :thumper ux
 	if (en->arch == ARCH_thumper) {
-		ItemID desired_item = ITEM_coal;
+		ArchetypeID desired_item = ARCH_coal;
 
 		float x0 = en->pos.x;
 		float y0 = en->pos.y;
@@ -3427,9 +3688,8 @@ void do_ui_stuff() {
 						world_frame.hover_consumed = true;
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							if (attempt_add_item_to_inv(world->mouse_cursor_item)) {
-								world->mouse_cursor_item = (ItemInstanceData){0};
-							} else {
+							bool succ = move_item_instance_to_inv(&world->mouse_cursor_item);
+							if (!succ) {
 								play_sound("event:/error");
 							}
 						}
@@ -3524,9 +3784,9 @@ void do_ui_stuff() {
 
 		float icon_length = 10.f;
 		y0 -= icon_length;
-		ItemID selected = 0;
+		ArchetypeID selected = 0;
 		int count = 0;
-		for (ItemID i = 1; i < ITEM_MAX; i++) {
+		for (ArchetypeID i = 1; i < ARCH_MAX; i++) {
 			ItemData item_data  = get_item_data(i);
 			bool unlocked = is_fully_unlocked(world->item_unlocks[i]);
 			if (item_data.ingredients_count == 0 || item_data.disabled) {
@@ -3553,7 +3813,7 @@ void do_ui_stuff() {
 
 				Range2f render_box = range2f_make_bottom_left(v2(0, 0), v2(icon_length, icon_length));
 
-				Draw_Quad* quad = draw_sprite_in_rect_with_xform(item_data.icon, render_box, COLOR_WHITE, 0.2, xform);
+				Draw_Quad* quad = draw_sprite_in_rect_with_xform(get_icon_from_arch_id(i), render_box, COLOR_WHITE, 0.2, xform);
 				if (!unlocked) {
 					set_col_override(quad, v4(0.2, 0.2, 0.2, 1.0));
 				}
@@ -3617,7 +3877,7 @@ void do_ui_stuff() {
 
 					// title
 					{
-						string txt = get_archetype_data(item_data.to_build).pretty_name;
+						string txt = item_data.pretty_name;
 						Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 						y0 -= met.visual_size.y + padding;
 					}
@@ -3716,9 +3976,9 @@ void do_ui_stuff() {
 
 		float icon_length = 10.f;
 		y0 -= icon_length;
-		ItemID selected = 0;
+		ArchetypeID selected = 0;
 		int count = 0;
-		for (int i = 1; i < ITEM_MAX; i++) {
+		for (int i = 1; i < ARCH_MAX; i++) {
 			UnlockState unlock_state = world->item_unlocks[i];
 			ItemData item_data = get_item_data(i);
 			if (item_data.ingredients_count == 0 || item_data.disabled || is_fully_unlocked(unlock_state)) {
@@ -3744,7 +4004,7 @@ void do_ui_stuff() {
 				xform = m4_scale(xform, v3(scale, scale, 1));
 				xform = m4_translate(xform, v3(icon_length * -0.5, icon_length * -0.5, 1));
 
-				draw_sprite_in_rect_with_xform(item_data.icon, render_box, COLOR_WHITE, 0.2, xform);
+				draw_sprite_in_rect_with_xform(get_icon_from_arch_id(i), render_box, COLOR_WHITE, 0.2, xform);
 			}
 			x0 += icon_length;
 
@@ -3758,7 +4018,6 @@ void do_ui_stuff() {
 		if (selected) {
 			UnlockState* unlock_state = &world->item_unlocks[selected];
 			ItemData item_data = get_item_data(selected);
-			bool is_building = item_data.to_build != 0;
 
 			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
@@ -3794,7 +4053,7 @@ void do_ui_stuff() {
 
 			// title
 			{
-				string txt = is_building ? get_archetype_data(item_data.to_build).pretty_name : item_data.pretty_name;
+				string txt = item_data.pretty_name;
 				Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
 				y0 -= met.visual_size.y + 2.f;
 			}
@@ -3850,10 +4109,12 @@ void do_ui_stuff() {
 	if (world->mouse_cursor_item.id) {
 		if (is_key_just_pressed('Q')) {
 			consume_key_just_pressed('Q');
-			if (attempt_add_item_to_inv(world->mouse_cursor_item)) {
-				world->mouse_cursor_item = empty_item;
-			} else {
+			bool succ = move_item_instance_to_inv(&world->mouse_cursor_item);
+			if (!succ) {
 				play_sound("event:/error");
+				// drop remaining on ground
+				drop_item_at_pos(world->mouse_cursor_item, get_player()->pos);
+				world->mouse_cursor_item = empty_item;
 			}
 		}
 	}
@@ -3862,15 +4123,15 @@ void do_ui_stuff() {
 	if (world->mouse_cursor_item.id)
 	defer_scope(push_z_layer_in_frame(layer_cursor_item, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 	{
-		ItemID item_id = world->mouse_cursor_item.id;
+		ArchetypeID item_id = world->mouse_cursor_item.id;
 		ItemData item_data = get_item_data(world->mouse_cursor_item.id);
-		if (!item_data.to_build || world_frame.hover_consumed) {
+		if (!item_data.can_be_placed || world_frame.hover_consumed) {
 			// it's just an item
 			Sprite* sprite = get_sprite(get_sprite_id_from_item_instance(world->mouse_cursor_item));
 			Range2f rect = range2f_make_center_center(get_mouse_pos_in_current_space(), v2(10, 10));
 			draw_item_amount_in_rect(world->mouse_cursor_item, rect);
 
-			if (item_id == ITEM_tp_focus) {
+			if (item_id == ARCH_tp_focus) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 					play_sound("event:/exp_pickup");
@@ -3886,8 +4147,8 @@ void do_ui_stuff() {
 			// :place building
 			world_frame.hover_consumed = true;
 
-			SpriteID sprite_id = item_data.icon;
-			ArchetypeID arch_id = item_data.to_build;
+			SpriteID sprite_id = item_data.sprite_id;
+			ArchetypeID arch_id = item_data.arch;
 			Entity arch_data = get_archetype_data(arch_id);
 
 			if (is_key_just_pressed('R')) {
@@ -3999,7 +4260,6 @@ void do_ui_stuff() {
 					entity_setup(en, arch_id);
 					en->pos = pos;
 					en->right_click_remove = true;
-					en->item_id = world->mouse_cursor_item.id;
 					en->dir = world->cursor_rotate_dir;
 
 					world->mouse_cursor_item.amount -= 1;
@@ -4024,9 +4284,14 @@ void do_ui_stuff() {
 }
 
 void draw_base_sprite(Entity* en) {
-	Sprite* sprite = get_sprite(en->sprite_id);
+	SpriteID sprite_id = en->sprite_id;
+	if (!sprite_id) {
+		sprite_id = en->icon;
+	}
+
+	Sprite* sprite = get_sprite(sprite_id);
 	Matrix4 xform = m4_scalar(1.0);
-	if (en->arch == ARCH_item) {
+	if (en->is_item) {
 		xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
 	}
 
@@ -4755,15 +5020,11 @@ void draw_world_in_frame() {
 			s32 z_layer = en->z_layer;
 			if (z_layer == 0) {
 				z_layer = layer_world;
-				if (en->item_id) {
+				if (en->can_be_placed) {
 					z_layer = layer_buildings;
 				}
 			}
 			push_z_layer_in_frame(z_layer, current_draw_frame);
-
-			if (en->item_id == ITEM_exp) {
-				draw_rect_in_frame(en->pos, v2(1, 1), col_exp, current_draw_frame);
-			}
 
 			switch (en->arch) {
 
@@ -4776,6 +5037,10 @@ void draw_world_in_frame() {
 				case ARCH_enemy_nest: render_enemy_nest(en); break;
 				case ARCH_meteor: render_meteor(en); break;
 				case ARCH_turret: render_turret(en); break;
+
+				case ARCH_exp: {
+					draw_rect_in_frame(en->pos, v2(1, 1), col_exp, current_draw_frame);
+				} break;
 
 				// :enemy
 				case ARCH_enemy1: {
@@ -4803,9 +5068,7 @@ void draw_world_in_frame() {
 				} break;
 
 				default: {
-					if (en->item_id != ITEM_exp) {
-						draw_base_sprite(en);
-					}
+					draw_base_sprite(en);
 				} break;
 			}
 
@@ -5088,290 +5351,6 @@ int entry(int argc, char **argv) {
 	assert(font, "Failed loading arial.ttf, %d", GetLastError());
 
 	setup_entity_archetype_data_cache();
-	
-	// item data resource setup
-	{
-		// :item resources
-		item_data[ITEM_meteorite_ingot] = (ItemData){ .pretty_name=STR("Meteorite Ingot"), .icon=SPRITE_meteorite_ingot};
-		item_data[ITEM_raw_meteorite] = (ItemData){ .pretty_name=STR("Raw Meteorite"), .icon=SPRITE_raw_meteorite, .furnace_transform_into=ITEM_meteorite_ingot};
-		item_data[ITEM_red_core] = (ItemData){ .pretty_name=STR("Æ█Ξ2vX Core"), .icon=SPRITE_red_core};
-		item_data[ITEM_iron_ingot] = (ItemData){ .pretty_name=STR("Iron Ingot"), .icon=SPRITE_iron_ingot};
-		item_data[ITEM_raw_iron] = (ItemData){ .pretty_name=STR("Raw Iron"), .icon=SPRITE_raw_iron, .furnace_transform_into=ITEM_iron_ingot};
-		item_data[ITEM_o2_shard] = (ItemData){ .pretty_name=STR("Oxygen Shard"), .icon=SPRITE_o2_shard};
-		item_data[ITEM_exp] = (ItemData){ .pretty_name=STR("Experience"), .icon=SPRITE_exp};
-		item_data[ITEM_rock] = (ItemData){ .pretty_name=STR("Rock"), .icon=SPRITE_item_rock };
-		item_data[ITEM_pine_wood] = (ItemData){ .pretty_name=STR("Pine Wood"), .icon=SPRITE_item_pine_wood, .furnace_transform_into=ITEM_coal };
-		item_data[ITEM_raw_copper] = (ItemData){ .pretty_name=STR("Raw Copper"), .icon=SPRITE_raw_copper, .furnace_transform_into=ITEM_copper_ingot };
-		item_data[ITEM_fiber] = (ItemData){ .pretty_name=STR("Fiber"), .icon=SPRITE_fiber };
-		item_data[ITEM_flint] = (ItemData){ .pretty_name=STR("Flint"), .icon=SPRITE_flint };
-
-		item_data[ITEM_tp_focus] = (ItemData){
-			.pretty_name=STR("Quantum Lens"),
-			.icon=SPRITE_blank_tp_focus,
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=100}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_iron_ingot, .amount=20} },
-			.stack_size=1,
-		};
-
-		item_data[ITEM_copper_ingot] = (ItemData){
-			.pretty_name=STR("Copper Ingot"),
-			.description=STR("Shiny"),
-			.icon=SPRITE_copper_ingot,
-			.craft_length=20,
-			.for_structure=ARCH_furnace,
-		};
-
-		item_data[ITEM_coal] = (ItemData){
-			.pretty_name=STR("Coal"),
-			.description=STR("FUEEEEEEL"),
-			.icon=SPRITE_coal,
-			.craft_length=5,
-			.for_structure=ARCH_furnace,
-		};
-
-		// NOTE
-		// maybe we move some of these guys into the first round of item researching??
-		//
-		item_data[ITEM_flint_axe] = (ItemData){
-			.disabled=true,
-			.pretty_name=STR("Flint Axe"),
-			.description=STR("+1 damage to trees"),
-			.icon=SPRITE_flint_axe,
-			.craft_length=10,
-			.extra_axe_dmg=1,
-			.ingredients_count=3,
-			.ingredients={
-				{.id=ITEM_pine_wood, .amount=10},
-				{.id=ITEM_flint, .amount=10},
-				{.id=ITEM_fiber, .amount=10},
-			},
-		};
-
-		item_data[ITEM_flint_pickaxe] = (ItemData){
-			.disabled=true,
-			.pretty_name=STR("Flint Pickaxe"),
-			.description=STR("+1 damage to rocks"), // todo - make this functional from the extra dmg state
-			.icon=SPRITE_flint_pickaxe,
-			.craft_length=10,
-			.extra_pickaxe_dmg=1,
-			.ingredients_count=3,
-			.ingredients={
-				{.id=ITEM_pine_wood, .amount=10},
-				{.id=ITEM_flint, .amount=10},
-				{.id=ITEM_fiber, .amount=10},
-			},
-		};
-
-		item_data[ITEM_flint_scythe] = (ItemData){
-			.disabled=true,
-			.pretty_name=STR("Flint Scythe"),
-			.description=STR("+1 damage to grass"),
-			.icon=SPRITE_flint_scythe,
-			.craft_length=10,
-			.extra_sickle_dmg=1,
-			.ingredients_count=3,
-			.ingredients={
-				{.id=ITEM_pine_wood, .amount=10},
-				{.id=ITEM_flint, .amount=10},
-				{.id=ITEM_fiber, .amount=10},
-			},
-		};
-
-		// :item :buildings
-
-		item_data[ITEM_thumper] = (ItemData){
-			.to_build=ARCH_thumper,
-			.icon=SPRITE_thumper,
-			.description=STR("Burns fuel to slam into the ground and destroy resources in a radius."),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=100}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_iron_ingot, .amount=10} }
-		};
-
-		item_data[ITEM_portal] = (ItemData){
-			.to_build=ARCH_portal,
-			.icon=SPRITE_portal_icon,
-			.description=STR("Quantum transportation. Use at own risk."),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=9999}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_copper_ingot, .amount=100} }
-		};
-
-		item_data[ITEM_anti_meteor] = (ItemData){
-			.to_build=ARCH_anti_meteor,
-			.icon=SPRITE_anti_meteor,
-			.description=STR("Redirects meteors in a radius"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.ingredients_count=2,
-			.ingredients={ {.id=ITEM_meteorite_ingot, .amount=2}, {.id=ITEM_iron_ingot, .amount=2} }
-		};
-
-		item_data[ITEM_extractor] = (ItemData){
-			.disabled=true, 
-			.to_build=ARCH_extractor,
-			.icon=SPRITE_extractor_east,
-			.description=STR("Extracts items from the thing beside it"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_iron_ingot, .amount=1} }
-		};
-
-		item_data[ITEM_conveyor] = (ItemData){
-			.disabled=true,
-			.to_build=ARCH_conveyor,
-			.icon=SPRITE_conveyor_right,
-			.description=STR("Moves items"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_iron_ingot, .amount=1} }
-		};
-
-		item_data[ITEM_wood_crate] = (ItemData){
-			.to_build=ARCH_wood_crate,
-			.icon=SPRITE_wood_crate,
-			.description=STR("Stores items"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=20}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_rock, .amount=4} }
-		};
-
-		// :turret
-		item_data[ITEM_turret] = (ItemData){
-			.disabled=true,
-			.to_build=ARCH_turret,
-			.icon=SPRITE_turret,
-			.description=STR("Shoot bullets at nearby enemies"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.ingredients_count=3,
-			.ingredients={ {.id=ITEM_iron_ingot, .amount=2}, {.id=ITEM_red_core, .amount=1} }
-		};
-		// these need to be a package deal...
-		item_data[ITEM_bullet] = (ItemData){
-			.disabled=true,
-			.pretty_name=STR("Bullet"),
-			.description=STR("Ammo for turrets"),
-			.icon=SPRITE_bullet,
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.used_in_turret=true,
-			.ingredients_count=1,
-			.ingredients={
-				{.id=ITEM_red_core, .amount=1},
-			},
-		};
-
-		item_data[ITEM_o2_emitter] = (ItemData){
-			.to_build=ARCH_o2_emitter,
-			.icon=SPRITE_o2_emitter,
-			.description=STR("Feed oxygen into a sealed room with 3x more efficency"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=100}},
-			.ingredients_count=3,
-			.ingredients={ {.id=ITEM_iron_ingot, .amount=5}, {.id=ITEM_o2_shard, .amount=10} }
-		};
-
-		// note, this should go into a "Shelter #1" grouped research unlock thingo
-		// :wall
-		item_data[ITEM_wall_gate] = (ItemData){
-			.to_build=ARCH_wall_gate,
-			.icon=SPRITE_wall_gate,
-			.description=STR("Allows travel into a sealed room"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_rock, .amount=1}, }
-		};
-		item_data[ITEM_wall] = (ItemData){
-			.to_build=ARCH_wall,
-			.icon=SPRITE_wall,
-			.description=STR("Can be used to build a sealed Oxygen room"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_rock, .amount=1} }
-		};
-
-		item_data[ITEM_longboi_test] = (ItemData){
-			.disabled=true,
-			.to_build=ARCH_longboi_test,
-			.icon=SPRITE_longboi_test,
-			.description=STR("Place on top of resources to mine."),
-			.exp_cost=10,
-			.ingredients_count=2,
-			.ingredients={ {.id=ITEM_rock, .amount=30}, {.id=ITEM_copper_ingot, .amount=5} }
-		};
-
-		// :burner
-		item_data[ITEM_burner_drill] = (ItemData){
-			.disabled=true,
-			.to_build=ARCH_burner_drill,
-			.icon=SPRITE_burner_drill,
-			.description=STR("Burns coal to drill into large veins"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=200}},
-			.ingredients_count=2,
-			.ingredients={ {.id=ITEM_iron_ingot, .amount=4}, {.id=ITEM_rock, .amount=4} }
-		};
-
-		// :tether
-		item_data[ITEM_tether] = (ItemData){
-			.to_build=ARCH_tether,
-			.icon=SPRITE_tether,
-			.description=STR("Extends oxygen range"),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=50}},
-			.ingredients_count=2,
-			.ingredients={ {.id=ITEM_meteorite_ingot, .amount=1}, {.id=ITEM_fiber, .amount=8} }
-		};
-
-		item_data[ITEM_furnace] = (ItemData){
-			.to_build=ARCH_furnace,
-			.icon=SPRITE_furnace,
-			.description=STR("Can burn stuff into something more useful."),
-			.research_ingredients_count=1,
-			.research_ingredients={{.id=ITEM_exp, .amount=30}},
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_rock, .amount=5} }
-		};
-
-		item_data[ITEM_workbench] = (ItemData){
-			.disabled=true,
-			.to_build=ARCH_workbench,
-			.icon=SPRITE_fabricator,
-			.description=STR("Crafts things."),
-			.ingredients_count=2,
-			.ingredients={ {.id=ITEM_pine_wood, .amount=10}, {.id=ITEM_fiber, .amount=5} }
-		};
-
-		item_data[ITEM_research_station] = (ItemData){
-			.to_build=ARCH_research_station,
-			.icon=SPRITE_research_station,
-			.description=STR("Research recipes to unlock more buildings."),
-			.ingredients_count=1,
-			.ingredients={ {.id=ITEM_rock, .amount=5} }
-		};
-	}
-	// :item defaults
-	{
-		for (ItemID i = 1; i < ITEM_MAX; i++) {
-			ItemData* data = &item_data[i];
-			if (data->craft_length == 0) {
-				data->craft_length = 2.0;
-			}
-			if (data->stack_size == 0) {
-				data->stack_size = 64;
-			}
-		}
-	}
 
 	init_biome_maps();
 
@@ -6070,12 +6049,12 @@ int entry(int argc, char **argv) {
 				}
 
 				// pickup
-				if (is_player_alive() && en->arch == ARCH_item) {
+				if (is_player_alive() && en->is_item) {
 
-					bool is_exp = en->item_id == ITEM_exp;
+					bool is_exp = en->arch == ARCH_exp;
 
 					float pickup_radius = player_pickup_radius;
-					if (en->item_id == ITEM_exp) {
+					if (is_exp) {
 						pickup_radius *= 3;
 					}
 
@@ -6113,7 +6092,9 @@ int entry(int argc, char **argv) {
 								play_sound("event:/item_pickup");
 							}
 
-							if (attempt_add_item_to_inv((ItemInstanceData){.id=en->item_id, .amount=en->item_amount})) {
+							// #item
+							bool succ = move_item_instance_to_inv(&(ItemInstanceData){.id=en->arch, .amount=en->item_amount});
+							if (succ) {
 								entity_zero_immediately(en);
 							} else {
 								// #ship
@@ -6356,7 +6337,7 @@ int entry(int argc, char **argv) {
 				// drop inv items
 				for (int j = 0; j < ARRAY_COUNT(world->inventory_items); j++) {
 					ItemInstanceData* inv_item = &world->inventory_items[j];
-					if (inv_item->id == ITEM_exp) {
+					if (inv_item->id == ARCH_exp) {
 						*inv_item = empty_item;
 					}
 					if (inv_item->amount > 0) {
@@ -6414,19 +6395,19 @@ int entry(int argc, char **argv) {
 							int damage_amount = 1;
 							/*
 							if (selected_en->dmg_type == DMG_axe) {
-								for (int i = 0; i < ITEM_MAX; i++) {
+								for (int i = 0; i < ARCH_MAX; i++) {
 									if (world->inventory_items[i].amount) {
 										damage_amount += get_item_data(i).extra_axe_dmg;
 									}
 								}
 							} else if (selected_en->dmg_type == DMG_pickaxe) {
-								for (int i = 0; i < ITEM_MAX; i++) {
+								for (int i = 0; i < ARCH_MAX; i++) {
 									if (world->inventory_items[i].amount) {
 										damage_amount += get_item_data(i).extra_pickaxe_dmg;
 									}
 								}
 							} else if (selected_en->dmg_type == DMG_sickle) {
-								for (int i = 0; i < ITEM_MAX; i++) {
+								for (int i = 0; i < ARCH_MAX; i++) {
 									if (world->inventory_items[i].amount) {
 										damage_amount += get_item_data(i).extra_sickle_dmg;
 									}
@@ -6494,7 +6475,7 @@ int entry(int argc, char **argv) {
 
 						if (is_in_range) {
 							Entity* drop = entity_create();
-							setup_item(drop, selected_en->item_id);
+							setup_item(drop, selected_en->arch);
 							drop->pos = selected_en->pos;
 
 							for (int j = 0; j < selected_en->input0.amount; j++) {

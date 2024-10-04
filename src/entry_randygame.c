@@ -483,6 +483,7 @@ typedef struct EntityFrame {
 	bool is_awake;
 	GameError error;
 	Vector2 last_pos;
+	bool is_being_picked_up;
 	// :frame
 } EntityFrame;
 
@@ -524,7 +525,6 @@ typedef struct Entity {
 	Vector2 velocity;
 	Vector2 acceleration;
 	float friction;
-	bool is_being_picked_up;
 	bool disable_friction;
 	float64 pick_up_cooldown_end_time;
 	float white_flash_current_alpha;
@@ -887,7 +887,7 @@ typedef struct WorldFrame {
 	TileEntityCache* tile_entity_cache;
 	bool is_creation;
 	bool draw_portals;
-	// :frame state
+	// WORLD :frame state
 } WorldFrame;
 WorldFrame world_frame;
 
@@ -2070,6 +2070,46 @@ bool move_item_instance_to_inv(ItemInstanceData* item) {
 
 	// couldn't add all amount to inventory
 	return false;
+}
+
+// copied and modified from the one below.
+bool can_add_item_to_inv(ItemInstanceData item) {
+	ItemData item_data = get_item_data(item.id);
+
+	int amount_left = item.amount;
+
+	// First pass: Try to stack into existing items
+	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
+		ItemInstanceData* inv_item = &world->inventory_items[i];
+
+		if (inv_item->id == item.id) {
+			int space_left = item_data.stack_size - inv_item->amount;
+			if (space_left > 0) {
+				int amount_to_add = (amount_left < space_left) ? amount_left : space_left;
+				amount_left -= amount_to_add;
+
+				if (amount_left == 0) {
+					return true;
+				}
+			}
+		}
+	}
+
+	// Second pass: Try to find empty slots
+	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
+		ItemInstanceData* inv_item = &world->inventory_items[i];
+		if (inv_item->id == 0) {
+			int amount_to_add = (amount_left < item_data.stack_size) ? amount_left : item_data.stack_size;
+			amount_left -= amount_to_add;
+
+			if (amount_left == 0) {
+				return true;
+			}
+		}
+	}
+
+	bool can_add_some = amount_left != item.amount;
+	return can_add_some;
 }
 
 bool attempt_add_item_to_inv(ItemInstanceData item) {
@@ -6048,7 +6088,7 @@ int entry(int argc, char **argv) {
 					}
 				}
 
-				// pickup
+				// :pickup
 				if (is_player_alive() && en->is_item) {
 
 					bool is_exp = en->arch == ARCH_exp;
@@ -6058,27 +6098,27 @@ int entry(int argc, char **argv) {
 						pickup_radius *= 3;
 					}
 
-					if (has_reached_end_time(en->pick_up_cooldown_end_time) &&
+					ItemInstanceData item = (ItemInstanceData){.id=en->arch, .amount=en->item_amount};
+
+					bool room_in_inventory = can_add_item_to_inv(item);
+
+					if (room_in_inventory && has_reached_end_time(en->pick_up_cooldown_end_time) &&
 					fabsf(v2_dist(en->pos, get_player()->pos)) < pickup_radius) {
-						en->is_being_picked_up = true;
+						en->frame.is_being_picked_up = true;
 					}
 
-					if (en->is_being_picked_up) {
+					if (en->frame.is_being_picked_up) {
+						en->has_physics = true;
+						en->disable_friction = true;
+						Vector2 pick_up_target_pos = player->pos;
+						Vector2 target_normal = v2_normalize(v2_sub(pick_up_target_pos, en->pos));
 
 						if (is_exp) {
 							// physically accelerate towards the player
-							en->has_physics = true;
-							en->disable_friction = true;
-							Vector2 pick_up_target_pos = player->pos;
-							Vector2 target_normal = v2_normalize(v2_sub(pick_up_target_pos, en->pos));
 							en->acceleration = v2_mulf(target_normal, 2000.0f);
 							float mag = v2_length(en->velocity);
 							en->velocity = v2_mulf(target_normal, mag);
 						} else {
-							en->has_physics = true;
-							en->disable_friction = true;
-							Vector2 pick_up_target_pos = player->pos;
-							Vector2 target_normal = v2_normalize(v2_sub(pick_up_target_pos, en->pos));
 							en->acceleration = v2_mulf(target_normal, 1000.0f);
 							float mag = v2_length(en->velocity);
 							en->velocity = v2_mulf(target_normal, mag);
@@ -6093,14 +6133,14 @@ int entry(int argc, char **argv) {
 							}
 
 							// #item
-							bool succ = move_item_instance_to_inv(&(ItemInstanceData){.id=en->arch, .amount=en->item_amount});
+							bool succ = move_item_instance_to_inv(&item);
 							if (succ) {
 								entity_zero_immediately(en);
-							} else {
-								// #ship
-								log_error("needa figure this out...");
 							}
 						}
+					} else {
+						en->disable_friction = false;
+						en->friction = 30;
 					}
 				}
 			}

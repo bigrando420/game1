@@ -344,6 +344,8 @@ typedef enum SpriteID {
 	SPRITE_meteorite_depo,
 	SPRITE_raw_meteorite,
 	SPRITE_meteorite_ingot,
+	SPRITE_blank_tp_focus,
+	SPRITE_charged_tp_focus,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -407,18 +409,18 @@ typedef enum ItemID {
 	ITEM_thumper,
 	ITEM_raw_meteorite,
 	ITEM_meteorite_ingot,
+	ITEM_tp_focus,
 	// :item
 	ITEM_MAX,
 } ItemID;
 
-typedef struct InventoryItemData {
-	int amount;
-} InventoryItemData; 
-
-typedef struct ItemAmount {
+typedef struct ItemInstanceData {
 	ItemID id;
 	int amount;
-} ItemAmount; 
+	bool has_focus_target;
+	Vector2 focus_target_pos;
+} ItemInstanceData; 
+const ItemInstanceData empty_item = {0};
 
 typedef enum ArchetypeID {
 	ARCH_nil = 0,
@@ -484,10 +486,11 @@ typedef struct ItemData {
 	// merged in from building.
 	ArchetypeID to_build;
 	int exp_cost;
-	ItemAmount ingredients[8];
+	ItemInstanceData ingredients[8];
 	int ingredients_count;
-	ItemAmount research_ingredients[4];
+	ItemInstanceData research_ingredients[4];
 	int research_ingredients_count;
+	int stack_size;
 } ItemData;
 ItemData item_data[ITEM_MAX] = {0};
 ItemData get_item_data(ItemID id) {
@@ -542,7 +545,7 @@ typedef struct EntityFrame {
 } EntityFrame;
 
 typedef struct StorageSlot {
-	ItemAmount item;
+	ItemInstanceData item;
 	bool output_only; // can only take items from here, can't put in
 	int desired_item_count;
 	ItemID desired_items[4];
@@ -554,6 +557,7 @@ typedef struct Entity {
 	ArchetypeID arch;
 	ItemID item_id;
 	int item_amount;
+	ItemInstanceData new_item_thing;
 	Vector2 pos;
 	bool render_sprite;
 	SpriteID sprite_id;
@@ -562,7 +566,7 @@ typedef struct Entity {
 	bool destroyable_world_item;
 	int current_crafting_amount;
 	float64 crafting_end_time;
-	ItemAmount drops[4];
+	ItemInstanceData drops[4];
 	int drops_count;
 	DamageType dmg_type;
 	ItemID selected_crafting_item;
@@ -588,9 +592,9 @@ typedef struct Entity {
 	int storage_slot_count;
 
 	// deprecated
-	ItemAmount input0;
-	ItemAmount input1;
-	ItemAmount output0;
+	ItemInstanceData input0;
+	ItemInstanceData input1;
+	ItemInstanceData output0;
 	//
 
 	int anim_index;
@@ -843,6 +847,8 @@ BiomeID biome_at_tile(Tile tile) {
 	return biome;
 }
 
+#define INV_COUNT 16
+
 typedef struct World {
 	int id_count;
 	u64 tick_count; 
@@ -850,7 +856,7 @@ typedef struct World {
 	float64 cycle_end_time;
 	float64 time_elapsed;
 	Entity entities[MAX_ENTITY_COUNT];
-	InventoryItemData inventory_items[ITEM_MAX];
+	ItemInstanceData inventory_items[INV_COUNT];
 	UXState ux_state;
 	float inventory_alpha;
 	float inventory_alpha_target;
@@ -862,7 +868,7 @@ typedef struct World {
 	UnlockState item_unlocks[ITEM_MAX];
 	float64 resource_next_spawn_end_time[ARRAY_COUNT(world_resources)];
 	EntityHandle oxygenerator;
-	ItemAmount mouse_cursor_item;
+	ItemInstanceData mouse_cursor_item;
 	float night_alpha;
 	float night_alpha_target;
 	float64 next_close_meteor_spawn_end_time;
@@ -996,8 +1002,8 @@ void setup_meteorite_depo(Entity* en) {
 	entity_max_health_setter(en, rock_health * 3);
 	en->destroyable_world_item = true;
 	en->drops_count = 2;
-	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=3};
-	en->drops[1] = (ItemAmount){.id=ITEM_raw_meteorite, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=3};
+	en->drops[1] = (ItemInstanceData){.id=ITEM_raw_meteorite, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(3, 1);
 	en->has_collision = true;
@@ -1012,7 +1018,7 @@ void setup_rock_small(Entity* en) {
 	en->destroyable_by_explosion = true;
 	en->meteor_destroy_without_drops = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(2, 1);
 	en->has_collision = true;
@@ -1026,7 +1032,7 @@ void setup_rock_medium(Entity* en) {
 	entity_max_health_setter(en, rock_health * 1.5);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=2};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=2};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(2, 2);
 	en->has_collision = true;
@@ -1040,7 +1046,7 @@ void setup_rock_large(Entity* en) {
 	entity_max_health_setter(en, rock_health * 2);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=3};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=3};
 	en->dmg_type = DMG_pickaxe;
 	en->tile_size = v2i(3, 2);
 	en->has_collision = true;
@@ -1170,7 +1176,7 @@ void setup_enemy1(Entity* en) {
 	en->collision_bounds = range2f_make_center_center(v2(0, 0), enemy_size);
 	en->is_enemy = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){ITEM_red_core, 1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_red_core, .amount=1};
 	entity_max_health_setter(en, 20);
 }
 
@@ -1216,7 +1222,7 @@ void setup_iron_depo(Entity* en) {
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_raw_iron, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_raw_iron, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1230,7 +1236,7 @@ void setup_coal_depo(Entity* en) {
 	entity_max_health_setter(en, 10);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_coal, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_coal, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1268,7 +1274,7 @@ void setup_ice_vein(Entity* en) {
 	entity_max_health_setter(en, ice_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_o2_shard, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_o2_shard, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1314,7 +1320,7 @@ void setup_grass(Entity* en) {
 	entity_max_health_setter(en, grass_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_fiber, .amount=get_random_int_in_range(1, 2)};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_fiber, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_sickle;
 }
 
@@ -1327,7 +1333,7 @@ void setup_flint_depo(Entity* en) {
 	entity_max_health_setter(en, flint_depo_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_flint, .amount=get_random_int_in_range(1, 2)};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_flint, .amount=get_random_int_in_range(1, 2)};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1340,7 +1346,7 @@ void setup_copper_depo(Entity* en) {
 	entity_max_health_setter(en, copper_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_raw_copper, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_raw_copper, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 	en->has_collision = true;
 }
@@ -1357,7 +1363,7 @@ void setup_exp_vein(Entity* en) {
 	entity_max_health_setter(en, exp_vein_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_exp, .amount=get_random_int_in_range(2, 3)};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_exp, .amount=get_random_int_in_range(2, 3)};
 	en->dmg_type = DMG_pickaxe;
 }
 
@@ -1436,7 +1442,7 @@ void setup_rock(Entity* en) {
 	entity_max_health_setter(en, rock_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_rock, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_rock, .amount=1};
 	en->dmg_type = DMG_pickaxe;
 }
 
@@ -1451,7 +1457,7 @@ void setup_tree(Entity* en) {
 	entity_max_health_setter(en, tree_health);
 	en->destroyable_world_item = true;
 	en->drops_count = 1;
-	en->drops[0] = (ItemAmount){.id=ITEM_pine_wood, .amount=1};
+	en->drops[0] = (ItemInstanceData){.id=ITEM_pine_wood, .amount=1};
 	en->dmg_type = DMG_axe;
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_bottom_center(v2(4, 4));
@@ -1807,6 +1813,42 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 
 // :func dump
 
+bool attempt_add_item_to_inv(ItemInstanceData item) {
+	ItemData item_data = get_item_data(item.id);
+
+	int amount_left = item.amount;
+	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
+		ItemInstanceData* inv_item = &world->inventory_items[i];
+
+		if (inv_item->id == item.id) {
+			// add remaining amount to existing item
+			inv_item->amount += amount_left;
+			amount_left = 0;
+
+			if (inv_item->amount > item_data.stack_size) {
+				amount_left = inv_item->amount - item_data.stack_size;
+				inv_item->amount = item_data.stack_size;
+			}
+
+			if (amount_left == 0) {
+				return true;
+			}
+		}
+	}
+
+	// still left? try find empty slot for it.
+	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
+		ItemInstanceData* inv_item = &world->inventory_items[i];
+		if (inv_item->id == 0) {
+			*inv_item = item;
+			item.amount = amount_left;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 // :camera
 Matrix4 construct_view_matrix(Vector2 pos, float zoom, float trauma) {
 
@@ -1951,25 +1993,56 @@ void do_resource_respawning() {
 	}
 }
 
-bool has_enough_for_recipe(ItemAmount* recipe, int count) {
+bool has_enough_for_recipe(ItemInstanceData* recipe, int count) {
 	for (int i = 0; i < count; i++) {
-		ItemAmount ing = recipe[i];
+		ItemInstanceData ing = recipe[i];
 		ItemData ing_data = get_item_data(ing.id);
-		if (world->inventory_items[ing.id].amount < ing.amount) {
-			return false;
+
+		int total_count = 0;
+
+		for (int j = 0; j < ARRAY_COUNT(world->inventory_items); j++) {
+			ItemInstanceData* item = &world->inventory_items[j];
+			if (item->id == ing.id && item->amount) {
+				total_count += item->amount;
+			}
+		}
+
+		if (total_count < ing.amount) {
+			return false; 
 		}
 	}
+
 	return true;
 }
 
-void consume_recipe(ItemAmount* recipe, int count) {
+void consume_recipe(ItemInstanceData* recipe, int count) {
 	for (int i = 0; i < count; i++) {
-		ItemAmount ing = recipe[i];
+		ItemInstanceData ing = recipe[i];
 		ItemData ing_data = get_item_data(ing.id);
-		world->inventory_items[ing.id].amount -= ing.amount;
-		if (world->inventory_items[ing.id].amount < 0) {
-			log_error("consume_recipe went past zero on amount, something went tits up");
+
+		int remaining_amount = ing.amount;
+
+		for (int j = 0; j < ARRAY_COUNT(world->inventory_items); j++) {
+			ItemInstanceData* item = &world->inventory_items[j];
+			if (item->id == ing.id && item->amount) {
+				item->amount -= remaining_amount;
+
+				if (item->amount < 0) {
+					remaining_amount = -item->amount;
+					item->amount = 0;
+				}
+
+				if (item->amount == 0) {
+					*item = (ItemInstanceData){0};
+				}
+
+				if (remaining_amount == 0) {
+					break;
+				}
+			}
 		}
+
+		assert(remaining_amount == 0, "consume_recipe went tits up...");
 	}
 }
 
@@ -2167,7 +2240,7 @@ void do_entity_drops(Entity* en) {
 	if (en->drops_count) {
 		// drops from entity data
 		for (int i = 0; i < en->drops_count; i++) {
-			ItemAmount drop = en->drops[i];
+			ItemInstanceData drop = en->drops[i];
 			for (int j = 0; j < drop.amount; j++) {
 				growing_array_add((void**)&drops, &drop.id);
 			}
@@ -2181,7 +2254,7 @@ void do_entity_drops(Entity* en) {
 		growing_array_add((void**)&drops, &en->item_id);
 		// not dropping the raw materials anymore, so it's more clear that the item got destroyed.
 		// for (int i = 0; i < item_data.ingredients_count; i++) {
-		// 	ItemAmount drop = item_data.ingredients[i];
+		// 	ItemInstanceData drop = item_data.ingredients[i];
 		// 	for (int j = 0; j < drop.amount; j++) {
 		// 		growing_array_add((void**)&drops, &drop.id);
 		// 	}
@@ -2207,7 +2280,7 @@ void do_entity_drops(Entity* en) {
 	}
 }
 
-void draw_item_amount_in_rect(ItemAmount item_amount, Range2f rect) {
+void draw_item_amount_in_rect(ItemInstanceData item_amount, Range2f rect) {
 	draw_sprite_in_rect(get_sprite_id_from_item(item_amount.id), rect, COLOR_WHITE, 0.1);
 
 	float x0 = rect.max.x;
@@ -2220,7 +2293,7 @@ void draw_item_amount_in_rect(ItemAmount item_amount, Range2f rect) {
 	draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_bottom_right);
 }
 
-void item_tooltip(ItemAmount item_amount) {
+void item_tooltip(ItemInstanceData item_amount) {
 	push_z_layer_in_frame(layer_tooltip, current_draw_frame);
 
 	Vector2 text_scale = v2(0.1, 0.1);
@@ -2376,7 +2449,9 @@ void world_setup() {
 
 		world->item_unlocks[ITEM_tether].research_progress = 100;
 
-		world->inventory_items[ITEM_iron_ingot].amount = 100;
+		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_iron_ingot, .amount=100});
+
+		/*
 		world->inventory_items[ITEM_raw_copper].amount = 50;
 		world->inventory_items[ITEM_pine_wood].amount = 50;
 		world->inventory_items[ITEM_coal].amount = 50;
@@ -2387,6 +2462,7 @@ void world_setup() {
 		world->inventory_items[ITEM_flint].amount = 100;
 		world->inventory_items[ITEM_fiber].amount = 100;
 		world->inventory_items[ITEM_copper_ingot].amount = 100;
+		*/
 
 		// en = entity_create();
 		// setup_furnace(en);
@@ -2604,14 +2680,14 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							slot->item.amount += world->mouse_cursor_item.amount;
-							world->mouse_cursor_item = (ItemAmount){0};
+							world->mouse_cursor_item = (ItemInstanceData){0};
 						}
 					} else {
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							if (has_desired_item_in_hand) {
 								// swap
-								ItemAmount temp = world->mouse_cursor_item;
+								ItemInstanceData temp = world->mouse_cursor_item;
 								world->mouse_cursor_item = slot->item;
 								slot->item = temp;
 							} else {
@@ -2625,7 +2701,7 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 						if (has_desired_item_in_hand) {
 							// place inside
 							slot->item = world->mouse_cursor_item;
-							world->mouse_cursor_item = (ItemAmount){0};
+							world->mouse_cursor_item = (ItemInstanceData){0};
 						} else {
 							play_sound("event:/error");
 						}
@@ -2637,7 +2713,7 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 						// take into hand
 						world->mouse_cursor_item = slot->item;
-						slot->item = (ItemAmount){0};
+						slot->item = (ItemInstanceData){0};
 					}
 
 					item_tooltip(slot->item);
@@ -2654,7 +2730,7 @@ void input_slot_new(Range2f rect, StorageSlot* slot) {
 
 }
 
-void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
+void input_slot(Range2f rect, ItemInstanceData* slot, ItemID* desired_items) {
 	if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 		
 		// interact with the slot
@@ -2676,14 +2752,14 @@ void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							slot->amount += world->mouse_cursor_item.amount;
-							world->mouse_cursor_item = (ItemAmount){0};
+							world->mouse_cursor_item = (ItemInstanceData){0};
 						}
 					} else {
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							if (has_desired_item_in_hand) {
 								// swap
-								ItemAmount temp = world->mouse_cursor_item;
+								ItemInstanceData temp = world->mouse_cursor_item;
 								world->mouse_cursor_item = *slot;
 								*slot = temp;
 							} else {
@@ -2697,7 +2773,7 @@ void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
 						if (has_desired_item_in_hand) {
 							// place inside
 							*slot = world->mouse_cursor_item;
-							world->mouse_cursor_item = (ItemAmount){0};
+							world->mouse_cursor_item = (ItemInstanceData){0};
 						} else {
 							play_sound("event:/error");
 						}
@@ -2709,7 +2785,7 @@ void input_slot(Range2f rect, ItemAmount* slot, ItemID* desired_items) {
 						consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 						// take into hand
 						world->mouse_cursor_item = *slot;
-						*slot = (ItemAmount){0};
+						*slot = (ItemInstanceData){0};
 					}
 
 					item_tooltip(*slot);
@@ -2855,7 +2931,7 @@ void do_world_entity_interaction_ui_stuff() {
 
 			// output slot
 			{
-				ItemAmount* slot = &en->output0;
+				ItemInstanceData* slot = &en->output0;
 
 				if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 					// interact with the slot
@@ -2871,7 +2947,7 @@ void do_world_entity_interaction_ui_stuff() {
 									consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 									// take into hand
 									world->mouse_cursor_item = *slot;
-									*slot = (ItemAmount){0};
+									*slot = (ItemInstanceData){0};
 								}
 
 								item_tooltip(*slot);
@@ -2983,7 +3059,7 @@ void do_world_entity_interaction_ui_stuff() {
 			y0 = get_entity_range(en).max.y;
 			y0 += 1.f;
 
-			ItemAmount* slot = &en->input0;
+			ItemInstanceData* slot = &en->input0;
 
 			ItemID* desired_items;
 			growing_array_init_reserve((void**)&desired_items, sizeof(ItemID), 1, get_temporary_allocator());
@@ -3019,7 +3095,7 @@ void do_world_entity_interaction_ui_stuff() {
 		{
 			Range2f rect = range2f_make_bottom_left(v2(x0, y0), v2(slot_size, slot_size));
 
-			ItemAmount* slot = &en->input0;
+			ItemInstanceData* slot = &en->input0;
 
 			if (range2f_contains(rect, get_mouse_pos_in_current_space())) {
 				if (world->mouse_cursor_item.id) {
@@ -3029,13 +3105,13 @@ void do_world_entity_interaction_ui_stuff() {
 							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 								slot->amount += world->mouse_cursor_item.amount;
-								world->mouse_cursor_item = (ItemAmount){0};
+								world->mouse_cursor_item = (ItemInstanceData){0};
 							}
 						} else {
 							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 								// swap
-								ItemAmount temp = world->mouse_cursor_item;
+								ItemInstanceData temp = world->mouse_cursor_item;
 								world->mouse_cursor_item = *slot;
 								*slot = temp;
 							}
@@ -3044,7 +3120,7 @@ void do_world_entity_interaction_ui_stuff() {
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							*slot = world->mouse_cursor_item;
-							world->mouse_cursor_item = (ItemAmount){0};
+							world->mouse_cursor_item = (ItemInstanceData){0};
 						}
 					}
 				} else {
@@ -3053,7 +3129,7 @@ void do_world_entity_interaction_ui_stuff() {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							// take into hand
 							world->mouse_cursor_item = *slot;
-							*slot = (ItemAmount){0};
+							*slot = (ItemInstanceData){0};
 						}
 
 						item_tooltip(*slot);
@@ -3093,14 +3169,14 @@ void do_world_entity_interaction_ui_stuff() {
 							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 								en->input0.amount += world->mouse_cursor_item.amount;
-								world->mouse_cursor_item = (ItemAmount){0};
+								world->mouse_cursor_item = (ItemInstanceData){0};
 							}
 						} else {
 							if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 								consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 								if (world->mouse_cursor_item.id == desired_item) {
 									// swap
-									ItemAmount temp = world->mouse_cursor_item;
+									ItemInstanceData temp = world->mouse_cursor_item;
 									world->mouse_cursor_item = en->input0;
 									en->input0 = temp;
 								} else {
@@ -3114,7 +3190,7 @@ void do_world_entity_interaction_ui_stuff() {
 							if (world->mouse_cursor_item.id == desired_item) {
 								// place inside
 								en->input0 = world->mouse_cursor_item;
-								world->mouse_cursor_item = (ItemAmount){0};
+								world->mouse_cursor_item = (ItemInstanceData){0};
 							} else {
 								play_sound("event:/error");
 							}
@@ -3126,7 +3202,7 @@ void do_world_entity_interaction_ui_stuff() {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 							// take into hand
 							world->mouse_cursor_item = en->input0;
-							en->input0 = (ItemAmount){0};
+							en->input0 = (ItemInstanceData){0};
 						}
 
 						do_tooltip = true;
@@ -3290,8 +3366,11 @@ void do_ui_stuff() {
 						world_frame.hover_consumed = true;
 						if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 							consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-							world->inventory_items[world->mouse_cursor_item.id].amount += world->mouse_cursor_item.amount;
-							world->mouse_cursor_item = (ItemAmount){0};
+							if (attempt_add_item_to_inv(world->mouse_cursor_item)) {
+								world->mouse_cursor_item = (ItemInstanceData){0};
+							} else {
+								play_sound("event:/error");
+							}
 						}
 					}
 				}
@@ -3302,10 +3381,10 @@ void do_ui_stuff() {
 			y0 -= icon_width;
 
 			int slot_index = 0;
-			ItemID hovered_item = 0;
-			for (int i = 1; i < ITEM_MAX; i++) {
+			ItemInstanceData* hovered_item_slot = 0;
+			for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
 				ItemData item_data = get_item_data(i);
-				InventoryItemData* item = &world->inventory_items[i];
+				ItemInstanceData* item = &world->inventory_items[i];
 				if (item->amount > 0) {
 
 					Range2f box = range2f_make_bottom_left(v2(x0, y0), v2(icon_width, icon_width));
@@ -3316,18 +3395,17 @@ void do_ui_stuff() {
 
 					if (is_inventory_enabled && range2f_contains(box, get_mouse_pos_in_current_space())) {
 						is_selected_alpha = 1.0;
-						hovered_item = i;
+						hovered_item_slot = item;
 					}
 
-					Sprite* sprite = get_sprite(get_sprite_id_from_item(i));
+					Sprite* sprite = get_sprite(get_sprite_id_from_item(item->id));
 
-					ItemAmount item_amount = (ItemAmount){i, item->amount};
-					draw_item_amount_in_rect(item_amount, box);
+					draw_item_amount_in_rect(*item, box);
 
 					// tooltip
 					if (is_selected_alpha == 1.0)
 					{
-						item_tooltip(item_amount);
+						item_tooltip(*item);
 					}
 
 					slot_index += 1;
@@ -3341,12 +3419,11 @@ void do_ui_stuff() {
 			}
 
 			// :cursor item
-			if (!world->mouse_cursor_item.id && hovered_item) {
+			if (!world->mouse_cursor_item.id && hovered_item_slot) {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
-					InventoryItemData* item = &world->inventory_items[hovered_item];
-					world->mouse_cursor_item = (ItemAmount){.id=hovered_item, .amount=item->amount};
-					item->amount = 0;
+					world->mouse_cursor_item = *hovered_item_slot;
+					*hovered_item_slot = empty_item;
 				}
 			}
 		}
@@ -3435,31 +3512,19 @@ void do_ui_stuff() {
 			ItemData item_data = get_item_data(selected);
 
 			if (is_fully_unlocked(unlock_state)) {
-				bool has_enough_for_recipe = true;
-				for (int i = 0; i < item_data.ingredients_count; i++) {
-					ItemAmount ing = item_data.ingredients[i];
-					ItemData ing_data = get_item_data(ing.id);
-					if (world->inventory_items[ing.id].amount < ing.amount) {
-						has_enough_for_recipe = false;
-					}
-				}
 
 				// craft
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-					if (has_enough_for_recipe) {
+					if (has_enough_for_recipe(world->inventory_items, ARRAY_COUNT(world->inventory_items))) {
 						// insta craft straight into cursor
 						// #future, we'll wanna make this craft queue so we can lean into automated crafting
 						if (!world->mouse_cursor_item.id || world->mouse_cursor_item.id == selected) {
 							world->mouse_cursor_item.id = selected;
 							world->mouse_cursor_item.amount += 1;
 
-							for (int i = 0; i < item_data.ingredients_count; i++) {
-								ItemAmount ing = item_data.ingredients[i];
-								ItemData ing_data = get_item_data(ing.id);
-								world->inventory_items[ing.id].amount -= ing.amount;
-							}
+							consume_recipe(world->inventory_items, ARRAY_COUNT(world->inventory_items));
 						}
 
 						play_sound("event:/craft");
@@ -3508,7 +3573,7 @@ void do_ui_stuff() {
 					// ingredient list
 					// #duplicate
 					for (int i = 0; i < item_data.ingredients_count; i++) {
-						ItemAmount ing = item_data.ingredients[i];
+						ItemInstanceData ing = item_data.ingredients[i];
 						ItemData ing_data = get_item_data(ing.id);
 
 						float height = font_height_body * text_scale.x;
@@ -3516,7 +3581,7 @@ void do_ui_stuff() {
 						x0 = x_left_ingredient_list;
 
 						Vector4 col = COLOR_WHITE;
-						if (world->inventory_items[ing.id].amount < ing.amount) {
+						if (!has_enough_for_recipe(&ing, 1)) {
 							col = COLOR_RED;
 						}
 
@@ -3693,7 +3758,7 @@ void do_ui_stuff() {
 			// #duplicate
 			float x_left_ingredient_list = x_left;
 			for (int i = 0; i < item_data.research_ingredients_count; i++) {
-				ItemAmount ing = item_data.research_ingredients[i];
+				ItemInstanceData ing = item_data.research_ingredients[i];
 				ItemData ing_data = get_item_data(ing.id);
 
 				float height = font_height_body * text_scale.x;
@@ -3701,7 +3766,7 @@ void do_ui_stuff() {
 				x0 = x_left_ingredient_list;
 
 				Vector4 col = COLOR_WHITE;
-				if (world->inventory_items[ing.id].amount < ing.amount) {
+				if (!has_enough_for_recipe(&ing, 1)) {
 					col = COLOR_RED;
 				}
 
@@ -3722,8 +3787,11 @@ void do_ui_stuff() {
 	if (world->mouse_cursor_item.id) {
 		if (is_key_just_pressed('Q')) {
 			consume_key_just_pressed('Q');
-			world->inventory_items[world->mouse_cursor_item.id].amount += world->mouse_cursor_item.amount;
-			world->mouse_cursor_item = (ItemAmount){0};
+			if (attempt_add_item_to_inv(world->mouse_cursor_item)) {
+				world->mouse_cursor_item = empty_item;
+			} else {
+				play_sound("event:/error");
+			}
 		}
 	}
 
@@ -3731,12 +3799,18 @@ void do_ui_stuff() {
 	if (world->mouse_cursor_item.id)
 	defer_scope(push_z_layer_in_frame(layer_cursor_item, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 	{
+		ItemID item_id = world->mouse_cursor_item.id;
 		ItemData item_data = get_item_data(world->mouse_cursor_item.id);
 		if (!item_data.to_build || world_frame.hover_consumed) {
 			// it's just an item
 			Sprite* sprite = get_sprite(get_sprite_id_from_item(world->mouse_cursor_item.id));
 			Range2f rect = range2f_make_center_center(get_mouse_pos_in_current_space(), v2(10, 10));
 			draw_item_amount_in_rect(world->mouse_cursor_item, rect);
+
+			if (item_id == ITEM_tp_focus) {
+
+			}
+
 		} else
 			defer_scope(set_world_space(), set_screen_space())
 			defer_scope(push_z_layer_in_frame(layer_buildings, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
@@ -3862,7 +3936,7 @@ void do_ui_stuff() {
 
 					world->mouse_cursor_item.amount -= 1;
 					if (world->mouse_cursor_item.amount <= 0) {
-						world->mouse_cursor_item = (ItemAmount){0};
+						world->mouse_cursor_item = (ItemInstanceData){0};
 					}
 				} else {
 					play_sound("event:/error");
@@ -3946,7 +4020,7 @@ void update_thumper(Entity* en) {
 
 			en->input0.amount -= 1;
 			if (en->input0.amount <= 0) {
-				en->input0 = (ItemAmount){0};
+				en->input0 = (ItemInstanceData){0};
 			}
 		}
 	}
@@ -4048,7 +4122,8 @@ void render_portal(Entity* en) {
 	set_quad_type(q, QUAD_TYPE_portal);
 
 	// afterimage effect
-	// if (false)
+	// me don't like this...
+	if (false)
 	{
 		float tp_length = 0.3f;
 		float time_ago = now() - en->teleported_at_time;
@@ -4101,12 +4176,12 @@ void conveyor_move_logic(Entity* en) {
 					if (en->input0.amount != 0) {
 						log_error("this should be 0??");
 					}
-					en->input0 = (ItemAmount){0};
+					en->input0 = (ItemInstanceData){0};
 				}
 			}
 		} else {
 
-			ItemAmount* item_on_conveyor = &en->input0;
+			ItemInstanceData* item_on_conveyor = &en->input0;
 
 			// loop thru slots, checking for desired matches
 			for (int i = 0; i < storage->storage_slot_count; i++) {
@@ -4137,7 +4212,7 @@ void conveyor_move_logic(Entity* en) {
 
 						dest_slot->item.id = item_on_conveyor->id;
 						dest_slot->item.amount += 1;
-						*item_on_conveyor = (ItemAmount){0};
+						*item_on_conveyor = (ItemInstanceData){0};
 					}
 
 				}
@@ -4178,7 +4253,7 @@ void update_extractor(Entity* en) {
 			Entity* storage = tc->entity;
 
 			// #improvement - need to define a "extractor takes slot from this slot" markup in setup ?
-			ItemAmount* extraction_slot = &storage->output0;
+			ItemInstanceData* extraction_slot = &storage->output0;
 			if (storage->arch == ARCH_wood_crate || storage->arch == ARCH_conveyor || storage->arch == ARCH_extractor) {
 				extraction_slot = &storage->input0;
 			}
@@ -4190,7 +4265,7 @@ void update_extractor(Entity* en) {
 
 				extraction_slot->amount -= 1;
 				if (extraction_slot->amount <= 0) {
-					*extraction_slot = (ItemAmount){0};
+					*extraction_slot = (ItemInstanceData){0};
 				}
 			}
 		}
@@ -4418,7 +4493,7 @@ void update_turret(Entity* en) {
 			en->frame.did_shoot = true;
 			en->input0.amount -= 1;
 			if (en->input0.amount <= 0) {
-				en->input0 = (ItemAmount){0};
+				en->input0 = (ItemInstanceData){0};
 			}
 
 			{
@@ -4928,6 +5003,8 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_meteorite_depo] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/meteorite_depo.png"), get_heap_allocator())};
 		sprites[SPRITE_raw_meteorite] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/raw_meteorite.png"), get_heap_allocator())};
 		sprites[SPRITE_meteorite_ingot] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/meteorite_ingot.png"), get_heap_allocator())};
+		sprites[SPRITE_blank_tp_focus] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/blank_tp_focus.png"), get_heap_allocator())};
+		sprites[SPRITE_charged_tp_focus] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/charged_tp_focus.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -4947,12 +5024,6 @@ int entry(int argc, char **argv) {
 	
 	// item data resource setup
 	{
-		// do defaults
-		for (ItemID i = 1; i < ITEM_MAX; i++) {
-			ItemData* data = &item_data[i];
-			data->craft_length = 2.0;
-		}
-
 		// :item resources
 		item_data[ITEM_meteorite_ingot] = (ItemData){ .pretty_name=STR("Meteorite Ingot"), .icon=SPRITE_meteorite_ingot};
 		item_data[ITEM_raw_meteorite] = (ItemData){ .pretty_name=STR("Raw Meteorite"), .icon=SPRITE_raw_meteorite, .furnace_transform_into=ITEM_meteorite_ingot};
@@ -4966,6 +5037,16 @@ int entry(int argc, char **argv) {
 		item_data[ITEM_raw_copper] = (ItemData){ .pretty_name=STR("Raw Copper"), .icon=SPRITE_raw_copper, .furnace_transform_into=ITEM_copper_ingot };
 		item_data[ITEM_fiber] = (ItemData){ .pretty_name=STR("Fiber"), .icon=SPRITE_fiber };
 		item_data[ITEM_flint] = (ItemData){ .pretty_name=STR("Flint"), .icon=SPRITE_flint };
+
+		item_data[ITEM_tp_focus] = (ItemData){
+			.pretty_name=STR("Quantum Lens"),
+			.icon=SPRITE_blank_tp_focus,
+			.research_ingredients_count=1,
+			.research_ingredients={{.id=ITEM_exp, .amount=100}},
+			.ingredients_count=1,
+			.ingredients={ {.id=ITEM_iron_ingot, .amount=20} },
+			.stack_size=1,
+		};
 
 		item_data[ITEM_copper_ingot] = (ItemData){
 			.pretty_name=STR("Copper Ingot"),
@@ -4995,9 +5076,9 @@ int entry(int argc, char **argv) {
 			.extra_axe_dmg=1,
 			.ingredients_count=3,
 			.ingredients={
-				{ITEM_pine_wood, 10},
-				{ITEM_flint, 10},
-				{ITEM_fiber, 10},
+				{.id=ITEM_pine_wood, .amount=10},
+				{.id=ITEM_flint, .amount=10},
+				{.id=ITEM_fiber, .amount=10},
 			},
 		};
 
@@ -5010,9 +5091,9 @@ int entry(int argc, char **argv) {
 			.extra_pickaxe_dmg=1,
 			.ingredients_count=3,
 			.ingredients={
-				{ITEM_pine_wood, 10},
-				{ITEM_flint, 10},
-				{ITEM_fiber, 10},
+				{.id=ITEM_pine_wood, .amount=10},
+				{.id=ITEM_flint, .amount=10},
+				{.id=ITEM_fiber, .amount=10},
 			},
 		};
 
@@ -5025,9 +5106,9 @@ int entry(int argc, char **argv) {
 			.extra_sickle_dmg=1,
 			.ingredients_count=3,
 			.ingredients={
-				{ITEM_pine_wood, 10},
-				{ITEM_flint, 10},
-				{ITEM_fiber, 10},
+				{.id=ITEM_pine_wood, .amount=10},
+				{.id=ITEM_flint, .amount=10},
+				{.id=ITEM_fiber, .amount=10},
 			},
 		};
 
@@ -5038,9 +5119,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_thumper,
 			.description=STR("Burns fuel to slam into the ground and destroy resources in a radius."),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 100}},
+			.research_ingredients={{.id=ITEM_exp, .amount=100}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 10} }
+			.ingredients={ {.id=ITEM_iron_ingot, .amount=10} }
 		};
 
 		item_data[ITEM_portal] = (ItemData){
@@ -5048,9 +5129,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_portal_icon,
 			.description=STR("Quantum transportation. Use at own risk."),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 9999}},
+			.research_ingredients={{.id=ITEM_exp, .amount=9999}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_copper_ingot, 100} }
+			.ingredients={ {.id=ITEM_copper_ingot, .amount=100} }
 		};
 
 		item_data[ITEM_anti_meteor] = (ItemData){
@@ -5058,9 +5139,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_anti_meteor,
 			.description=STR("Redirects meteors in a radius"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.ingredients_count=2,
-			.ingredients={ {ITEM_meteorite_ingot, 2}, {ITEM_iron_ingot, 2} }
+			.ingredients={ {.id=ITEM_meteorite_ingot, .amount=2}, {.id=ITEM_iron_ingot, .amount=2} }
 		};
 
 		item_data[ITEM_extractor] = (ItemData){
@@ -5069,9 +5150,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_extractor_east,
 			.description=STR("Extracts items from the thing beside it"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 1} }
+			.ingredients={ {.id=ITEM_iron_ingot, .amount=1} }
 		};
 
 		item_data[ITEM_conveyor] = (ItemData){
@@ -5080,9 +5161,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_conveyor_right,
 			.description=STR("Moves items"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_iron_ingot, 1} }
+			.ingredients={ {.id=ITEM_iron_ingot, .amount=1} }
 		};
 
 		item_data[ITEM_wood_crate] = (ItemData){
@@ -5090,9 +5171,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_wood_crate,
 			.description=STR("Stores items"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 20}},
+			.research_ingredients={{.id=ITEM_exp, .amount=20}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_rock, 4} }
+			.ingredients={ {.id=ITEM_rock, .amount=4} }
 		};
 
 		// :turret
@@ -5102,9 +5183,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_turret,
 			.description=STR("Shoot bullets at nearby enemies"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.ingredients_count=3,
-			.ingredients={ {ITEM_iron_ingot, 2}, {ITEM_red_core, 1} }
+			.ingredients={ {.id=ITEM_iron_ingot, .amount=2}, {.id=ITEM_red_core, .amount=1} }
 		};
 		// these need to be a package deal...
 		item_data[ITEM_bullet] = (ItemData){
@@ -5113,11 +5194,11 @@ int entry(int argc, char **argv) {
 			.description=STR("Ammo for turrets"),
 			.icon=SPRITE_bullet,
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.used_in_turret=true,
 			.ingredients_count=1,
 			.ingredients={
-				{ITEM_red_core, 1},
+				{.id=ITEM_red_core, .amount=1},
 			},
 		};
 
@@ -5126,9 +5207,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_o2_emitter,
 			.description=STR("Feed oxygen into a sealed room with 3x more efficency"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 100}},
+			.research_ingredients={{.id=ITEM_exp, .amount=100}},
 			.ingredients_count=3,
-			.ingredients={ {ITEM_iron_ingot, 5}, {ITEM_o2_shard, 10} }
+			.ingredients={ {.id=ITEM_iron_ingot, .amount=5}, {.id=ITEM_o2_shard, .amount=10} }
 		};
 
 		// note, this should go into a "Shelter #1" grouped research unlock thingo
@@ -5138,18 +5219,18 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_wall_gate,
 			.description=STR("Allows travel into a sealed room"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_rock, 1}, }
+			.ingredients={ {.id=ITEM_rock, .amount=1}, }
 		};
 		item_data[ITEM_wall] = (ItemData){
 			.to_build=ARCH_wall,
 			.icon=SPRITE_wall,
 			.description=STR("Can be used to build a sealed Oxygen room"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_rock, 1} }
+			.ingredients={ {.id=ITEM_rock, .amount=1} }
 		};
 
 		item_data[ITEM_longboi_test] = (ItemData){
@@ -5159,7 +5240,7 @@ int entry(int argc, char **argv) {
 			.description=STR("Place on top of resources to mine."),
 			.exp_cost=10,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_rock, 30}, {ITEM_copper_ingot, 5} }
+			.ingredients={ {.id=ITEM_rock, .amount=30}, {.id=ITEM_copper_ingot, .amount=5} }
 		};
 
 		// :burner
@@ -5169,9 +5250,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_burner_drill,
 			.description=STR("Burns coal to drill into large veins"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 200}},
+			.research_ingredients={{.id=ITEM_exp, .amount=200}},
 			.ingredients_count=2,
-			.ingredients={ {ITEM_iron_ingot, 4}, {ITEM_rock, 4} }
+			.ingredients={ {.id=ITEM_iron_ingot, .amount=4}, {.id=ITEM_rock, .amount=4} }
 		};
 
 		// :tether
@@ -5180,9 +5261,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_tether,
 			.description=STR("Extends oxygen range"),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 50}},
+			.research_ingredients={{.id=ITEM_exp, .amount=50}},
 			.ingredients_count=2,
-			.ingredients={ {ITEM_meteorite_ingot, 1}, {ITEM_fiber, 8} }
+			.ingredients={ {.id=ITEM_meteorite_ingot, .amount=1}, {.id=ITEM_fiber, .amount=8} }
 		};
 
 		item_data[ITEM_furnace] = (ItemData){
@@ -5190,9 +5271,9 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_furnace,
 			.description=STR("Can burn stuff into something more useful."),
 			.research_ingredients_count=1,
-			.research_ingredients={{ITEM_exp, 30}},
+			.research_ingredients={{.id=ITEM_exp, .amount=30}},
 			.ingredients_count=1,
-			.ingredients={ {ITEM_rock, 5} }
+			.ingredients={ {.id=ITEM_rock, .amount=5} }
 		};
 
 		item_data[ITEM_workbench] = (ItemData){
@@ -5201,7 +5282,7 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_fabricator,
 			.description=STR("Crafts things."),
 			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 10}, {ITEM_fiber, 5} }
+			.ingredients={ {.id=ITEM_pine_wood, .amount=10}, {.id=ITEM_fiber, .amount=5} }
 		};
 
 		item_data[ITEM_research_station] = (ItemData){
@@ -5209,7 +5290,7 @@ int entry(int argc, char **argv) {
 			.icon=SPRITE_research_station,
 			.description=STR("Research recipes to unlock more buildings."),
 			.ingredients_count=1,
-			.ingredients={ {ITEM_rock, 5} }
+			.ingredients={ {.id=ITEM_rock, .amount=5} }
 		};
 		item_data[ITEM_teleporter1] = (ItemData){
 			.disabled=true,
@@ -5218,8 +5299,20 @@ int entry(int argc, char **argv) {
 			.description=STR("A gateway to the next world."),
 			.exp_cost=9999,
 			.ingredients_count=2,
-			.ingredients={ {ITEM_pine_wood, 1000}, {ITEM_rock, 1000} }
+			.ingredients={ {.id=ITEM_pine_wood, .amount=1000}, {.id=ITEM_rock, .amount=1000} }
 		};
+	}
+	// :item defaults
+	{
+		for (ItemID i = 1; i < ITEM_MAX; i++) {
+			ItemData* data = &item_data[i];
+			if (data->craft_length == 0) {
+				data->craft_length = 2.0;
+			}
+			if (data->stack_size == 0) {
+				data->stack_size = 4;
+			}
+		}
 	}
 
 	init_biome_maps();
@@ -5784,7 +5877,7 @@ int entry(int argc, char **argv) {
 
 						fuel_slot->item.amount -= 1;
 						if (fuel_slot->item.amount <= 0) {
-							fuel_slot->item = (ItemAmount){0};
+							fuel_slot->item = (ItemInstanceData){0};
 						}
 					}
 
@@ -5794,7 +5887,7 @@ int entry(int argc, char **argv) {
 
 						resource_slot->item.amount -= 1;
 						if (resource_slot->item.amount <= 0) {
-							resource_slot->item = (ItemAmount){0};
+							resource_slot->item = (ItemInstanceData){0};
 						}
 					}
 
@@ -5833,7 +5926,7 @@ int entry(int argc, char **argv) {
 
 							en->input0.amount -= 1;
 							if (en->input0.amount <= 0) {
-								en->input0 = (ItemAmount){0};
+								en->input0 = (ItemInstanceData){0};
 							}
 						}
 					}
@@ -5887,14 +5980,14 @@ int entry(int argc, char **argv) {
 									storage->input0.id = en->output0.id;
 									en->output0.amount -= 1;
 									if (en->output0.amount <= 0) {
-										en->output0 = (ItemAmount){0};
+										en->output0 = (ItemInstanceData){0};
 									}
 								}
 							} else {
 								if (storage->input0.id == 0 || storage->input0.id == en->output0.id) {
 									storage->input0.amount += en->output0.amount;
 									storage->input0.id = en->output0.id;
-									en->output0 = (ItemAmount){0};
+									en->output0 = (ItemInstanceData){0};
 								}
 							}
 						}
@@ -5908,7 +6001,7 @@ int entry(int argc, char **argv) {
 						// consume fuel
 						en->input0.amount -= 1;
 						if (en->input0.amount <= 0) {
-							en->input0 = (ItemAmount){0};
+							en->input0 = (ItemInstanceData){0};
 						}
 						en->oxygen = en->oxygen_max;
 					}
@@ -5920,6 +6013,8 @@ int entry(int argc, char **argv) {
 
 				// pickup
 				if (is_player_alive() && en->arch == ARCH_item) {
+
+					bool is_exp = en->item_id == ITEM_exp;
 
 					float pickup_radius = player_pickup_radius;
 					if (en->item_id == ITEM_exp) {
@@ -5933,7 +6028,7 @@ int entry(int argc, char **argv) {
 
 					if (en->is_being_picked_up) {
 
-						if (en->item_id == ITEM_exp) {
+						if (is_exp) {
 							// physically accelerate towards the player
 							en->has_physics = true;
 							en->disable_friction = true;
@@ -5942,14 +6037,7 @@ int entry(int argc, char **argv) {
 							en->acceleration = v2_mulf(target_normal, 2000.0f);
 							float mag = v2_length(en->velocity);
 							en->velocity = v2_mulf(target_normal, mag);
-
-							if (v2_dist(en->pos, player->pos) < 2.0f) {
-								play_sound("event:/exp_pickup");
-								world->inventory_items[en->item_id].amount += en->item_amount;
-								entity_zero_immediately(en);
-							}
 						} else {
-							// physically accelerate towards the player
 							en->has_physics = true;
 							en->disable_friction = true;
 							Vector2 pick_up_target_pos = player->pos;
@@ -5957,14 +6045,23 @@ int entry(int argc, char **argv) {
 							en->acceleration = v2_mulf(target_normal, 1000.0f);
 							float mag = v2_length(en->velocity);
 							en->velocity = v2_mulf(target_normal, mag);
-
-							if (v2_dist(en->pos, player->pos) < 2.0f) {
-								play_sound("event:/item_pickup");
-								world->inventory_items[en->item_id].amount += en->item_amount;
-								entity_zero_immediately(en);
-							}
 						}
 
+						if (v2_dist(en->pos, player->pos) < 2.0f) {
+
+							if (is_exp) {
+								play_sound("event:/exp_pickup");
+							} else {
+								play_sound("event:/item_pickup");
+							}
+
+							if (attempt_add_item_to_inv((ItemInstanceData){.id=en->item_id, .amount=en->item_amount})) {
+								entity_zero_immediately(en);
+							} else {
+								// #ship
+								log_error("needa figure this out...");
+							}
+						}
 					}
 				}
 			}
@@ -6199,18 +6296,18 @@ int entry(int argc, char **argv) {
 			if (is_player_alive() && player->oxygen == 0) {
 				player->health = 0;
 				// drop inv items
-				for (ItemID item_id = 1; item_id < ARRAY_COUNT(world->inventory_items); item_id++) {
-					InventoryItemData* inv_item_data = &world->inventory_items[item_id];
-					if (item_id == ITEM_exp) {
-						inv_item_data->amount = 0;
+				for (int j = 0; j < ARRAY_COUNT(world->inventory_items); j++) {
+					ItemInstanceData* inv_item = &world->inventory_items[j];
+					if (inv_item->id == ITEM_exp) {
+						*inv_item = empty_item;
 					}
-					if (inv_item_data->amount > 0) {
+					if (inv_item->amount > 0) {
 						Entity* drop = entity_create();
-						setup_item(drop, item_id);
+						setup_item(drop, inv_item->id);
 						drop->pos = player->pos;
-						drop->item_amount = inv_item_data->amount;
+						drop->new_item_thing = *inv_item;
 					}
-					inv_item_data->amount = 0;
+					*inv_item = empty_item;
 				}
 
 				world->ux_state = UX_respawn;
@@ -6257,6 +6354,7 @@ int entry(int argc, char **argv) {
 							particle_emit(selected_en->pos, PFX_hit);
 
 							int damage_amount = 1;
+							/*
 							if (selected_en->dmg_type == DMG_axe) {
 								for (int i = 0; i < ITEM_MAX; i++) {
 									if (world->inventory_items[i].amount) {
@@ -6276,6 +6374,7 @@ int entry(int argc, char **argv) {
 									}
 								}
 							} // #extend_dmg_type_here
+							*/
 
 							selected_en->health -= damage_amount;
 

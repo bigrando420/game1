@@ -344,6 +344,7 @@ typedef enum SpriteID {
 	SPRITE_meteorite_ingot,
 	SPRITE_blank_tp_focus,
 	SPRITE_charged_tp_focus,
+	SPRITE_portal_controller,
 	// :sprite
 	SPRITE_MAX,
 } SpriteID;
@@ -402,8 +403,6 @@ typedef enum ArchetypeID {
 	ARCH_rock_medium,
 	ARCH_rock_large,
 	ARCH_meteorite_depo,
-	ARCH_portal_controller,
-
 	// these were items
 	ARCH_rock,
 	ARCH_exp,
@@ -419,7 +418,8 @@ typedef enum ArchetypeID {
 	ARCH_raw_meteorite,
 	ARCH_meteorite_ingot,
 	ARCH_tp_focus,
-
+	//
+	ARCH_portal_controller,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -584,7 +584,7 @@ typedef struct Entity {
 	//
 
 
-	// copied from the old Entity struct
+	// copied from the old ItemData struct
 	string description;
 	SpriteID icon;
 	int extra_axe_dmg; // #extend_dmg_type_here
@@ -995,9 +995,7 @@ void entity_max_health_setter(Entity* en, int new_max_health) {
 	}
 }
 
-// :arch :setup things
-
-// :item setup
+// :item :setup
 
 void setup_rock(Entity* en) {
 	en->arch = ARCH_rock;
@@ -1046,18 +1044,7 @@ void setup_bullet(Entity* en) {
 	en->arch = ARCH_bullet;
 	en->pretty_name = STR("Bullet");
 	en->icon=SPRITE_bullet;
-
 	en->disabled = true; 
-	en->can_be_placed = true;
-		// 	item_data[ARCH_wood_crate] = (Entity){
-		// 	.to_build=ARCH_wood_crate,
-		// 	.icon=SPRITE_wood_crate,
-		// 	.description=STR("Stores items"),
-		// 	.research_ingredients_count=1,
-		// 	.research_ingredients={{.id=ARCH_exp, .amount=20}},
-		// 	.ingredients_count=1,
-		// 	.ingredients={ {.id=ARCH_rock, .amount=4} }
-		// };
 }
 void setup_red_core(Entity* en) {
 	en->arch = ARCH_red_core;
@@ -1097,6 +1084,8 @@ void setup_exp(Entity* en) {
 	en->icon = SPRITE_exp;
 	en->stack_size = 999;
 }
+
+// :setup world things
 
 void setup_meteorite_depo(Entity* en) {
 	en->pretty_name = STR("Meteorite Deposit");
@@ -1155,6 +1144,18 @@ void setup_rock_large(Entity* en) {
 	en->has_collision = true;
 }
 
+void setup_large_iron_depo(Entity* en) {
+	en->pretty_name = STR("Large Iron Deposit");
+	en->arch = ARCH_large_iron_depo;
+	en->sprite_id = SPRITE_large_iron_depo;
+	en->big_resource_drop = ARCH_raw_iron;
+	entity_max_health_setter(en, 1);
+	en->has_collision = true;
+	en->tile_size = v2i(3, 2);
+}
+
+// :setup :buildings
+
 // :thumper
 void setup_thumper(Entity* en) {
 	en->pretty_name = STR("Thumper");
@@ -1175,38 +1176,37 @@ void setup_thumper(Entity* en) {
 	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=10};
 }
 
-void setup_large_iron_depo(Entity* en) {
-	en->pretty_name = STR("Large Iron Deposit");
-	en->arch = ARCH_large_iron_depo;
-	en->sprite_id = SPRITE_large_iron_depo;
-	en->big_resource_drop = ARCH_raw_iron;
-	entity_max_health_setter(en, 1);
-	en->has_collision = true;
-	en->tile_size = v2i(3, 2);
-}
-
 // :portal
 void setup_portal_controller(Entity* en) {
 	en->arch = ARCH_portal_controller;
 	en->tile_size = v2i(1, 1);
-	en->pretty_name = STR("Portal Controller");
+	en->pretty_name = STR("Quantum Controller");
+	en->description = STR("Place next to a Quantum Gate to control where it teleports to.");
+	en->sprite_id = SPRITE_portal_controller;
 
 	en->storage_slot_count = 1;
 	en->storage_slots[0].desired_item_count = 1;
 	en->storage_slots[0].desired_items[0] = ARCH_tp_focus;
+
+	en->can_be_placed = true;
+	en->research_ingredients_count=1;
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=100};
+	en->ingredients_count=1;
+	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=10};
 }
 void setup_portal(Entity* en) {
 	en->arch = ARCH_portal;
-	en->tile_size = v2i(11, 3);
+	en->tile_size = v2i(9, 3);
 	en->pretty_name = STR("Quantum Gate");
 	en->render_target_image = 0;
 	en->interactable_entity = true;
+	en->sprite_id = SPRITE_portal_frame;
 
 	en->icon=SPRITE_portal_icon;
 	en->description=STR("Quantum transportation. Use at own risk.");
 	en->can_be_placed = true;
 	en->research_ingredients_count=1;
-	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=9999};
+	en->research_ingredients[0]=(ItemInstanceData){.id=ARCH_exp, .amount=500};
 	en->ingredients_count=1;
 	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=100};
 }
@@ -1746,6 +1746,7 @@ void setup_item_with_instance(Entity* en, ItemInstanceData item) {
 	entity_setup(en, item.id);
 	en->is_item = true;
 	en->item = item;
+	en->has_collision = false;
 }
 void setup_item(Entity* en, ArchetypeID id) {
 	entity_setup(en, id);
@@ -1754,6 +1755,7 @@ void setup_item(Entity* en, ArchetypeID id) {
 	if (en->item.amount == 0) {
 		en->item.amount = 1;
 	}
+	en->has_collision = false;
 }
 
 void setup_entity_archetype_data_cache() {
@@ -4329,6 +4331,16 @@ void do_ui_stuff() {
 	pop_z_layer_in_frame(current_draw_frame);
 }
 
+void draw_sprite_at_pos(SpriteID sprite_id, Vector2 pos) {
+	Sprite* sprite = get_sprite(sprite_id);
+
+	Vector2 draw_pos = pos;
+	Vector2 size = get_sprite_size(sprite);
+	draw_pos = v2_add(draw_pos, v2_mulf(size, -0.5));
+
+	Draw_Quad* q = draw_image_in_frame(sprite->image, draw_pos, size, COLOR_WHITE, current_draw_frame);
+}
+
 void draw_base_sprite(Entity* en) {
 	SpriteID sprite_id = en->sprite_id;
 	if (!sprite_id) {
@@ -4337,9 +4349,6 @@ void draw_base_sprite(Entity* en) {
 
 	Sprite* sprite = get_sprite(sprite_id);
 	Matrix4 xform = m4_scalar(1.0);
-	if (en->is_item) {
-		xform         = m4_translate(xform, v3(0, 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0), 0));
-	}
 
 	// all entities basically have a center center position
 	// that way the ->pos is very easily used in other areas intuitively.
@@ -4478,10 +4487,9 @@ void do_portal_thing (Entity* player) {
 	}
 }
 void update_portal(Entity* en) {
-
-	if (is_key_down(MOUSE_BUTTON_RIGHT)) {
-		en->portal_view_pos = get_mouse_pos_in_current_space();
-	}
+	// if (is_key_down(MOUSE_BUTTON_RIGHT)) {
+	// 	en->portal_view_pos = get_mouse_pos_in_current_space();
+	// }
 
 	if (!en->render_target_image) {
 		Vector2 sprite_size = get_sprite_size(get_sprite(SPRITE_portal_frame));
@@ -5072,51 +5080,65 @@ void draw_world_in_frame() {
 			}
 			push_z_layer_in_frame(z_layer, current_draw_frame);
 
-			switch (en->arch) {
-
-				case ARCH_player: break;
-
-				// :render
-				case ARCH_portal: if (world_frame.draw_portals) render_portal(en); break;
-				case ARCH_extractor:
-				case ARCH_conveyor: render_conveyor(en); break;
-				case ARCH_enemy_nest: render_enemy_nest(en); break;
-				case ARCH_meteor: render_meteor(en); break;
-				case ARCH_turret: render_turret(en); break;
-
-				case ARCH_exp: {
+			if (en->is_item) {
+				if (en->arch == ARCH_exp) {
 					draw_rect_in_frame(en->pos, v2(1, 1), col_exp, current_draw_frame);
-				} break;
-
-				// :enemy
-				case ARCH_enemy1: {
-					Vector2 center = en->pos;
-					float rate_mult = en->frame.target_en->is_valid ? 1.f : 0;
-					center.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0 * rate_mult);
-					center.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0 * rate_mult);
-
-					Vector2 size = enemy_size;
-					Vector2 draw_pos = center;
-					draw_pos.x += size.x * -0.5;
-					draw_pos.y += size.y * -0.5;
-
-					Vector4 col = COLOR_RED;
-					if (!en->frame.target_en->is_valid) {
-						col = v4_mul(col, v4(0.5, 0.5, 0.5, 1.f));
+				} else {
+					// try drawing the item's icon
+					SpriteID id = en->icon;
+					if (!id) {
+						id=en->sprite_id;
 					}
 
-					draw_rect_in_frame(draw_pos, size, col, current_draw_frame);
+					Vector2 pos = en->pos;
+					pos.y += 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0);
 
-					if (en->frame.target_en->is_valid) {
-						add_point_light(center, v4(1,0,0,0.5), 20, 1);
-					}
+					draw_sprite_at_pos(id, pos);
+				}
+			} else {
+				switch (en->arch) {
 
-				} break;
+					case ARCH_player: break;
 
-				default: {
-					draw_base_sprite(en);
-				} break;
+					// :render
+					case ARCH_portal: if (world_frame.draw_portals) render_portal(en); break;
+					case ARCH_extractor:
+					case ARCH_conveyor: render_conveyor(en); break;
+					case ARCH_enemy_nest: render_enemy_nest(en); break;
+					case ARCH_meteor: render_meteor(en); break;
+					case ARCH_turret: render_turret(en); break;
+
+					// :enemy
+					case ARCH_enemy1: {
+						Vector2 center = en->pos;
+						float rate_mult = en->frame.target_en->is_valid ? 1.f : 0;
+						center.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0 * rate_mult);
+						center.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0 * rate_mult);
+
+						Vector2 size = enemy_size;
+						Vector2 draw_pos = center;
+						draw_pos.x += size.x * -0.5;
+						draw_pos.y += size.y * -0.5;
+
+						Vector4 col = COLOR_RED;
+						if (!en->frame.target_en->is_valid) {
+							col = v4_mul(col, v4(0.5, 0.5, 0.5, 1.f));
+						}
+
+						draw_rect_in_frame(draw_pos, size, col, current_draw_frame);
+
+						if (en->frame.target_en->is_valid) {
+							add_point_light(center, v4(1,0,0,0.5), 20, 1);
+						}
+
+					} break;
+
+					default: {
+						draw_base_sprite(en);
+					} break;
+				}
 			}
+
 
 			// :oxygenerator render
 			if (en->arch == ARCH_oxygenerator) {
@@ -5381,6 +5403,7 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_meteorite_ingot] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/meteorite_ingot.png"), get_heap_allocator())};
 		sprites[SPRITE_blank_tp_focus] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/blank_tp_focus.png"), get_heap_allocator())};
 		sprites[SPRITE_charged_tp_focus] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/charged_tp_focus.png"), get_heap_allocator())};
+		sprites[SPRITE_portal_controller] = (Sprite) { .image=load_image_from_disk(STR("res/sprites/portal_controller.png"), get_heap_allocator())};
 		// :sprite
 
 		#if CONFIGURATION == DEBUG
@@ -6666,7 +6689,7 @@ int entry(int argc, char **argv) {
 			tm_scope("portal render")
 			{
 				Entity* portal = &world->entities[i];
-				if (!(is_valid(portal) && portal->arch == ARCH_portal)) continue;
+				if (!(is_valid(portal) && portal->arch == ARCH_portal && portal->render_target_image)) continue;
 
 				Gfx_Image* target_image = portal->render_target_image;
 

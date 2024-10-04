@@ -364,16 +364,6 @@ Vector2 get_sprite_size(Sprite* sprite) {
 	return (Vector2) { sprite->image->width, sprite->image->height };
 }
 
-// could we merge itemid into archid? and just use a flag to represent it?
-// I remember trying this a while back. I got frustated with it being too overloaded I think.
-//
-// I guess probably not, because there's a distinction from an item on the ground, and the placed big chungus entity?
-// ^ can easily be solved with a bool...
-//
-// #item
-// I'm gonna try this out and see what happens lol.
-//
-
 typedef enum ArchetypeID {
 	ARCH_nil = 0,
 	ARCH_tree,
@@ -594,8 +584,7 @@ typedef struct Entity {
 	//
 
 
-	// #item
-	// copied from the old ItemData struct
+	// copied from the old Entity struct
 	string description;
 	SpriteID icon;
 	int extra_axe_dmg; // #extend_dmg_type_here
@@ -622,8 +611,6 @@ typedef struct Entity {
 } Entity;
 #define MAX_ENTITY_COUNT 1024
 
-typedef Entity ItemData;
-// #item
 Entity entity_archetype_data[ARCH_MAX] = {0};
 Entity get_archetype_data(ArchetypeID id) {
 	return entity_archetype_data[id];
@@ -1040,7 +1027,7 @@ void setup_bullet(Entity* en) {
 
 	en->disabled = true; 
 	en->can_be_placed = true;
-		// 	item_data[ARCH_wood_crate] = (ItemData){
+		// 	item_data[ARCH_wood_crate] = (Entity){
 		// 	.to_build=ARCH_wood_crate,
 		// 	.icon=SPRITE_wood_crate,
 		// 	.description=STR("Stores items"),
@@ -1077,7 +1064,6 @@ void setup_tp_focus(Entity* en) {
 	en->sprite_id = SPRITE_charged_tp_focus;
 }
 
-// #item, merged the exp_orb
 void setup_exp(Entity* en) {
 	en->arch = ARCH_exp;
 
@@ -1085,7 +1071,6 @@ void setup_exp(Entity* en) {
 	en->exp_amount = 1;
 	en->ignore_collision = true;
 
-	// #item 
 	en->pretty_name = STR("Experience");
 	en->icon = SPRITE_exp;
 	en->stack_size = 999;
@@ -1159,9 +1144,6 @@ void setup_thumper(Entity* en) {
 	en->tile_size = v2i(2, 2);
 	en->radius = tile_width * 10;
 
-	// item stuff
-	// #item - this seems kinda fine
-	// We're overloaded with the item and the placed building, but that should be alright I think?
 	en->can_be_placed = true;
 	en->icon = SPRITE_thumper;
 	en->description = STR("Burns fuel to slam into the ground and destroy resources in a radius.");
@@ -1328,7 +1310,7 @@ void setup_turret(Entity* en) {
 
 	en->disabled=true;
 	en->can_be_placed = true;
-		// item_data[ARCH_turret] = (ItemData){
+		// item_data[ARCH_turret] = (Entity){
 		// 	.disabled=true,
 		// 	.to_build=ARCH_turret,
 		// 	.icon=SPRITE_turret,
@@ -1452,7 +1434,7 @@ void setup_burner_drill(Entity* en) {
 
 	en->disabled=true;
 	en->can_be_placed = true;
-		// 	item_data[ARCH_burner_drill] = (ItemData){
+		// 	item_data[ARCH_burner_drill] = (Entity){
 		// 	.disabled=true,
 		// 	.to_build=ARCH_burner_drill,
 		// 	.icon=SPRITE_burner_drill,
@@ -1594,7 +1576,7 @@ void setup_furnace(Entity* en) {
 		StorageSlot* slot = &en->storage_slots[1];
 		slot->desired_item_count = 0;
 		for (ArchetypeID i = 0; i < ARCH_MAX; i++) {
-			ItemData item_data = get_item_data(i);
+			Entity item_data = get_item_data(i);
 			if (item_data.furnace_transform_into) {
 				assert(slot->desired_item_count < ARRAY_COUNT(slot->desired_items));
 				slot->desired_items[slot->desired_item_count] = i;
@@ -1618,7 +1600,7 @@ void setup_workbench(Entity* en) {
 	en->disabled=true;
 	en->can_be_placed = true;
 
-		// 	item_data[ARCH_workbench] = (ItemData){
+		// 	item_data[ARCH_workbench] = (Entity){
 		// 	.disabled=true,
 		// 	.to_build=ARCH_workbench,
 		// 	.icon=SPRITE_fabricator,
@@ -2033,7 +2015,7 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 // :func dump
 
 bool move_item_instance_to_inv(ItemInstanceData* item) {
-	ItemData item_data = get_item_data(item->id);
+	Entity item_data = get_item_data(item->id);
 
 	// First pass: Try to stack into existing items
 	for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
@@ -2059,7 +2041,7 @@ bool move_item_instance_to_inv(ItemInstanceData* item) {
 		ItemInstanceData* inv_item = &world->inventory_items[i];
 		if (inv_item->id == 0) {
 			int amount_to_add = (item->amount < item_data.stack_size) ? item->amount : item_data.stack_size;
-			inv_item->id = item->id;
+			*inv_item = *item;
 			inv_item->amount = amount_to_add;
 			item->amount -= amount_to_add;
 
@@ -2078,7 +2060,7 @@ bool move_item_instance_to_inv(ItemInstanceData* item) {
 
 // copied and modified from the one below.
 bool can_add_item_to_inv(ItemInstanceData item) {
-	ItemData item_data = get_item_data(item.id);
+	Entity item_data = get_item_data(item.id);
 
 	int amount_left = item.amount;
 
@@ -2117,7 +2099,7 @@ bool can_add_item_to_inv(ItemInstanceData item) {
 }
 
 bool attempt_add_item_to_inv(ItemInstanceData item) {
-	ItemData item_data = get_item_data(item.id);
+	Entity item_data = get_item_data(item.id);
 
 	int amount_left = item.amount;
 
@@ -2305,7 +2287,7 @@ void do_resource_respawning() {
 bool has_enough_for_recipe(ItemInstanceData* recipe, int count) {
 	for (int i = 0; i < count; i++) {
 		ItemInstanceData ing = recipe[i];
-		ItemData ing_data = get_item_data(ing.id);
+		Entity ing_data = get_item_data(ing.id);
 
 		int total_count = 0;
 
@@ -2327,7 +2309,7 @@ bool has_enough_for_recipe(ItemInstanceData* recipe, int count) {
 void consume_recipe(ItemInstanceData* recipe, int count) {
 	for (int i = 0; i < count; i++) {
 		ItemInstanceData ing = recipe[i];
-		ItemData ing_data = get_item_data(ing.id);
+		Entity ing_data = get_item_data(ing.id);
 
 		int remaining_amount = ing.amount;
 
@@ -2541,7 +2523,6 @@ void drop_item_at_pos(ItemInstanceData item, Vector2 pos) {
 	drop->pos = pos;
 	drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
 	drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
-	// #item - make this copy the entire item...
 }
 
 void do_entity_drops(Entity* en) {
@@ -2562,7 +2543,7 @@ void do_entity_drops(Entity* en) {
 	if (en->right_click_remove) {
 
 		// drop building stuff
-		ItemData item_data = get_item_data(en->arch);
+		Entity item_data = get_item_data(en->arch);
 		growing_array_add((void**)&drops, &en->arch);
 		// not dropping the raw materials anymore, so it's more clear that the item got destroyed.
 		// for (int i = 0; i < item_data.ingredients_count; i++) {
@@ -2609,7 +2590,7 @@ void item_tooltip(ItemInstanceData item) {
 	push_z_layer_in_frame(layer_tooltip, current_draw_frame);
 
 	Vector2 text_scale = v2(0.1, 0.1);
-	ItemData item_data = get_item_data(item.id);
+	Entity item_data = get_item_data(item.id);
 
 	Vector2 size = v2(40, 20);
 	Vector2 pos = get_mouse_pos_in_current_space();
@@ -3404,7 +3385,7 @@ void do_world_entity_interaction_ui_stuff() {
 			ArchetypeID* desired_items;
 			growing_array_init_reserve((void**)&desired_items, sizeof(ArchetypeID), 1, get_temporary_allocator());
 			for (ArchetypeID i = 0; i < ARCH_MAX; i++) {
-				ItemData item_data = get_item_data(i);
+				Entity item_data = get_item_data(i);
 				if (item_data.used_in_turret) {
 					growing_array_add((void**)&desired_items, &i);
 				}
@@ -3747,7 +3728,7 @@ void do_ui_stuff() {
 			int slot_index = 0;
 			ItemInstanceData* hovered_item_slot = 0;
 			for (int i = 0; i < ARRAY_COUNT(world->inventory_items); i++) {
-				ItemData item_data = get_item_data(i);
+				Entity item_data = get_item_data(i);
 				ItemInstanceData* item = &world->inventory_items[i];
 				if (item->amount > 0) {
 
@@ -3830,7 +3811,7 @@ void do_ui_stuff() {
 		ArchetypeID selected = 0;
 		int count = 0;
 		for (ArchetypeID i = 1; i < ARCH_MAX; i++) {
-			ItemData item_data  = get_item_data(i);
+			Entity item_data  = get_item_data(i);
 			bool unlocked = is_fully_unlocked(world->item_unlocks[i]);
 			if (item_data.ingredients_count == 0 || item_data.disabled) {
 				continue;
@@ -3873,7 +3854,7 @@ void do_ui_stuff() {
 		if (selected)
 		defer_scope(push_z_layer_in_frame(layer_tooltip, current_draw_frame), pop_z_layer_in_frame(current_draw_frame)) {
 			UnlockState unlock_state = world->item_unlocks[selected];
-			ItemData item_data = get_item_data(selected);
+			Entity item_data = get_item_data(selected);
 
 			if (is_fully_unlocked(unlock_state)) {
 
@@ -3940,7 +3921,7 @@ void do_ui_stuff() {
 					// #duplicate
 					for (int i = 0; i < item_data.ingredients_count; i++) {
 						ItemInstanceData ing = item_data.ingredients[i];
-						ItemData ing_data = get_item_data(ing.id);
+						Entity ing_data = get_item_data(ing.id);
 
 						float height = font_height_body * text_scale.x;
 
@@ -4023,7 +4004,7 @@ void do_ui_stuff() {
 		int count = 0;
 		for (int i = 1; i < ARCH_MAX; i++) {
 			UnlockState unlock_state = world->item_unlocks[i];
-			ItemData item_data = get_item_data(i);
+			Entity item_data = get_item_data(i);
 			if (item_data.ingredients_count == 0 || item_data.disabled || is_fully_unlocked(unlock_state)) {
 				continue;
 			}
@@ -4060,7 +4041,7 @@ void do_ui_stuff() {
 
 		if (selected) {
 			UnlockState* unlock_state = &world->item_unlocks[selected];
-			ItemData item_data = get_item_data(selected);
+			Entity item_data = get_item_data(selected);
 
 			if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
@@ -4124,7 +4105,7 @@ void do_ui_stuff() {
 			float x_left_ingredient_list = x_left;
 			for (int i = 0; i < item_data.research_ingredients_count; i++) {
 				ItemInstanceData ing = item_data.research_ingredients[i];
-				ItemData ing_data = get_item_data(ing.id);
+				Entity ing_data = get_item_data(ing.id);
 
 				float height = font_height_body * text_scale.x;
 
@@ -4167,7 +4148,7 @@ void do_ui_stuff() {
 	defer_scope(push_z_layer_in_frame(layer_cursor_item, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 	{
 		ArchetypeID item_id = world->mouse_cursor_item.id;
-		ItemData item_data = get_item_data(world->mouse_cursor_item.id);
+		Entity item_data = get_item_data(world->mouse_cursor_item.id);
 		if (!item_data.can_be_placed || world_frame.hover_consumed) {
 			// it's just an item
 			Sprite* sprite = get_sprite(get_sprite_id_from_item_instance(world->mouse_cursor_item));
@@ -5978,7 +5959,7 @@ int entry(int argc, char **argv) {
 						en->next_crafting_progress_tick_end_time = now() + 0.1;
 						if (en->progress_on_crafting >= 100) {
 
-							ItemData item_data = get_item_data(en->current_crafting_item);
+							Entity item_data = get_item_data(en->current_crafting_item);
 
 							// :CRAFT!
 							Entity* drop = entity_create();
@@ -6133,7 +6114,6 @@ int entry(int argc, char **argv) {
 								play_sound("event:/item_pickup");
 							}
 
-							// #item
 							bool succ = move_item_instance_to_inv(&en->item);
 							if (succ) {
 								entity_zero_immediately(en);

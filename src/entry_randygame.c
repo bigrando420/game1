@@ -2026,6 +2026,7 @@ void consume_recipe(ItemInstanceData* recipe, int count) {
 			ItemInstanceData* item = &world->inventory_items[j];
 			if (item->id == ing.id && item->amount) {
 				item->amount -= remaining_amount;
+				remaining_amount = 0;
 
 				if (item->amount < 0) {
 					remaining_amount = -item->amount;
@@ -2450,6 +2451,11 @@ void world_setup() {
 		world->item_unlocks[ITEM_tether].research_progress = 100;
 
 		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_iron_ingot, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_o2_shard, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_rock, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_exp, .amount=9999});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_copper_ingot, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ITEM_fiber, .amount=100});
 
 		/*
 		world->inventory_items[ITEM_raw_copper].amount = 50;
@@ -3517,17 +3523,19 @@ void do_ui_stuff() {
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
-					if (has_enough_for_recipe(world->inventory_items, ARRAY_COUNT(world->inventory_items))) {
+					if (has_enough_for_recipe(item_data.ingredients, item_data.ingredients_count)) {
 						// insta craft straight into cursor
 						// #future, we'll wanna make this craft queue so we can lean into automated crafting
-						if (!world->mouse_cursor_item.id || world->mouse_cursor_item.id == selected) {
+
+						if (!world->mouse_cursor_item.id
+						|| (world->mouse_cursor_item.id == selected && world->mouse_cursor_item.amount + 1 <= item_data.stack_size)) {
 							world->mouse_cursor_item.id = selected;
 							world->mouse_cursor_item.amount += 1;
-
-							consume_recipe(world->inventory_items, ARRAY_COUNT(world->inventory_items));
+							consume_recipe(item_data.ingredients, item_data.ingredients_count);
+							play_sound("event:/craft");
+						} else {
+							play_sound("event:/error");
 						}
-
-						play_sound("event:/craft");
 					} else {
 						play_sound("event:/error");
 					}
@@ -5310,7 +5318,7 @@ int entry(int argc, char **argv) {
 				data->craft_length = 2.0;
 			}
 			if (data->stack_size == 0) {
-				data->stack_size = 4;
+				data->stack_size = 64;
 			}
 		}
 	}

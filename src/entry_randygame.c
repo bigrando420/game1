@@ -63,6 +63,22 @@ typedef enum Pivot {
 	PIVOT_top_right,
 } Pivot;
 
+Vector2 get_pivot_scale(Pivot pivot) {
+	Vector2 pivot_mul;
+	switch (pivot) {
+		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
+		case PIVOT_bottom_center: pivot_mul = v2(0.5, 0.0); break;
+		case PIVOT_bottom_right: pivot_mul = v2(1.0, 0.0); break;
+		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
+		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
+		case PIVOT_center_right: pivot_mul = v2(1.0, 0.5); break;
+		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
+		case PIVOT_top_left: pivot_mul = v2(0.0, 1.0); break;
+		case PIVOT_top_right: pivot_mul = v2(1.0, 1.0); break;
+	}
+	return pivot_mul;
+}
+
 // ^^^ engine changes
 
 // the scuff zone
@@ -474,6 +490,7 @@ typedef struct EntityFrame {
 	GameError error;
 	Vector2 last_pos;
 	bool is_being_picked_up;
+	Entity* focus_item;
 	// :frame
 } EntityFrame;
 
@@ -1176,13 +1193,15 @@ void setup_thumper(Entity* en) {
 	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=10};
 }
 
-// :portal
+// :qcontroller
 void setup_portal_controller(Entity* en) {
 	en->arch = ARCH_portal_controller;
 	en->tile_size = v2i(1, 1);
 	en->pretty_name = STR("Quantum Controller");
 	en->description = STR("Place next to a Quantum Gate to control where it teleports to.");
 	en->sprite_id = SPRITE_portal_controller;
+	en->has_collision=true;
+	en->interactable_entity=true;
 
 	en->storage_slot_count = 1;
 	en->storage_slots[0].desired_item_count = 1;
@@ -1194,6 +1213,7 @@ void setup_portal_controller(Entity* en) {
 	en->ingredients_count=1;
 	en->ingredients[0]=(ItemInstanceData){.id=ARCH_iron_ingot, .amount=10};
 }
+// :portal
 void setup_portal(Entity* en) {
 	en->arch = ARCH_portal;
 	en->tile_size = v2i(9, 3);
@@ -1201,6 +1221,7 @@ void setup_portal(Entity* en) {
 	en->render_target_image = 0;
 	en->interactable_entity = true;
 	en->sprite_id = SPRITE_portal_frame;
+	en->offset_based_on_tile_height=true;
 
 	en->icon=SPRITE_portal_icon;
 	en->description=STR("Quantum transportation. Use at own risk.");
@@ -2016,21 +2037,7 @@ Entity* entity_at_tile(Tile tile) {
 Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_height, Vector2 position, Vector2 scale, Vector4 color, Pivot pivot) {
 	Gfx_Text_Metrics metrics = measure_text(font, text, raster_height, scale);
 	position = v2_sub(position, metrics.visual_pos_min);
-	Vector2 pivot_mul = {0};
-	switch (pivot) {
-		case PIVOT_bottom_left: pivot_mul = v2(0.0, 0.0); break;
-		case PIVOT_bottom_center: pivot_mul = v2(0.5, 0.0); break;
-		case PIVOT_bottom_right: pivot_mul = v2(1.0, 0.0); break;
-		case PIVOT_center_left: pivot_mul = v2(0.0, 0.5); break;
-		case PIVOT_center_center: pivot_mul = v2(0.5, 0.5); break;
-		case PIVOT_center_right: pivot_mul = v2(1.0, 0.5); break;
-		case PIVOT_top_center: pivot_mul = v2(0.5, 1.0); break;
-		case PIVOT_top_left: pivot_mul = v2(0.0, 1.0); break;
-		case PIVOT_top_right: pivot_mul = v2(1.0, 1.0); break;
-		default:
-		log_error("pivot not supported yet. fill in case at draw_text_with_pivot");
-		break;
-	}
+	Vector2 pivot_mul = get_pivot_scale(pivot);
 	position = v2_sub(position, v2_mul(metrics.visual_size, pivot_mul));
 	draw_text_in_frame(font, text, raster_height, position, scale, color, current_draw_frame);
 	return metrics;
@@ -2362,13 +2369,6 @@ void consume_recipe(ItemInstanceData* recipe, int count) {
 	}
 }
 
-Draw_Quad* draw_sprite(SpriteID sprite_id, Vector2 pos) {
-	Sprite* sprite = get_sprite(sprite_id);
-	Vector2 draw_pos = pos;
-	draw_pos.x -= sprite->image->width * 0.5;
-	return draw_image_in_frame(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE, current_draw_frame);
-}
-
 inline float get_error_flash_frequency() {
 	return sin_breathe(os_get_elapsed_seconds(), 6.f);
 }
@@ -2502,13 +2502,15 @@ Vector2 get_offset_for_rendering(ArchetypeID id) {
 
 	Sprite* sprite = get_sprite(en.sprite_id);
 
+	Vector2 sprite_size = get_sprite_size(sprite );
+
 	Vector2 offset = {0};
-	offset.x -= get_sprite_size(sprite).x * 0.5;
+	offset.x -= sprite_size.x * 0.5;
 
 	if (en.offset_based_on_tile_height) {
 		offset.y -= en.tile_size.y * tile_width * 0.5;
 	} else {
-		offset.y -= get_sprite_size(sprite).y * 0.5;
+		offset.y -= sprite_size.y * 0.5;
 	}
 
 	if (en.arch == ARCH_burner_drill) {
@@ -2789,7 +2791,7 @@ void world_setup() {
 		world->item_unlocks[ARCH_tether].research_progress = 100;
 
 		world->inventory_items[0] = (ItemInstanceData){.id=ARCH_exp, .amount=9999};
-		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_iron_ingot, .amount=100});
+		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_iron_ingot, .amount=300});
 		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_o2_shard, .amount=100});
 		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_rock, .amount=100});
 		attempt_add_item_to_inv((ItemInstanceData){.id=ARCH_copper_ingot, .amount=100});
@@ -3588,7 +3590,7 @@ void do_world_entity_interaction_ui_stuff() {
 		}
 	}
 
-	// :portal contoller ux
+	// :qcontroller ux
 	if (en->arch == ARCH_portal_controller) {
 		// slot_size.x;
 
@@ -3609,6 +3611,9 @@ void do_world_entity_interaction_ui_stuff() {
 
 			if (slot->item.id) {
 				draw_item_amount_in_rect(slot->item, rect);
+			} else {
+				Draw_Quad* quad = draw_sprite_in_rect(SPRITE_blank_tp_focus, rect, COLOR_WHITE, 0.1);
+				set_col_override(quad, v4(0,0,0, 0.8));
 			}
 		}
 	}
@@ -4167,7 +4172,12 @@ void do_ui_stuff() {
 		}
 	}
 
-	// :cursor item drawing
+	set_world_space();
+	pop_z_layer_in_frame(current_draw_frame);
+}
+
+// :cursor item drawing
+void do_cursor_drawing_and_logic() {
 	if (world->mouse_cursor_item.id)
 	defer_scope(push_z_layer_in_frame(layer_cursor_item, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 	{
@@ -4180,6 +4190,7 @@ void do_ui_stuff() {
 			draw_item_amount_in_rect(world->mouse_cursor_item, rect);
 
 			if (item_id == ARCH_tp_focus) {
+				world_frame.hover_consumed=true;
 				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
 					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 					play_sound("event:/exp_pickup");
@@ -4320,25 +4331,16 @@ void do_ui_stuff() {
 			}
 		}
 	}
-
-	// esc exit
-	if (world->ux_state != UX_nil && world->ux_state != UX_respawn && is_key_just_pressed(KEY_ESCAPE)) {
-		consume_key_just_pressed(KEY_ESCAPE);
-		world->ux_state = 0;
-	}
-
-	set_world_space();
-	pop_z_layer_in_frame(current_draw_frame);
 }
 
-void draw_sprite_at_pos(SpriteID sprite_id, Vector2 pos) {
+Draw_Quad* draw_sprite_at_pos_pivot(SpriteID sprite_id, Vector2 pos, Pivot pivot) {
 	Sprite* sprite = get_sprite(sprite_id);
-
 	Vector2 draw_pos = pos;
-	Vector2 size = get_sprite_size(sprite);
-	draw_pos = v2_add(draw_pos, v2_mulf(size, -0.5));
-
-	Draw_Quad* q = draw_image_in_frame(sprite->image, draw_pos, size, COLOR_WHITE, current_draw_frame);
+	draw_pos = v2_sub(draw_pos, v2_mul(get_sprite_size(sprite), get_pivot_scale(pivot)));
+	return draw_image_in_frame(sprite->image, draw_pos, v2(sprite->image->width, sprite->image->height), COLOR_WHITE, current_draw_frame);
+}
+Draw_Quad* draw_sprite(SpriteID sprite_id, Vector2 pos) {
+	return draw_sprite_at_pos_pivot(sprite_id, pos, PIVOT_bottom_center);
 }
 
 void draw_base_sprite(Entity* en) {
@@ -4456,14 +4458,17 @@ void update_thumper(Entity* en) {
 }
 
 // :portal
-void do_portal_thing (Entity* player) {
+void do_portal_teleport_thing (Entity* player) {
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* portal = &world->entities[i];
 		if (!(portal->is_valid && portal->arch == ARCH_portal)) continue;
 
-		float portal_width = 77;
+		float portal_width = tile_width * 7;
 
-		float y_thres = portal->pos.y;
+		Vector2 portal_thres_pos = portal->pos;
+		portal_thres_pos.y += get_offset_for_rendering(portal->arch).y;
+
+		float y_thres = portal_thres_pos.y;
 		float x_min = portal->pos.x - portal_width * 0.5;
 		float x_max = portal->pos.x + portal_width * 0.5;
 
@@ -4486,6 +4491,7 @@ void do_portal_thing (Entity* player) {
 		}
 	}
 }
+// :portal
 void update_portal(Entity* en) {
 	// if (is_key_down(MOUSE_BUTTON_RIGHT)) {
 	// 	en->portal_view_pos = get_mouse_pos_in_current_space();
@@ -4498,6 +4504,7 @@ void update_portal(Entity* en) {
 	}
 
 }
+// :portal
 void render_portal(Entity* en) {
 
 	// Vector2 size = get_sprite_size(get_sprite(SPRITE_portal_frame));
@@ -4505,7 +4512,10 @@ void render_portal(Entity* en) {
 	// draw_pos.x -= size.x * 0.5;
 	// draw_image_in_frame(en->render_target_image, draw_pos, size, v4(1,1,1,1), current_draw_frame);
 
-	Draw_Quad* q = draw_sprite(SPRITE_portal_frame, en->pos);
+	Vector2 draw_pos = en->pos;
+	draw_pos = v2_add(draw_pos, get_offset_for_rendering(en->arch));
+
+	Draw_Quad* q = draw_sprite_at_pos_pivot(SPRITE_portal_frame, draw_pos, PIVOT_bottom_left);
 	set_quad_type(q, QUAD_TYPE_portal);
 
 	// afterimage effect
@@ -4527,6 +4537,33 @@ void render_portal(Entity* en) {
 
 			q->color.a = ease_in_exp(1.0-alpha, 15);
 		}
+	}
+}
+
+// :qcontroller
+void update_portal_controller(Entity* en) {
+	StorageSlot* slot = &en->storage_slots[0];
+	if (slot->item.id && slot->item.has_focus_target) {
+
+		// check for portals around us to update
+		for (int i = 0; i < 4; i++) {
+			Tile t = v2_world_pos_to_tile_pos(en->pos);
+			if (i == 0) {
+				t.x += 1;
+			} else if (i == 1) {
+				t.x -= 1;
+			} else if (i == 2) {
+				t.y += 1;
+			} else if (i == 3) {
+				t.y -= 1;
+			}
+
+			TileCache* tc = tile_cache_at_tile(t);
+			if (tc->entity && tc->entity->arch == ARCH_portal) {
+				tc->entity->frame.focus_item = slot->item;
+			}
+		}
+
 	}
 }
 
@@ -5093,7 +5130,7 @@ void draw_world_in_frame() {
 					Vector2 pos = en->pos;
 					pos.y += 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0);
 
-					draw_sprite_at_pos(id, pos);
+					draw_sprite_at_pos_pivot(id, pos, PIVOT_center_center);
 				}
 			} else {
 				switch (en->arch) {
@@ -5592,6 +5629,13 @@ int entry(int argc, char **argv) {
 
 			do_ui_stuff();
 			do_world_entity_interaction_ui_stuff();
+			do_cursor_drawing_and_logic();
+
+			// esc exit
+			if (world->ux_state != UX_nil && world->ux_state != UX_respawn && is_key_just_pressed(KEY_ESCAPE)) {
+				consume_key_just_pressed(KEY_ESCAPE);
+				world->ux_state = 0;
+			}
 
 			current_draw_frame = 0;
 		}
@@ -5943,6 +5987,14 @@ int entry(int argc, char **argv) {
 			}
 		}
 
+		// update portal controllers before the portals.
+		// They stuff their items into the surrounding portals.
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			if (!(en->is_valid && en->arch == ARCH_portal_controller)) continue;
+			update_portal_controller(en);
+		}
+
 		// update entities
 		Entity* player = get_player();
 		tm_scope("entity update")
@@ -6261,7 +6313,7 @@ int entry(int argc, char **argv) {
 			en->pos = next_pos;
 		}
 
-		do_portal_thing(get_player());
+		do_portal_teleport_thing(get_player());
 
 		// debug draw collision bounds
 		// #fix
@@ -6691,6 +6743,8 @@ int entry(int argc, char **argv) {
 				Entity* portal = &world->entities[i];
 				if (!(is_valid(portal) && portal->arch == ARCH_portal && portal->render_target_image)) continue;
 
+				// #TODO use frame's item to turn portal on / off
+
 				Gfx_Image* target_image = portal->render_target_image;
 
 				current_draw_frame = &offscreen_draw_frame;
@@ -6705,10 +6759,12 @@ int entry(int argc, char **argv) {
 
 					Vector2 dest_pos = portal->portal_view_pos;
 
-					// these are in the world space
-					Vector2 bottom_left = v2_add(dest_pos, v2(frame_size.x * -0.5, 0));
-					Vector2 top_right = v2_add(dest_pos, v2(frame_size.x * 0.5, frame_size.y));
-					Range2f rect = (Range2f){.min=bottom_left, .max=top_right};
+					Vector2 portal_offset = get_offset_for_rendering(portal->arch);
+
+					// worldspace view rect
+					Range2f rect;
+					rect.min = v2_add(dest_pos, portal_offset);
+					rect.max = v2_add(rect.min, frame_size);
 
 					// Compute the center and size of the rectangle
 					Vector2 rect_center = v2_mulf(v2_add(rect.min, rect.max), 0.5f);

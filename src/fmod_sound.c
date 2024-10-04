@@ -5,7 +5,10 @@ FMOD_STUDIO_BANK* fmod_studio_strings_bank = 0;
 FMOD_STUDIO_EVENTINSTANCE* play_sound_at_pos_with_cooldown(char* path, Vector2 pos, bool cooldown) {
   FMOD_STUDIO_EVENTDESCRIPTION* event_desc;
   FMOD_RESULT ok = FMOD_Studio_System_GetEvent(fmod_studio_system, path, &event_desc);
-  assert(ok == FMOD_OK, "error playing - %s - %s", path, FMOD_ErrorString(ok));
+  if (ok != FMOD_OK) {
+    log_error("error playing - %s - %s", path, FMOD_ErrorString(ok));
+    return 0;
+  }
 
 	FMOD_STUDIO_EVENTINSTANCE* instance;
 	ok = FMOD_Studio_EventDescription_CreateInstance(event_desc, &instance);

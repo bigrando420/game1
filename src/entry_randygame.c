@@ -173,7 +173,6 @@ float tether_connection_radius = 80.0;
 float o2_full_tank_deplete_length = 16.0f; // #volatile length of oxygen riser sfx
 float oxygen_regen_tick_length = 0.01;
 float oxygen_deplete_tick_length = 1.f;
-float teleporter_radius = 8.0f;
 const int tile_width = 8;
 const float cursor_selection_slop_radius = 16.0f;
 const float player_pickup_radius = 32.0f;
@@ -289,7 +288,6 @@ typedef enum SpriteID {
 	SPRITE_research_station,
 	SPRITE_exp,
 	SPRITE_exp_vein,
-	SPRITE_teleporter1,
 	SPRITE_copper_depo,
 	SPRITE_raw_copper,
 	SPRITE_copper_ingot,
@@ -391,7 +389,6 @@ typedef enum ItemID {
 	ITEM_furnace,
 	ITEM_workbench,
 	ITEM_research_station,
-	ITEM_teleporter1,
 	ITEM_tether,
 	ITEM_burner_drill,
 	ITEM_longboi_test,
@@ -433,7 +430,7 @@ typedef enum ArchetypeID {
 	ARCH_workbench = 7,
 	ARCH_research_station = 8,
 	ARCH_exp_vein = 9,
-	ARCH_teleporter1 = 10,
+	// ARCH_ = 10,
 	ARCH_copper_depo = 11,
 	ARCH_flint_depo = 12,
 	ARCH_grass = 13,
@@ -466,6 +463,7 @@ typedef enum ArchetypeID {
 	ARCH_rock_medium = 40,
 	ARCH_rock_large = 41,
 	ARCH_meteorite_depo = 42,
+	ARCH_portal_controller = 43,
 	// :arch
 	ARCH_MAX,
 } ArchetypeID;
@@ -498,6 +496,12 @@ ItemData get_item_data(ItemID id) {
 }
 SpriteID get_sprite_id_from_item(ItemID id) {
 	return get_item_data(id).icon;
+}
+SpriteID get_sprite_id_from_item_instance(ItemInstanceData item) {
+	if (item.id == ITEM_tp_focus) {
+		return (item.has_focus_target ? SPRITE_charged_tp_focus : SPRITE_blank_tp_focus);
+	}
+	return get_item_data(item.id).icon;
 }
 
 typedef enum DamageType {
@@ -1075,11 +1079,21 @@ void setup_large_iron_depo(Entity* en) {
 }
 
 // :portal
+void setup_portal_controller(Entity* en) {
+	en->arch = ARCH_portal_controller;
+	en->tile_size = v2i(1, 1);
+	en->pretty_name = STR("Portal Controller");
+
+	en->storage_slot_count = 1;
+	en->storage_slots[0].desired_item_count = 1;
+	en->storage_slots[0].desired_items[0] = ITEM_tp_focus;
+}
 void setup_portal(Entity* en) {
 	en->arch = ARCH_portal;
 	en->tile_size = v2i(11, 3);
 	en->pretty_name = STR("Quantum Gate");
 	en->render_target_image = 0;
+	en->interactable_entity = true;
 }
 
 void setup_anti_meteor(Entity* en) {
@@ -1351,12 +1365,6 @@ void setup_copper_depo(Entity* en) {
 	en->has_collision = true;
 }
 
-void setup_teleporter1(Entity* en) {
-	en->arch = ARCH_teleporter1;
-	en->pretty_name = STR("Teleporter");
-	en->sprite_id = SPRITE_teleporter1;
-}
-
 void setup_exp_vein(Entity* en) {
 	en->arch = ARCH_exp_vein;
 	en->sprite_id = SPRITE_exp_vein;
@@ -1490,7 +1498,6 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_rock: setup_rock(en); break;
 		case ARCH_tree: setup_tree(en); break;
 		case ARCH_exp_vein: setup_exp_vein(en); break;
-		case ARCH_teleporter1: setup_teleporter1(en); break;
 		case ARCH_copper_depo: setup_copper_depo(en); break;
 		case ARCH_flint_depo: setup_flint_depo(en); break;
 		case ARCH_grass: setup_grass(en); break;
@@ -1522,6 +1529,7 @@ void entity_setup(Entity* en, ArchetypeID id) {
 		case ARCH_rock_medium: setup_rock_medium(en); break;
 		case ARCH_rock_large: setup_rock_large(en); break;
 		case ARCH_meteorite_depo: setup_meteorite_depo(en); break;
+		case ARCH_portal_controller: setup_portal_controller(en); break;
 		// :arch :setup
 	}
 }
@@ -2282,7 +2290,7 @@ void do_entity_drops(Entity* en) {
 }
 
 void draw_item_amount_in_rect(ItemInstanceData item_amount, Range2f rect) {
-	draw_sprite_in_rect(get_sprite_id_from_item(item_amount.id), rect, COLOR_WHITE, 0.1);
+	draw_sprite_in_rect(get_sprite_id_from_item_instance(item_amount), rect, COLOR_WHITE, 0.1);
 
 	float x0 = rect.max.x;
 	float y0 = rect.min.y;
@@ -2294,11 +2302,11 @@ void draw_item_amount_in_rect(ItemInstanceData item_amount, Range2f rect) {
 	draw_text_with_pivot(font, txt, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_bottom_right);
 }
 
-void item_tooltip(ItemInstanceData item_amount) {
+void item_tooltip(ItemInstanceData item) {
 	push_z_layer_in_frame(layer_tooltip, current_draw_frame);
 
 	Vector2 text_scale = v2(0.1, 0.1);
-	ItemData item_data = get_item_data(item_amount.id);
+	ItemData item_data = get_item_data(item.id);
 
 	Vector2 size = v2(40, 20);
 	Vector2 pos = get_mouse_pos_in_current_space();
@@ -2312,6 +2320,28 @@ void item_tooltip(ItemInstanceData item_amount) {
 	y0 -= 2.f; // arbitrary padding
 
 	Gfx_Text_Metrics met = draw_text_with_pivot(font, item_data.pretty_name, font_height, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+	y0 -= met.visual_size.y;
+	y0 -= 2.f;
+
+	if (item_data.description.count) {
+		string txt = item_data.description;
+		Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+		y0 -= met.visual_size.y;
+		y0 -= 2.f;
+	}
+
+	if (item.id == ITEM_tp_focus) {
+		string txt;
+		if (item.has_focus_target) {
+			txt = tprint("Target Position: x%i, y%i", (int)item.focus_target_pos.x, (int)item.focus_target_pos.y);
+		} else {
+			txt = STR("Left click to set position.");
+		}
+		Gfx_Text_Metrics met = draw_text_with_pivot(font, txt, font_height_body, v2(x0, y0), text_scale, COLOR_WHITE, PIVOT_top_center);
+		y0 -= met.visual_size.y;
+		y0 -= 2.f;
+	}
+
 
 	pop_z_layer_in_frame(current_draw_frame);
 }
@@ -3249,6 +3279,31 @@ void do_world_entity_interaction_ui_stuff() {
 		}
 	}
 
+	// :portal contoller ux
+	if (en->arch == ARCH_portal_controller) {
+		// slot_size.x;
+
+		float x0 = en->pos.x;
+		float y0 = en->pos.y;
+
+		x0 -= slot_size * 0.5;
+		y0 = get_entity_range(en).max.y + 1.f;
+
+		{
+			Range2f rect = range2f_make_bottom_left(v2(x0, y0), v2(slot_size, slot_size));
+
+			StorageSlot* slot = &en->storage_slots[0];
+
+			input_slot_new(rect, slot);
+
+			draw_rect_in_frame(rect.min, range2f_size(rect), COLOR_GRAY, current_draw_frame);
+
+			if (slot->item.id) {
+				draw_item_amount_in_rect(slot->item, rect);
+			}
+		}
+	}
+
 	pop_z_layer_in_frame(current_draw_frame);
 }
 
@@ -3404,7 +3459,7 @@ void do_ui_stuff() {
 						hovered_item_slot = item;
 					}
 
-					Sprite* sprite = get_sprite(get_sprite_id_from_item(item->id));
+					Sprite* sprite = get_sprite(get_sprite_id_from_item_instance(*item));
 
 					draw_item_amount_in_rect(*item, box);
 
@@ -3811,12 +3866,17 @@ void do_ui_stuff() {
 		ItemData item_data = get_item_data(world->mouse_cursor_item.id);
 		if (!item_data.to_build || world_frame.hover_consumed) {
 			// it's just an item
-			Sprite* sprite = get_sprite(get_sprite_id_from_item(world->mouse_cursor_item.id));
+			Sprite* sprite = get_sprite(get_sprite_id_from_item_instance(world->mouse_cursor_item));
 			Range2f rect = range2f_make_center_center(get_mouse_pos_in_current_space(), v2(10, 10));
 			draw_item_amount_in_rect(world->mouse_cursor_item, rect);
 
 			if (item_id == ITEM_tp_focus) {
-
+				if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+					consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+					play_sound("event:/exp_pickup");
+					world->mouse_cursor_item.focus_target_pos = get_mouse_pos_in_current_space();
+					world->mouse_cursor_item.has_focus_target = true;
+				}
 			}
 
 		} else
@@ -4956,7 +5016,6 @@ int entry(int argc, char **argv) {
 		sprites[SPRITE_research_station] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/research_station.png"), get_heap_allocator()) };
 		sprites[SPRITE_exp] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp.png"), get_heap_allocator()) };
 		sprites[SPRITE_exp_vein] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/exp_vein.png"), get_heap_allocator()) };
-		sprites[SPRITE_teleporter1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/teleporter1.png"), get_heap_allocator()) };
 		sprites[SPRITE_copper_depo] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/copper_depo.png"), get_heap_allocator()) };
 		sprites[SPRITE_raw_copper] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/raw_copper.png"), get_heap_allocator()) };
 		sprites[SPRITE_copper_ingot] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/copper_ingot.png"), get_heap_allocator()) };
@@ -5299,15 +5358,6 @@ int entry(int argc, char **argv) {
 			.description=STR("Research recipes to unlock more buildings."),
 			.ingredients_count=1,
 			.ingredients={ {.id=ITEM_rock, .amount=5} }
-		};
-		item_data[ITEM_teleporter1] = (ItemData){
-			.disabled=true,
-			.to_build=ARCH_teleporter1,
-			.icon=SPRITE_teleporter1,
-			.description=STR("A gateway to the next world."),
-			.exp_cost=9999,
-			.ingredients_count=2,
-			.ingredients={ {.id=ITEM_pine_wood, .amount=1000}, {.id=ITEM_rock, .amount=1000} }
 		};
 	}
 	// :item defaults

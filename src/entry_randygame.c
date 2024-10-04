@@ -498,8 +498,7 @@ typedef struct Entity {
 	bool is_valid;
 	int id;
 	ArchetypeID arch;
-	int item_amount; // #item, need to yeet this.
-	ItemInstanceData new_item_thing;
+	ItemInstanceData item;
 	Vector2 pos;
 	bool render_sprite;
 	SpriteID sprite_id;
@@ -839,7 +838,7 @@ BiomeID biome_at_tile(Tile tile) {
 	return biome;
 }
 
-#define INV_COUNT 16
+#define INV_COUNT 24
 
 typedef struct World {
 	int id_count;
@@ -1739,12 +1738,17 @@ void entity_setup(Entity* en, ArchetypeID id) {
 	assert(en->arch, "Archetype not setup in function.");
 }
 
-// #item
+void setup_item_with_instance(Entity* en, ItemInstanceData item) {
+	entity_setup(en, item.id);
+	en->is_item = true;
+	en->item = item;
+}
 void setup_item(Entity* en, ArchetypeID id) {
 	entity_setup(en, id);
 	en->is_item = true;
-	if (en->item_amount == 0) {
-		en->item_amount = 1;
+	en->item.id = id;
+	if (en->item.amount == 0) {
+		en->item.amount = 1;
 	}
 }
 
@@ -2533,12 +2537,11 @@ void do_entity_exp_drops(Entity* en) {
 
 void drop_item_at_pos(ItemInstanceData item, Vector2 pos) {
 	Entity* drop = entity_create();
-	setup_item(drop, item.id);
+	setup_item_with_instance(drop, item);
 	drop->pos = pos;
 	drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
 	drop->pick_up_cooldown_end_time = now() + get_random_float32_in_range(0.1, 0.3);
 	// #item - make this copy the entire item...
-	drop->item_amount = item.amount;
 }
 
 void do_entity_drops(Entity* en) {
@@ -6098,9 +6101,7 @@ int entry(int argc, char **argv) {
 						pickup_radius *= 3;
 					}
 
-					ItemInstanceData item = (ItemInstanceData){.id=en->arch, .amount=en->item_amount};
-
-					bool room_in_inventory = can_add_item_to_inv(item);
+					bool room_in_inventory = can_add_item_to_inv(en->item);
 
 					if (room_in_inventory && has_reached_end_time(en->pick_up_cooldown_end_time) &&
 					fabsf(v2_dist(en->pos, get_player()->pos)) < pickup_radius) {
@@ -6133,7 +6134,7 @@ int entry(int argc, char **argv) {
 							}
 
 							// #item
-							bool succ = move_item_instance_to_inv(&item);
+							bool succ = move_item_instance_to_inv(&en->item);
 							if (succ) {
 								entity_zero_immediately(en);
 							}
@@ -6382,9 +6383,8 @@ int entry(int argc, char **argv) {
 					}
 					if (inv_item->amount > 0) {
 						Entity* drop = entity_create();
-						setup_item(drop, inv_item->id);
+						setup_item_with_instance(drop, *inv_item);
 						drop->pos = player->pos;
-						drop->new_item_thing = *inv_item;
 					}
 					*inv_item = empty_item;
 				}

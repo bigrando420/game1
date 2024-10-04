@@ -611,6 +611,28 @@ typedef struct Entity {
 } Entity;
 #define MAX_ENTITY_COUNT 1024
 
+//
+// NOTE about the entity structure
+//
+// Separating out items, buildings, the player, or really anything from this megastruct is a bad idea.
+//
+// On the surface, it seems like we'd be making things more clean and compact. But it actually just leads to
+// me needing to go to 17 different places in the codebase when adding in new pieces of content.
+//
+// Now that ALL THE DATA - runtime, constant, item or building specific - is contained with the Entity... The setup functions are
+// the one-stop shop for defining the data... me likey!
+//
+// Memory efficient? No.
+// Gameplay efficient? Yes.
+//
+// Memory or performance is not the bottlneck of making a good game.
+// And if it ever *does* become a bottlneck. Measure it, then optimise.
+//
+// The iteration speed of adding in new content is 10000x more important.
+//
+// Game design comes 1st.
+//
+
 Entity entity_archetype_data[ARCH_MAX] = {0};
 Entity get_archetype_data(ArchetypeID id) {
 	return entity_archetype_data[id];

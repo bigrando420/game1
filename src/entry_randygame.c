@@ -490,7 +490,7 @@ typedef struct EntityFrame {
 	GameError error;
 	Vector2 last_pos;
 	bool is_being_picked_up;
-	Entity* focus_item;
+	ItemInstanceData* focus_item;
 	// :frame
 } EntityFrame;
 
@@ -500,6 +500,12 @@ typedef struct StorageSlot {
 	int desired_item_count;
 	ArchetypeID desired_items[4];
 } StorageSlot;
+
+typedef enum Dimension {
+	DIM_first,
+	DIM_second,
+	DIM_MAX,
+} Dimension;
 
 typedef struct Entity {
 	bool is_valid;
@@ -591,6 +597,8 @@ typedef struct Entity {
 	float64 teleported_at_time;
 	bool is_item;
 	bool can_be_placed;
+	Dimension dim;
+	Dimension dimension_target;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -750,13 +758,13 @@ typedef struct Map {
 	BiomeID* tiles;
 	Tile* biome_tiles[BIOME_MAX];
 } Map;
-Map map = {0};
+Map maps[DIM_MAX] = {0};
 
 u32 biome_colors[BIOME_MAX] = {
 	0x000000, // void
 	0xffffff, // core,
 	0x484848, // barren,
-	0x3553b9, // forest,
+	0x4db133, // forest,
 	0xbf6937, // copper,
 	0xa54b18, // copper heavy
 	0x70d6cd, // ice
@@ -773,93 +781,99 @@ Vector4 biome_col_hex_to_rgba(u32 col) {
 	return (Vector4){r/255.0, g/255.0, b/255.0, 1};
 }
 
-inline Tile local_map_to_world_tile(Vector2i local) {
-	int x_index = local.x - floor((float)map.width * 0.5);
-	int y_index = local.y - floor((float)map.height * 0.5);
+inline Tile local_map_to_world_tile(Vector2i local, Dimension dim) {
+	int x_index = local.x - floor((float)maps[dim].width * 0.5);
+	int y_index = local.y - floor((float)maps[dim].height * 0.5);
 	return (Tile){x_index, y_index};
 }
 
-Vector2i world_tile_to_local_map(Tile world) {
-	int x_index = world.x + floor((float)map.width * 0.5);
-	int y_index = world.y + floor((float)map.height * 0.5);
-	x_index = clamp(x_index, 0, map.width-1);
-	y_index = clamp(y_index, 0, map.height-1);
+Vector2i world_tile_to_local_map(Tile world, Dimension dim) {
+	int x_index = world.x + floor((float)maps[dim].width * 0.5);
+	int y_index = world.y + floor((float)maps[dim].height * 0.5);
+	x_index = clamp(x_index, 0, maps[dim].width-1);
+	y_index = clamp(y_index, 0, maps[dim].height-1);
 	return (Vector2i){x_index, y_index};
 }
 
-inline int local_map_pos_to_index(Vector2i local_map) {
-	return local_map.y * map.width + local_map.x;
+inline int local_map_pos_to_index(Vector2i local_map, Dimension dim) {
+	return local_map.y * maps[dim].width + local_map.x;
 }
 
+// :map
 void init_biome_maps() {
+	for (Dimension dim = 0; dim < DIM_MAX; dim++) {
+		string path = tprint("res/sprites/dim%i_map.png", dim);;
 
-	string png;
-	bool ok = os_read_entire_file("res/sprites/biome0_map.png", &png, get_heap_allocator());
-	assert(ok);
+		Map* map = &maps[dim];
 
-	int width, height, channels;
-	stbi_set_flip_vertically_on_load(1);
-	third_party_allocator = get_heap_allocator();
-	u8* stb_data = stbi_load_from_memory(png.data, png.count, &width, &height, &channels, STBI_rgb_alpha);
-	assert(stb_data);
-	assert(channels == 4);
-	third_party_allocator = ZERO(Allocator);
+		string png;
+		bool ok = os_read_entire_file(path, &png, get_heap_allocator());
+		assert(ok);
 
-	map.width = width;
-	map.height = height;
-	map.tiles = alloc(get_heap_allocator(), width * height * sizeof(BiomeID));
+		int width, height, channels;
+		stbi_set_flip_vertically_on_load(1);
+		third_party_allocator = get_heap_allocator();
+		u8* stb_data = stbi_load_from_memory(png.data, png.count, &width, &height, &channels, STBI_rgb_alpha);
+		assert(stb_data);
+		assert(channels == 4);
+		third_party_allocator = ZERO(Allocator);
 
-	bool found_biomes[BIOME_MAX] = {0};
+		map->width = width;
+		map->height = height;
+		map->tiles = alloc(get_heap_allocator(), width * height * sizeof(BiomeID));
 
-	for (int y = 0; y < height; y++)
-	for (int x = 0; x < width; x++)
-	{
-		int index = y * width + x;
-		u8* pixel_first_channel = stb_data + index * channels;
-		u32 pixel_color =
-			(pixel_first_channel[0]) << 24 | // r
-			(pixel_first_channel[1]) << 16 | // g
-			(pixel_first_channel[2]) << 8 | // b
-			(pixel_first_channel[3]) << 0; // a
+		bool found_biomes[BIOME_MAX] = {0};
 
-		u32 pixel_no_alpha = pixel_color >> 8;
-
-		for (BiomeID i = 0; i < ARRAY_COUNT(biome_colors); i++) {
-			if (biome_colors[i] == pixel_no_alpha) {
-				map.tiles[index] = i;
-				found_biomes[i] = true;
-			}
-		}
-	}
-
-	for (BiomeID i = 0; i < BIOME_MAX; i++) {
-		if (!found_biomes[i]) {
-			log_warning("Biome %i is unused", i);
-		}
-
-		Tile* tiles;
-		growing_array_init_reserve((void**)&tiles, sizeof(Tile), 128, get_heap_allocator());
-
-		for (int y = 0; y < map.height; y++)
-		for (int x = 0; x < map.width; x++)
+		for (int y = 0; y < height; y++)
+		for (int x = 0; x < width; x++)
 		{
-			BiomeID biome_at_tile = map.tiles[local_map_pos_to_index(v2i(x, y))];
-			if (biome_at_tile == i) {
-				Tile t = local_map_to_world_tile(v2i(x, y));
-				growing_array_add((void**)&tiles, &t);
+			int index = y * width + x;
+			u8* pixel_first_channel = stb_data + index * channels;
+			u32 pixel_color =
+				(pixel_first_channel[0]) << 24 | // r
+				(pixel_first_channel[1]) << 16 | // g
+				(pixel_first_channel[2]) << 8 | // b
+				(pixel_first_channel[3]) << 0; // a
+
+			u32 pixel_no_alpha = pixel_color >> 8;
+
+			for (BiomeID i = 0; i < ARRAY_COUNT(biome_colors); i++) {
+				if (biome_colors[i] == pixel_no_alpha) {
+					map->tiles[index] = i;
+					found_biomes[i] = true;
+				}
 			}
 		}
 
-		map.biome_tiles[i] = tiles;
+		for (BiomeID i = 0; i < BIOME_MAX; i++) {
+			if (!found_biomes[i]) {
+				log_warning("Biome %i is unused", i);
+			}
+
+			Tile* tiles;
+			growing_array_init_reserve((void**)&tiles, sizeof(Tile), 128, get_heap_allocator());
+
+			for (int y = 0; y < map->height; y++)
+			for (int x = 0; x < map->width; x++)
+			{
+				BiomeID biome_at_tile = map->tiles[local_map_pos_to_index(v2i(x, y), dim)];
+				if (biome_at_tile == i) {
+					Tile t = local_map_to_world_tile(v2i(x, y), dim);
+					growing_array_add((void**)&tiles, &t);
+				}
+			}
+
+			map->biome_tiles[i] = tiles;
+		}
 	}
 }
 
-BiomeID biome_at_tile(Tile tile) {
+BiomeID biome_at_tile(Tile tile, Dimension dim) {
 	BiomeID biome = 0;
-	int x_index = tile.x + floor((float)map.width * 0.5);
-	int y_index = tile.y + floor((float)map.height * 0.5);
-	if (x_index < map.width && x_index >= 0 && y_index < map.height && y_index >= 0) {
-		biome = map.tiles[y_index * map.width + x_index];
+	int x_index = tile.x + floor((float)maps[dim].width * 0.5);
+	int y_index = tile.y + floor((float)maps[dim].height * 0.5);
+	if (x_index < maps[dim].width && x_index >= 0 && y_index < maps[dim].height && y_index >= 0) {
+		biome = maps[dim].tiles[y_index * maps[dim].width + x_index];
 	}
 	return biome;
 }
@@ -909,7 +923,7 @@ typedef struct WorldFrame {
 	bool hover_consumed;
 	bool show_inventory;
 	Entity* player;
-	TileEntityCache* tile_entity_cache;
+	TileEntityCache* tile_entity_caches[DIM_MAX];
 	bool is_creation;
 	bool draw_portals;
 	// WORLD :frame state
@@ -1969,14 +1983,14 @@ typedef struct TileEntityCache {
 	int tile_count;
 } TileEntityCache;
 
-void add_new_entity_to_tile_cache(Entity* en) {
-	TileEntityCache* cache = world_frame.tile_entity_cache;
+void add_new_entity_to_tile_cache(Entity* en, Dimension dim) {
+	TileEntityCache* cache = world_frame.tile_entity_caches[dim];
 
 	Tile* tiles = get_tile_list_at_pos_based_on_arch(en->pos, en->arch);
 	for (int j=0;j<growing_array_get_valid_count(tiles);j++) {
 		Tile tile = tiles[j];
-		Vector2i local_tile_pos = world_tile_to_local_map(tile);
-		int index = local_tile_pos.y * map.width + local_tile_pos.x;
+		Vector2i local_tile_pos = world_tile_to_local_map(tile, dim);
+		int index = local_tile_pos.y * maps[dim].width + local_tile_pos.x;
 		if (index >= 0 && index < cache->tile_count) {
 			cache->tiles[index].entity = en;
 		}
@@ -1984,38 +1998,40 @@ void add_new_entity_to_tile_cache(Entity* en) {
 }
 
 void create_tile_entity_pair_cache() {
-	if (world_frame.tile_entity_cache != 0) {
-		return;
-	}
+	for (Dimension dim = 0; dim < DIM_MAX; dim++) {
+		if (world_frame.tile_entity_caches[dim] != 0) {
+			continue;
+		}
 
-	tm_scope("allocs")
-	{
-		world_frame.tile_entity_cache = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
-		TileEntityCache* cache = world_frame.tile_entity_cache;
-		cache->tile_count = map.height * map.width;
-		cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
-	}
+		tm_scope("allocs")
+		{
+			world_frame.tile_entity_caches[dim] = alloc(get_temporary_allocator(), sizeof(TileEntityCache));
+			TileEntityCache* cache = world_frame.tile_entity_caches[dim];
+			cache->tile_count = maps[dim].height * maps[dim].width;
+			cache->tiles = alloc(get_temporary_allocator(), sizeof(TileCache) * cache->tile_count);
+		}
 
-	TileEntityCache* cache = world_frame.tile_entity_cache;
+		TileEntityCache* cache = world_frame.tile_entity_caches[dim];
 
-	tm_scope("store tiles")
-	for (int y = 0; y < map.height; y++)
-	for (int x = 0; x < map.width; x++) {
-		TileCache* tc = &cache->tiles[local_map_pos_to_index(v2i(x, y))];
-		tc->world_tile = local_map_to_world_tile(v2i(x, y));
-	}
+		tm_scope("store tiles")
+		for (int y = 0; y < maps[dim].height; y++)
+		for (int x = 0; x < maps[dim].width; x++) {
+			TileCache* tc = &cache->tiles[local_map_pos_to_index(v2i(x, y), dim)];
+			tc->world_tile = local_map_to_world_tile(v2i(x, y), dim);
+		}
 
-	tm_scope("add enttiy to tile cache")
-	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
-		Entity* en = &world->entities[i];
-		add_new_entity_to_tile_cache(en);
+		tm_scope("add enttiy to tile cache")
+		for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
+			Entity* en = &world->entities[i];
+			add_new_entity_to_tile_cache(en, dim);
+		}
 	}
 }
 
-TileCache* tile_cache_at_tile(Tile tile) {
-	TileEntityCache* cache = world_frame.tile_entity_cache;
-	Vector2i local_tile = world_tile_to_local_map(tile);
-	int index = local_tile.y * map.width + local_tile.x;
+TileCache* tile_cache_at_tile(Tile tile, Dimension dim) {
+	TileEntityCache* cache = world_frame.tile_entity_caches[dim];
+	Vector2i local_tile = world_tile_to_local_map(tile, dim);
+	int index = local_tile.y * maps[dim].width + local_tile.x;
 	if (index < 0 || index > cache->tile_count) {
 		return 0;
 	} else {
@@ -2023,10 +2039,10 @@ TileCache* tile_cache_at_tile(Tile tile) {
 	}
 }
 
-Entity* entity_at_tile(Tile tile) {
-	TileEntityCache* cache = world_frame.tile_entity_cache;
-	Vector2i local_tile = world_tile_to_local_map(tile);
-	int index = local_tile.y * map.width + local_tile.x;
+Entity* entity_at_tile(Tile tile, Dimension dim) {
+	TileEntityCache* cache = world_frame.tile_entity_caches[dim];
+	Vector2i local_tile = world_tile_to_local_map(tile, dim);
+	int index = local_tile.y * maps[dim].width + local_tile.x;
 	if (index < 0 || index > cache->tile_count) {
 		return 0;
 	} else {
@@ -2044,6 +2060,10 @@ Gfx_Text_Metrics draw_text_with_pivot(Gfx_Font *font, string text, u32 raster_he
 }
 
 // :func dump
+
+Dimension get_player_dim() {
+	return world_frame.player->dim;
+}
 
 bool move_item_instance_to_inv(ItemInstanceData* item) {
 	Entity item_data = get_item_data(item->id);
@@ -2236,13 +2256,15 @@ Vector2 world_pos_to_ndc(Vector2 world_pos) {
 	return ndc;
 }
 
-float get_world_radius() {
-	return map.width * tile_width / 2;
+float get_world_radius(Dimension dim) {
+	return maps[dim].width * tile_width / 2;
 }
 
 // :spawn
 float resource_respawn_length = 10.f;
 void do_resource_respawning() {
+	Dimension dim = DIM_first;
+
 	for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 		WorldResourceData data = world_resources[i];
 		if (!data.respawn) {
@@ -2251,9 +2273,9 @@ void do_resource_respawning() {
 
 		Tile* potential_spawn_tiles;
 		growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
-		for (int j = 0; j < growing_array_get_valid_count(map.biome_tiles[data.biome_id]); j++) {
-			Tile t = map.biome_tiles[data.biome_id][j];
-			TileCache* tc = tile_cache_at_tile(t);
+		for (int j = 0; j < growing_array_get_valid_count(maps[dim].biome_tiles[data.biome_id]); j++) {
+			Tile t = maps[dim].biome_tiles[data.biome_id][j];
+			TileCache* tc = tile_cache_at_tile(t, dim);
 			if (!tc->entity) {
 				growing_array_add((void**)&potential_spawn_tiles, &tc->world_tile);
 			}
@@ -2306,7 +2328,7 @@ void do_resource_respawning() {
 				Entity* en = entity_create();
 				entity_setup(en, data.arch_id);
 				en->pos = spawn_pos;
-				add_new_entity_to_tile_cache(en);
+				add_new_entity_to_tile_cache(en, dim);
 
 				world->resource_next_spawn_end_time[i] = 0;
 			}
@@ -2377,9 +2399,9 @@ Vector4 get_red_error_col_override() {
 	return v4(1, 0, 0, 0.8 * get_error_flash_frequency());
 }
 
-Range2f get_world_rect() {
-	float width = map.width * tile_width;
-	float height = map.height * tile_width;
+Range2f get_world_rect(Dimension dim) {
+	float width = maps[dim].width * tile_width;
+	float height = maps[dim].height * tile_width;
 	return (Range2f) {.min=v2(width * -0.5, height * -0.5), .max=v2(width * 0.5, height * 0.5)};
 }
 
@@ -2683,12 +2705,12 @@ void camera_shake_at_pos(float amount, Vector2 source_position, float radius, fl
 	// Beyond radius + falloff_distance, do not apply any shake
 }
 
-bool does_overlap_existing_entities(Vector2 pos, ArchetypeID id) {
+bool does_overlap_existing_entities(Vector2 pos, ArchetypeID id, Dimension dim) {
 
 	Tile* tiles = get_tile_list_at_pos_based_on_arch(pos, id);
 	for (int i = 0; i < growing_array_get_valid_count(tiles); i++) {
 		Tile tile = tiles[i];
-		TileCache* tc = tile_cache_at_tile(tile);
+		TileCache* tc = tile_cache_at_tile(tile, dim);
 		if (tc->entity) {
 			return true;
 		}
@@ -2701,14 +2723,16 @@ void spawn_world_resources() {
 
 	create_tile_entity_pair_cache();
 
+	Dimension dim = DIM_first;
+
 	for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 		WorldResourceData data = world_resources[i];
 
 		Tile* potential_spawn_tiles;
 		growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
-		for (int j = 0; j < growing_array_get_valid_count(map.biome_tiles[data.biome_id]); j++) {
-			Tile t = map.biome_tiles[data.biome_id][j];
-			TileCache* tc = tile_cache_at_tile(t);
+		for (int j = 0; j < growing_array_get_valid_count(maps[dim].biome_tiles[data.biome_id]); j++) {
+			Tile t = maps[dim].biome_tiles[data.biome_id][j];
+			TileCache* tc = tile_cache_at_tile(t, dim);
 			if (!tc->entity) {
 				growing_array_add((void**)&potential_spawn_tiles, &tc->world_tile);
 			}
@@ -2787,6 +2811,7 @@ void world_setup() {
 		en->pos.x = 50;
 		en->pos.y = 20;
 		en->pos = snap_position_to_nearest_tile_based_on_arch(en->pos, en->arch);
+		en->dimension_target = DIM_second;
 
 		world->item_unlocks[ARCH_tether].research_progress = 100;
 
@@ -4178,6 +4203,8 @@ void do_ui_stuff() {
 
 // :cursor item drawing
 void do_cursor_drawing_and_logic() {
+	Dimension dim = get_player_dim();
+
 	if (world->mouse_cursor_item.id)
 	defer_scope(push_z_layer_in_frame(layer_cursor_item, current_draw_frame), pop_z_layer_in_frame(current_draw_frame))
 	{
@@ -4254,7 +4281,7 @@ void do_cursor_drawing_and_logic() {
 			Tile* tiles = get_tile_list_at_pos_based_on_arch(pos, arch_id);
 			for (int i = 0; i < growing_array_get_valid_count(tiles); i++) {
 				Tile tile = tiles[i];
-				TileCache* tc = tile_cache_at_tile(tile);
+				TileCache* tc = tile_cache_at_tile(tile, dim);
 				// tc->debug_col_override = COLOR_GREEN;
 				// tc->debug_col_override.a = 0.2;
 
@@ -4461,7 +4488,7 @@ void update_thumper(Entity* en) {
 void do_portal_teleport_thing (Entity* player) {
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* portal = &world->entities[i];
-		if (!(portal->is_valid && portal->arch == ARCH_portal)) continue;
+		if (!(portal->is_valid && portal->arch == ARCH_portal && portal->dim == get_player_dim())) continue;
 
 		float portal_width = tile_width * 7;
 
@@ -4478,6 +4505,7 @@ void do_portal_teleport_thing (Entity* player) {
 			
 			Vector2 relative_to_portal = v2_sub(player->pos, portal->pos);
 			player->pos = v2_add(portal->portal_view_pos, relative_to_portal);
+			player->dim = portal->dimension_target;
 
 			Vector2 relative_cam_pos = v2_sub(camera_pos, old_player_pos);
 			camera_pos = v2_add(player->pos, relative_cam_pos);
@@ -4558,9 +4586,9 @@ void update_portal_controller(Entity* en) {
 				t.y -= 1;
 			}
 
-			TileCache* tc = tile_cache_at_tile(t);
+			TileCache* tc = tile_cache_at_tile(t, en->dim);
 			if (tc->entity && tc->entity->arch == ARCH_portal) {
-				tc->entity->frame.focus_item = slot->item;
+				tc->entity->frame.focus_item = &slot->item;
 			}
 		}
 
@@ -4580,7 +4608,7 @@ void conveyor_move_logic(Entity* en) {
 	} else if (en->dir == DIR_north) {
 		output_tile.y += 1;
 	}
-	TileCache* tc = tile_cache_at_tile(output_tile);
+	TileCache* tc = tile_cache_at_tile(output_tile, en->dim);
 
 	// attempt move into next tile
 	if (tc->entity && en->input0.id) {
@@ -4671,7 +4699,7 @@ void update_extractor(Entity* en) {
 		} else if (en->dir == DIR_north) {
 			input_tile.y -= 1;
 		}
-		TileCache* tc = tile_cache_at_tile(input_tile);
+		TileCache* tc = tile_cache_at_tile(input_tile, en->dim);
 
 		if (tc->entity) {
 			Entity* storage = tc->entity;
@@ -4829,7 +4857,7 @@ void update_meteor(Entity* en) {
 				spawn_pos.y += get_random_float32_in_range(en->radius * -0.5, en->radius * 0.5);
 				spawn_pos = snap_position_to_nearest_tile_based_on_arch(spawn_pos, arch);
 
-				if (!does_overlap_existing_entities(spawn_pos, arch)) {
+				if (!does_overlap_existing_entities(spawn_pos, arch, en->dim)) {
 					found_pos = true;
 					break;
 				}
@@ -4845,7 +4873,7 @@ void update_meteor(Entity* en) {
 				entity_setup(spawn, arch);
 				spawn->pos = spawn_pos;
 
-				add_new_entity_to_tile_cache(spawn); // need to update the cache instantly, because gangster shit is happening
+				add_new_entity_to_tile_cache(spawn, en->dim); // need to update the cache instantly, because gangster shit is happening
 			} else {
 				log_warning("couldn't find space for spawning in a resource");
 				break;
@@ -5096,7 +5124,7 @@ void update_enemy(Entity* en) {
 	}
 }
 
-void draw_world_in_frame() {
+void draw_world_in_frame(Dimension dim) {
 
 	set_world_space();
 
@@ -5106,8 +5134,7 @@ void draw_world_in_frame() {
 	tm_scope("push render entities")
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* en = &world->entities[i];
-		if (en->is_valid)
-		{
+		if (en->is_valid && en->dim == dim) {
 			s32 z_layer = en->z_layer;
 			if (z_layer == 0) {
 				z_layer = layer_world;
@@ -5222,7 +5249,7 @@ void draw_world_in_frame() {
 	}
 
 	// render :player
-	if (is_player_alive())
+	if (is_player_alive() && get_player_dim() == dim)
 	scope_z_layer(layer_player)
 	{
 		Entity* en = get_player();
@@ -5279,7 +5306,7 @@ void draw_world_in_frame() {
 		for (int x = player_tile_x - tile_radius_x; x < player_tile_x + tile_radius_x; x++) {
 			for (int y = player_tile_y - tile_radius_y; y < player_tile_y + tile_radius_y; y++) {
 
-				BiomeID biome = biome_at_tile(v2i(x, y));
+				BiomeID biome = biome_at_tile(v2i(x, y), dim);
 				if (biome == 0) {
 					continue;
 				}
@@ -5307,7 +5334,7 @@ void draw_world_in_frame() {
 	}
 
 	// player :hud
-	if (is_player_alive())
+	if (is_player_alive() && get_player_dim() == dim)
 	{
 		Entity* player = get_player();
 
@@ -5651,6 +5678,9 @@ int entry(int argc, char **argv) {
 					growing_array_init_reserve((void**)&nearby_tethers, sizeof(Entity*), 1, get_temporary_allocator());
 					for (int j = 0; j < MAX_ENTITY_COUNT; j++) {
 						Entity* nearby_tether = &world->entities[j];
+						if (!(nearby_tether->is_valid && nearby_tether->dim == self_tether->dim)) {
+							continue;
+						}
 						if (nearby_tether != self_tether && nearby_tether->is_valid && nearby_tether->is_oxygen_tether) {
 							if (v2_dist(nearby_tether->pos, self_tether->pos) < tether_connection_radius) {
 								growing_array_add((void**)&nearby_tethers, &nearby_tether);
@@ -5703,22 +5733,22 @@ int entry(int argc, char **argv) {
 					current->frame.is_powered = true;
 					Tile current_tile = v2_world_pos_to_tile_pos(current->pos);
 
-					Entity* left = entity_at_tile(v2i_add(v2i(-1, 0), current_tile));
+					Entity* left = entity_at_tile(v2i_add(v2i(-1, 0), current_tile), DIM_first);
 					if (left && left->wall_seal && !left->frame.is_powered) {
 						growing_array_add((void**)&stack, &left);
 					}
 
-					Entity* right = entity_at_tile(v2i_add(v2i(1, 0), current_tile));
+					Entity* right = entity_at_tile(v2i_add(v2i(1, 0), current_tile), DIM_first);
 					if (right && right->wall_seal && !right->frame.is_powered) {
 						growing_array_add((void**)&stack, &right);
 					}
 
-					Entity* top = entity_at_tile(v2i_add(v2i(0, 1), current_tile));
+					Entity* top = entity_at_tile(v2i_add(v2i(0, 1), current_tile), DIM_first);
 					if (top && top->wall_seal && !top->frame.is_powered) {
 						growing_array_add((void**)&stack, &top);
 					}
 
-					Entity* bottom = entity_at_tile(v2i_add(v2i(0, -1), current_tile));
+					Entity* bottom = entity_at_tile(v2i_add(v2i(0, -1), current_tile), DIM_first);
 					if (bottom && bottom->wall_seal && !bottom->frame.is_powered) {
 						growing_array_add((void**)&stack, &bottom);
 					}
@@ -5731,9 +5761,10 @@ int entry(int argc, char **argv) {
 		tm_scope("room flood fill")
 		{
 			Entity* player = get_player();
+			Dimension dim = get_player_dim();
 
 			Vector2i* stack;
-			growing_array_init_reserve((void**)&stack, sizeof(Vector2i), map.width*map.height, get_temporary_allocator());
+			growing_array_init_reserve((void**)&stack, sizeof(Vector2i), maps[dim].width*maps[dim].height, get_temporary_allocator());
 
 			Vector2i start_tile = v2_world_pos_to_tile_pos(player->pos);
 			growing_array_add((void**)&stack, &start_tile);
@@ -5742,7 +5773,7 @@ int entry(int argc, char **argv) {
 				Vector2i self = stack[growing_array_get_valid_count(stack)-1];
 				growing_array_pop((void**)&stack);
 
-				TileCache* self_tc = tile_cache_at_tile(self);
+				TileCache* self_tc = tile_cache_at_tile(self, dim);
 				self_tc->visited = true;
 
 				for (int i = 0; i < 4; i++) {
@@ -5764,7 +5795,7 @@ int entry(int argc, char **argv) {
 						continue;
 					}
 
-					TileCache* tile_cache = tile_cache_at_tile(tile);
+					TileCache* tile_cache = tile_cache_at_tile(tile, dim);
 					bool is_wall_seal = tile_cache->entity && tile_cache->entity->wall_seal && tile_cache->entity->frame.is_powered;
 					if (!tile_cache->visited && !is_wall_seal) {
 						growing_array_add((void**)&stack, &tile);
@@ -5779,6 +5810,10 @@ int entry(int argc, char **argv) {
 			float smallest_dist = 99999;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* en = &world->entities[i];
+				if (!(en->is_valid && en->dim == get_player_dim())) {
+					continue;
+				}
+
 				bool has_interaction = en->destroyable_world_item
 					|| en->big_resource_drop
 					|| en->interactable_entity
@@ -5936,7 +5971,7 @@ int entry(int argc, char **argv) {
 					while (true) {
 
 						float start_radius = 150.f;
-						float end_radius = get_world_radius();
+						float end_radius = get_world_radius(get_player_dim());
 						spawn_pos = v2_mulf(get_random_v2(), get_random_float32_in_range(start_radius, end_radius));
 
 						bool is_in_no_go_zone = false;
@@ -6105,7 +6140,7 @@ int entry(int argc, char **argv) {
 								// get tile next to it
 								Tile tile_pos = v2_world_pos_to_tile_pos(en->pos);
 								tile_pos.x += 1;
-								TileCache* tc = tile_cache_at_tile(tile_pos);
+								TileCache* tc = tile_cache_at_tile(tile_pos, en->dim);
 								if (tc->entity && tc->entity->big_resource_drop) {
 									Entity* resource = tc->entity;
 
@@ -6128,7 +6163,7 @@ int entry(int argc, char **argv) {
 					if (en->output0.id) {
 						Tile tile_pos = v2_world_pos_to_tile_pos(en->pos);
 						tile_pos.x -= 1;
-						TileCache* tc = tile_cache_at_tile(tile_pos);
+						TileCache* tc = tile_cache_at_tile(tile_pos, en->dim);
 						if (tc->entity && tc->entity->has_input_storage) {
 							Entity* storage = tc->entity;
 
@@ -6266,6 +6301,9 @@ int entry(int argc, char **argv) {
 				// courtesy of chatgpt
 				for (int j = 0; j < growing_array_get_valid_count(collision_entities); j++) {
 					Entity* against = collision_entities[j];
+					if (against->dim != en->dim) {
+						continue;
+					}
 
 					// Skip self
 					if (against == en) {
@@ -6357,7 +6395,7 @@ int entry(int argc, char **argv) {
 			float closest_dist = 99999;
 			for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 				Entity* tether = &world->entities[i];
-				if (tether->is_valid && tether->is_oxygen_tether && tether->frame.is_powered && tether->arch != ARCH_o2_emitter) {
+				if (tether->is_valid && tether->is_oxygen_tether && tether->frame.is_powered && tether->arch != ARCH_o2_emitter && tether->dim == get_player_dim()) {
 					float dist = v2_dist(tether->pos, player->pos);
 					if (dist < tether_connection_radius) {
 						if (!closest_tether || dist < closest_dist) {
@@ -6743,7 +6781,7 @@ int entry(int argc, char **argv) {
 				Entity* portal = &world->entities[i];
 				if (!(is_valid(portal) && portal->arch == ARCH_portal && portal->render_target_image)) continue;
 
-				// #TODO use frame's item to turn portal on / off
+				// TODO use frame's item to turn portal on / off
 
 				Gfx_Image* target_image = portal->render_target_image;
 
@@ -6789,7 +6827,7 @@ int entry(int argc, char **argv) {
 				}
 
 				cbuffer = (ShaderConstBuffer){0};
-				draw_world_in_frame();
+				draw_world_in_frame(portal->dimension_target);
 
 				offscreen_draw_frame.enable_z_sorting = true;
 				offscreen_draw_frame.shader_extension = global_shader;
@@ -6818,7 +6856,7 @@ int entry(int argc, char **argv) {
 						draw_frame_bind_image_to_shader(&offscreen_draw_frame, img, 0);
 					}
 
-					draw_world_in_frame();
+					draw_world_in_frame(get_player_dim());
 					current_draw_frame = 0;
 				}
 

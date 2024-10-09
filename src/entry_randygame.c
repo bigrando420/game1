@@ -4452,6 +4452,53 @@ void draw_base_sprite(Entity* en) {
 
 // update :func dump
 
+void render_player(Entity* en) {
+	if (!is_player_alive()) {
+		return; 
+	}
+
+	en->frame.functional_sprite_id = SPRITE_player_idle;
+
+	if (en->frame.input_axis.x != 0 || en->frame.input_axis.y != 0) {
+		en->frame.functional_sprite_id = SPRITE_player_walk;
+	}
+
+	if (en->frame.functional_sprite_id != en->last_frame.functional_sprite_id) {
+		en->anim_index = 0;
+		en->time_til_next_frame = 0;
+	}
+
+	Sprite* sprite = get_sprite(en->frame.functional_sprite_id);
+
+	if (has_reached_end_time(en->time_til_next_frame)) {
+		en->anim_index += 1;
+		if (en->anim_index >= sprite->frames) {
+			en->anim_index = 0;
+		}
+		en->time_til_next_frame = now() + 0.1;
+	}
+
+	Vector2i size = v2i(sprite->image->width / sprite->frames, sprite->image->height);
+
+	Matrix4 xform = m4_scalar(1.0);
+	xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));
+	xform         = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
+	if (en->last_move_dir.x == -1) {
+		xform = m4_scale(xform, v3(-1, 1, 1)); // flip if moving left
+	}
+	xform         = m4_translate(xform, v3(size.x * -0.5, 0.0, 0));
+
+	Vector4 col = COLOR_WHITE;
+	Draw_Quad* quad = draw_image_xform_in_frame(sprite->image, xform, v2(size.x, size.y), col, current_draw_frame);
+
+	u32 anim_sheet_pos_x = en->anim_index * size.x;
+	u32 anim_sheet_pos_y = 0;
+	quad->uv.x1 = (float32)(anim_sheet_pos_x)/(float32)sprite->image->width;
+	quad->uv.y1 = (float32)(anim_sheet_pos_y)/(float32)sprite->image->height;
+	quad->uv.x2 = (float32)(anim_sheet_pos_x+size.x) /(float32)sprite->image->width;
+	quad->uv.y2 = (float32)(anim_sheet_pos_y+size.y)/(float32)sprite->image->height;
+}
+
 // :thumper
 void update_thumper(Entity* en) {
 
@@ -5151,176 +5198,140 @@ void update_enemy(Entity* en) {
 	}
 }
 
+int compare_entity_y(const void* a, const void* b) {
+	Entity* entityA = *(Entity**)a;
+	Entity* entityB = *(Entity**)b;
+
+	if (entityA->pos.y < entityB->pos.y) {
+		return 1;
+	} else if (entityA->pos.y > entityB->pos.y) {
+		return -1;
+	}
+	return 0; // They are equal
+}
+
+
 void draw_world_in_frame(Dimension dim) {
 
 	set_world_space();
 
 	push_z_layer_in_frame(layer_world, current_draw_frame);
 
-	// render entities
-	tm_scope("push render entities")
+	// grab entities and sort by Y pos
+	Entity** entities_to_render;
+	growing_array_init_reserve((void**)&entities_to_render, sizeof(Entity*), MAX_ENTITY_COUNT, get_temporary_allocator());
 	for (int i = 0; i < MAX_ENTITY_COUNT; i++) {
 		Entity* en = &world->entities[i];
-		if (en->is_valid && en->dim == dim) {
-			s32 z_layer = en->z_layer;
-			if (z_layer == 0) {
-				z_layer = layer_world;
-				if (en->can_be_placed) {
-					z_layer = layer_buildings;
-				}
-			}
-			push_z_layer_in_frame(z_layer, current_draw_frame);
+		if (!(en->is_valid && en->dim == dim)) {
+			continue;
+		}
+		growing_array_add((void**)&entities_to_render, &en);
+	}
+	qsort(entities_to_render, growing_array_get_valid_count(entities_to_render), sizeof(Entity*), compare_entity_y);
 
-			if (en->is_item) {
-				if (en->arch == ARCH_exp) {
-					draw_rect_in_frame(en->pos, v2(1, 1), col_exp, current_draw_frame);
-				} else {
-					// try drawing the item's icon
-					SpriteID id = en->icon;
-					if (!id) {
-						id=en->sprite_id;
+	// render entities
+	tm_scope("push render entities")
+	for (int i = 0; i < growing_array_get_valid_count(entities_to_render); i++)
+	{
+		Entity* en = entities_to_render[i];
+
+		if (en->is_item) {
+			if (en->arch == ARCH_exp) {
+				draw_rect_in_frame(en->pos, v2(1, 1), col_exp, current_draw_frame);
+			} else {
+				// try drawing the item's icon
+				SpriteID id = en->icon;
+				if (!id) {
+					id=en->sprite_id;
+				}
+
+				Vector2 pos = en->pos;
+				pos.y += 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0);
+
+				draw_sprite_at_pos_pivot(id, pos, PIVOT_center_center);
+			}
+		} else {
+			switch (en->arch) {
+
+				// :render
+				case ARCH_player: render_player(en); break;
+				case ARCH_portal: if (world_frame.draw_portals) render_portal(en); break;
+				case ARCH_extractor:
+				case ARCH_conveyor: render_conveyor(en); break;
+				case ARCH_enemy_nest: render_enemy_nest(en); break;
+				case ARCH_meteor: render_meteor(en); break;
+				case ARCH_turret: render_turret(en); break;
+
+				// :enemy
+				case ARCH_enemy1: {
+					Vector2 center = en->pos;
+					float rate_mult = en->frame.target_en->is_valid ? 1.f : 0;
+					center.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0 * rate_mult);
+					center.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0 * rate_mult);
+
+					Vector2 size = enemy_size;
+					Vector2 draw_pos = center;
+					draw_pos.x += size.x * -0.5;
+					draw_pos.y += size.y * -0.5;
+
+					Vector4 col = COLOR_RED;
+					if (!en->frame.target_en->is_valid) {
+						col = v4_mul(col, v4(0.5, 0.5, 0.5, 1.f));
 					}
 
-					Vector2 pos = en->pos;
-					pos.y += 2.0 * sin_breathe(os_get_elapsed_seconds(), 5.0);
+					draw_rect_in_frame(draw_pos, size, col, current_draw_frame);
 
-					draw_sprite_at_pos_pivot(id, pos, PIVOT_center_center);
-				}
-			} else {
-				switch (en->arch) {
+					if (en->frame.target_en->is_valid) {
+						add_point_light(center, v4(1,0,0,0.5), 20, 1);
+					}
 
-					case ARCH_player: break;
+				} break;
 
-					// :render
-					case ARCH_portal: if (world_frame.draw_portals) render_portal(en); break;
-					case ARCH_extractor:
-					case ARCH_conveyor: render_conveyor(en); break;
-					case ARCH_enemy_nest: render_enemy_nest(en); break;
-					case ARCH_meteor: render_meteor(en); break;
-					case ARCH_turret: render_turret(en); break;
-
-					// :enemy
-					case ARCH_enemy1: {
-						Vector2 center = en->pos;
-						float rate_mult = en->frame.target_en->is_valid ? 1.f : 0;
-						center.y += 2.f * sin_breathe(os_get_elapsed_seconds(), 40.0 * rate_mult);
-						center.x += 1.f * sin_breathe(os_get_elapsed_seconds(), 80.0 * rate_mult);
-
-						Vector2 size = enemy_size;
-						Vector2 draw_pos = center;
-						draw_pos.x += size.x * -0.5;
-						draw_pos.y += size.y * -0.5;
-
-						Vector4 col = COLOR_RED;
-						if (!en->frame.target_en->is_valid) {
-							col = v4_mul(col, v4(0.5, 0.5, 0.5, 1.f));
-						}
-
-						draw_rect_in_frame(draw_pos, size, col, current_draw_frame);
-
-						if (en->frame.target_en->is_valid) {
-							add_point_light(center, v4(1,0,0,0.5), 20, 1);
-						}
-
-					} break;
-
-					default: {
-						draw_base_sprite(en);
-					} break;
-				}
+				default: {
+					draw_base_sprite(en);
+				} break;
 			}
-
-
-			// :oxygenerator render
-			if (en->arch == ARCH_oxygenerator) {
-				Vector2 size = {2, 5};
-				Vector2 draw_pos = en->pos;
-				draw_pos.x -= size.x * 0.5;
-				draw_pos.y -= 3;
-
-				size.y = size.y * ((float)en->oxygen / (float)en->oxygen_max);
-
-				draw_rect_in_frame(draw_pos, v2(size.x, size.y), col_oxygen, current_draw_frame);
-			}
-
-			// :health bar
-			if (en->health && en->health < en->max_health) {
-				Vector2 size = {6, 1};
-				Vector2 draw_pos = en->pos;
-				draw_pos.x -= size.x * 0.5;
-
-				draw_pos.y += get_offset_for_rendering(en->arch).y;
-				draw_pos.y -= 2;
-
-				draw_rect_in_frame(draw_pos, size, COLOR_BLACK, current_draw_frame);
-
-				float target_alpha = (float)en->health / (float)en->max_health;
-
-				if (en->health_bar_current_alpha == 0.0) {
-					en->health_bar_current_alpha = 1.0;
-				}
-				animate_f32_to_target(&en->health_bar_current_alpha, target_alpha, delta_t, 30.0f);
-
-				draw_rect_in_frame(draw_pos, v2(size.x * en->health_bar_current_alpha, size.y), COLOR_WHITE, current_draw_frame);
-			}
-
-			// :tether draw blue thingy
-			if (en->arch == ARCH_tether && en->is_oxygen_tether && en->frame.is_powered) {
-				Vector2 draw_pos = v2_add(en->pos, v2(-1, -1));
-				draw_pos = v2_add(draw_pos, en->tether_connection_offset);
-				draw_rect_in_frame(draw_pos, v2(2, 2), col_oxygen, current_draw_frame);
-			}
-
-			pop_z_layer_in_frame(current_draw_frame);
-		}
-	}
-
-	// render :player
-	if (is_player_alive() && get_player_dim() == dim)
-	scope_z_layer(layer_player)
-	{
-		Entity* en = get_player();
-
-		en->frame.functional_sprite_id = SPRITE_player_idle;
-
-		if (en->frame.input_axis.x != 0 || en->frame.input_axis.y != 0) {
-			en->frame.functional_sprite_id = SPRITE_player_walk;
 		}
 
-		if (en->frame.functional_sprite_id != en->last_frame.functional_sprite_id) {
-			en->anim_index = 0;
-			en->time_til_next_frame = 0;
+		// :oxygenerator render
+		if (en->arch == ARCH_oxygenerator) {
+			Vector2 size = {2, 5};
+			Vector2 draw_pos = en->pos;
+			draw_pos.x -= size.x * 0.5;
+			draw_pos.y -= 3;
+
+			size.y = size.y * ((float)en->oxygen / (float)en->oxygen_max);
+
+			draw_rect_in_frame(draw_pos, v2(size.x, size.y), col_oxygen, current_draw_frame);
 		}
 
-		Sprite* sprite = get_sprite(en->frame.functional_sprite_id);
+		// :health bar
+		if (en->health && en->health < en->max_health) {
+			Vector2 size = {6, 1};
+			Vector2 draw_pos = en->pos;
+			draw_pos.x -= size.x * 0.5;
 
-		if (has_reached_end_time(en->time_til_next_frame)) {
-			en->anim_index += 1;
-			if (en->anim_index >= sprite->frames) {
-				en->anim_index = 0;
+			draw_pos.y += get_offset_for_rendering(en->arch).y;
+			draw_pos.y -= 2;
+
+			draw_rect_in_frame(draw_pos, size, COLOR_BLACK, current_draw_frame);
+
+			float target_alpha = (float)en->health / (float)en->max_health;
+
+			if (en->health_bar_current_alpha == 0.0) {
+				en->health_bar_current_alpha = 1.0;
 			}
-			en->time_til_next_frame = now() + 0.1;
+			animate_f32_to_target(&en->health_bar_current_alpha, target_alpha, delta_t, 30.0f);
+
+			draw_rect_in_frame(draw_pos, v2(size.x * en->health_bar_current_alpha, size.y), COLOR_WHITE, current_draw_frame);
 		}
 
-		Vector2i size = v2i(sprite->image->width / sprite->frames, sprite->image->height);
-
-		Matrix4 xform = m4_scalar(1.0);
-		xform         = m4_translate(xform, v3(0, tile_width * -0.5, 0));
-		xform         = m4_translate(xform, v3(en->pos.x, en->pos.y, 0));
-		if (en->last_move_dir.x == -1) {
-			xform = m4_scale(xform, v3(-1, 1, 1)); // flip if moving left
+		// :tether draw blue thingy
+		if (en->arch == ARCH_tether && en->is_oxygen_tether && en->frame.is_powered) {
+			Vector2 draw_pos = v2_add(en->pos, v2(-1, -1));
+			draw_pos = v2_add(draw_pos, en->tether_connection_offset);
+			draw_rect_in_frame(draw_pos, v2(2, 2), col_oxygen, current_draw_frame);
 		}
-		xform         = m4_translate(xform, v3(size.x * -0.5, 0.0, 0));
-
-		Vector4 col = COLOR_WHITE;
-		Draw_Quad* quad = draw_image_xform_in_frame(sprite->image, xform, v2(size.x, size.y), col, current_draw_frame);
-
-		u32 anim_sheet_pos_x = en->anim_index * size.x;
-		u32 anim_sheet_pos_y = 0;
-		quad->uv.x1 = (float32)(anim_sheet_pos_x)/(float32)sprite->image->width;
-		quad->uv.y1 = (float32)(anim_sheet_pos_y)/(float32)sprite->image->height;
-		quad->uv.x2 = (float32)(anim_sheet_pos_x+size.x) /(float32)sprite->image->width;
-		quad->uv.y2 = (float32)(anim_sheet_pos_y+size.y)/(float32)sprite->image->height;
 	}
 
 	// :tile :rendering

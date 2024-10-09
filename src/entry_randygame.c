@@ -97,7 +97,9 @@ float float_alpha(float x, float min, float max) {
 // :utils
 
 bool get_random_bool() {
-	return get_random_int_in_range(0, 1);
+	// this needs to be 0 -> 9 because just doing 0 -> 1 gives a repeating pattern...
+	s64 b = get_random_int_in_range(0, 9);
+	return b < 5;
 }
 
 int get_random_sign() {
@@ -599,6 +601,8 @@ typedef struct Entity {
 	bool can_be_placed;
 	Dimension dim;
 	Dimension dimension_target;
+	u64 random_seed;
+	bool flip_sprite;
 	// :entity
 
 	// state that is completely constant, derived by archetype
@@ -722,33 +726,37 @@ typedef enum BiomeID {
 
 typedef struct WorldResourceData {
 	BiomeID biome_id;
+	Dimension dim;
 	ArchetypeID arch_id;
 	int dist_from_self;
 	bool respawn;
 } WorldResourceData;
 // NOTE - trying out a new pattern here. That way we don't have to keep writing up enums to index into these guys. If we need dynamic runtime data, just make an array with the count of this array and have it essentially share the index. Like what I've done below in the world state.
 WorldResourceData world_resources[] = {
-	{ BIOME_forest, ARCH_tree, 5, false },
-	{ BIOME_forest, ARCH_grass, 3, false },
-	// { BIOME_forest, ARCH_flint_depo, 20 },
+	// { .biome_id=BIOME_forest, .arch_id=ARCH_flint_depo, .dist_from_self=20 },.respawn=
 
-	{ BIOME_barren, ARCH_rock_small, 10, false },
-	{ BIOME_barren, ARCH_rock_medium, 15, false },
-	{ BIOME_barren, ARCH_rock_large, 20, false },
-	{ BIOME_barren, ARCH_coal_depo, 20, false },
+	{ .biome_id=BIOME_barren, .arch_id=ARCH_rock_small, .dist_from_self=10, .respawn=false },
+	{ .biome_id=BIOME_barren, .arch_id=ARCH_rock_medium, .dist_from_self=15, .respawn=false },
+	{ .biome_id=BIOME_barren, .arch_id=ARCH_rock_large, .dist_from_self=20, .respawn=false },
+	{ .biome_id=BIOME_barren, .arch_id=ARCH_coal_depo, .dist_from_self=20, .respawn=false },
 
-	{ BIOME_copper, ARCH_copper_depo, 10, false },
+	{ .biome_id=BIOME_copper, .arch_id=ARCH_copper_depo, .dist_from_self=10, .respawn=false },
 
-	{ BIOME_copper_heavy, ARCH_copper_depo, 4, false },
-	// { BIOME_copper_heavy, ARCH_flint_depo, 20 },
-	{ BIOME_copper_heavy, ARCH_rock, 10, false },
+	{ .biome_id=BIOME_copper_heavy, .arch_id=ARCH_copper_depo, .dist_from_self=4, .respawn=false },
+	// { .biome_id=BIOME_copper_heavy, .arch_id=ARCH_flint_depo, .dist_from_self=20 },.respawn=
+	{ .biome_id=BIOME_copper_heavy, .arch_id=ARCH_rock, .dist_from_self=10, .respawn=false },
 
-	{ BIOME_ice, ARCH_ice_vein, 6, true },
-	{ BIOME_ice_heavy, ARCH_large_ice_vein, 10, false },
+	{ .biome_id=BIOME_ice, .arch_id=ARCH_ice_vein, .dist_from_self=6, .respawn=true },
+	{ .biome_id=BIOME_ice_heavy, .arch_id=ARCH_large_ice_vein, .dist_from_self=10, .respawn=false },
 
-	{ BIOME_iron, ARCH_iron_depo, 6, true },
+	{ .biome_id=BIOME_iron, .arch_id=ARCH_iron_depo, .dist_from_self=6, .respawn=true },
 
-	{ BIOME_enemy_nest, ARCH_enemy_nest, 4, false },
+	{ .biome_id=BIOME_enemy_nest, .arch_id=ARCH_enemy_nest, .dist_from_self=4, .respawn=false },
+
+	// second dim
+	{ .dim=DIM_second, .biome_id=BIOME_forest, .arch_id=ARCH_tree, .dist_from_self=5, .respawn=false },
+	{ .dim=DIM_second, .biome_id=BIOME_forest, .arch_id=ARCH_grass, .dist_from_self=3, .respawn=false },
+
 	// :spawn_res system
 };
 
@@ -981,7 +989,7 @@ void entity_apply_defaults(Entity* en) {
 	en->stack_size = 64;
 }
 
-Entity* entity_create() {
+Entity* entity_create(Dimension dim) {
 	Entity* entity_found = 0;
 	for (int i = 1; i < MAX_ENTITY_COUNT; i++) {
 		Entity* existing_entity = &world->entities[i];
@@ -997,6 +1005,8 @@ Entity* entity_create() {
 	world->id_count += 1;
 	entity_found->id = world->id_count;
 	entity_found->frame.is_creation = true;
+	entity_found->dim = dim;
+	entity_found->random_seed = get_random();
 
 	return entity_found;
 }
@@ -1702,8 +1712,6 @@ void setup_tree(Entity* en) {
 	// en->destroyable_by_explosion = true;
 	en->tile_size = v2i(2, 2);
 	en->offset_based_on_tile_height = true;
-	en->sprite_id = SPRITE_tree1;
-	// en->sprite_id = SPRITE_tree1;
 	entity_max_health_setter(en, tree_health);
 	en->destroyable_world_item = true;
 	// en->drops_count = 1;
@@ -1712,6 +1720,12 @@ void setup_tree(Entity* en) {
 	en->has_collision = true;
 	en->collision_bounds = range2f_make_bottom_center(v2(4, 4));
 	en->collision_bounds = range2f_shift(en->collision_bounds, v2(0, -tile_width));
+
+	u64 prev_seed = seed_for_random;
+	seed_for_random = en->random_seed;
+	en->flip_sprite = get_random_bool();
+	en->sprite_id = SPRITE_tree0 + get_random_bool();
+	seed_for_random = prev_seed;
 }
 
 void entity_setup(Entity* en, ArchetypeID id) {
@@ -2325,7 +2339,7 @@ void do_resource_respawning() {
 			}
 
 			if (has_reached_end_time(world->resource_next_spawn_end_time[i])) {
-				Entity* en = entity_create();
+				Entity* en = entity_create(dim);
 				entity_setup(en, data.arch_id);
 				en->pos = spawn_pos;
 				add_new_entity_to_tile_cache(en, dim);
@@ -2553,7 +2567,7 @@ void do_entity_exp_drops(Entity* en) {
 		exp_amount = 8;
 	}
 	for (int i = 0; i < get_random_int_in_range(exp_amount-1, exp_amount); i++) {
-		Entity* orb = entity_create();
+		Entity* orb = entity_create(en->dim);
 		setup_item(orb, ARCH_exp);
 		orb->is_item = true;
 		orb->pos = en->pos;
@@ -2565,8 +2579,8 @@ void do_entity_exp_drops(Entity* en) {
 	}
 }
 
-void drop_item_at_pos(ItemInstanceData item, Vector2 pos) {
-	Entity* drop = entity_create();
+void drop_item_at_pos(ItemInstanceData item, Vector2 pos, Dimension dim) {
+	Entity* drop = entity_create(dim);
 	setup_item_with_instance(drop, item);
 	drop->pos = pos;
 	drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
@@ -2613,7 +2627,7 @@ void do_entity_drops(Entity* en) {
 	// create all the item drops
 	for (int i = 0; i < growing_array_get_valid_count(drops); i++) {
 		ArchetypeID drop_id = drops[i];
-		Entity* drop = entity_create();
+		Entity* drop = entity_create(en->dim);
 		setup_item(drop, drop_id);
 		drop->pos = en->pos;
 		drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
@@ -2719,14 +2733,17 @@ bool does_overlap_existing_entities(Vector2 pos, ArchetypeID id, Dimension dim) 
 	return false;
 }
 
+// :spawn on startup
 void spawn_world_resources() {
 
 	create_tile_entity_pair_cache();
 
-	Dimension dim = DIM_first;
-
+	for (int dim = 0; dim < DIM_MAX; dim++)
 	for (int i = 0; i < ARRAY_COUNT(world_resources); i++) {
 		WorldResourceData data = world_resources[i];
+		if (data.dim != dim) {
+			continue;
+		}
 
 		Tile* potential_spawn_tiles;
 		growing_array_init((void**)&potential_spawn_tiles, sizeof(Tile), get_temporary_allocator());
@@ -2761,7 +2778,7 @@ void spawn_world_resources() {
 				}
 
 				if (!too_close) {
-					Entity* en = entity_create();
+					Entity* en = entity_create(dim);
 					entity_setup(en, data.arch_id);
 					en->pos = spawn_pos;
 				}
@@ -2779,20 +2796,22 @@ void spawn_world_resources() {
 
 // :map init
 void world_setup() {
-	Entity* player_en = entity_create();
+	Dimension dim = DIM_first;
+
+	Entity* player_en = entity_create(dim);
 	setup_player(player_en);
 	player_en->pos.x = 20.f;
 
-	Entity* en = entity_create();
+	Entity* en = entity_create(dim);
 	setup_oxygenerator(en);
 	world->oxygenerator = handle_from_entity(en);
 	en->pos = snap_position_to_nearest_tile_based_on_arch(v2(0, 0), en->arch);
 
-	en = entity_create();
+	en = entity_create(dim);
 	setup_workbench(en);
 	en->pos = snap_position_to_nearest_tile_based_on_arch(v2(-tile_width, tile_width), en->arch);
 
-	en = entity_create();
+	en = entity_create(dim);
 	setup_ice_vein(en);
 	en->pos.x = 50;
 	en->pos.y = 0;
@@ -2806,7 +2825,7 @@ void world_setup() {
 	// :test stuff
 	#if defined(DEV_TESTING)
 	{
-		en = entity_create();
+		en = entity_create(dim);
 		setup_portal(en);
 		en->pos.x = 50;
 		en->pos.y = 20;
@@ -2836,11 +2855,11 @@ void world_setup() {
 		world->inventory_items[ARCH_copper_ingot].amount = 100;
 		*/
 
-		// en = entity_create();
+		// en = entity_create(dim);
 		// setup_furnace(en);
 		// en->pos.y = 20.0;
 
-		// en = entity_create();
+		// en = entity_create(dim);
 		// setup_research_station(en);
 		// en->pos.x = -20.0;
 	}
@@ -4191,7 +4210,7 @@ void do_ui_stuff() {
 			if (!succ) {
 				play_sound("event:/error");
 				// drop remaining on ground
-				drop_item_at_pos(world->mouse_cursor_item, get_player()->pos);
+				drop_item_at_pos(world->mouse_cursor_item, get_player()->pos, get_player_dim());
 				world->mouse_cursor_item = empty_item;
 			}
 		}
@@ -4342,7 +4361,7 @@ void do_cursor_drawing_and_logic() {
 				consume_key_just_pressed(MOUSE_BUTTON_LEFT);
 
 				if (has_room_to_place) {
-					Entity* en = entity_create();
+					Entity* en = entity_create(get_player_dim());
 					entity_setup(en, arch_id);
 					en->pos = pos;
 					en->right_click_remove = true;
@@ -4377,12 +4396,20 @@ void draw_base_sprite(Entity* en) {
 	}
 
 	Sprite* sprite = get_sprite(sprite_id);
+	Vector2 size = get_sprite_size(sprite);
 	Matrix4 xform = m4_scalar(1.0);
 
 	// all entities basically have a center center position
 	// that way the ->pos is very easily used in other areas intuitively.
 	Vector2 draw_pos = v2_add(en->pos, get_offset_for_rendering(en->arch));
 	xform = m4_translate(xform, v3(draw_pos.x, draw_pos.y, 0));
+
+	// flip the sprite
+	{
+		xform = m4_translate(xform, v3(size.x * 0.5, size.y * 0.5, 0));
+		xform = m4_scale(xform, v3(en->flip_sprite ? -1 : 1, 1, 1));
+		xform = m4_translate(xform, v3(size.x * -0.5, size.y * -0.5, 0));
+	}
 
 	Vector4 col = COLOR_WHITE;
 	if (world_frame.selected_entity == en) {
@@ -4768,7 +4795,7 @@ void update_enemy_nest(Entity* en) {
 	}
 
 	if (enemy_count < 1 && en->next_hit_end_time != 0 && has_reached_end_time(en->next_hit_end_time)) {
-		Entity* spawn = entity_create();
+		Entity* spawn = entity_create(en->dim);
 		setup_enemy1(spawn);
 		spawn->pos = en->pos;
 		spawn->spawned_from = handle_from_entity(en);
@@ -4869,7 +4896,7 @@ void update_meteor(Entity* en) {
 			}
 
 			if (found_pos) {
-				Entity* spawn = entity_create();
+				Entity* spawn = entity_create(en->dim);
 				entity_setup(spawn, arch);
 				spawn->pos = spawn_pos;
 
@@ -5311,18 +5338,27 @@ void draw_world_in_frame(Dimension dim) {
 					continue;
 				}
 
-				// checkerboard pattern
-				Vector4 col = color_0;
-				if ((x + (y % 2 == 0) ) % 2 == 0) {
-					col.a = 0.9;
-				}
-				col = v4_lerp(col, biome_col_hex_to_rgba(biome_colors[biome]), 0.1f);
-				float x_pos = x * tile_width;
-				float y_pos = y * tile_width;
-				Draw_Quad* quad = draw_rect_in_frame(v2(x_pos, y_pos), v2(tile_width, tile_width), col, current_draw_frame);
+				if (dim == DIM_first) {
 
-				// TileCache* tc = tile_cache_at_tile(v2i(x, y));
-				// set_col_override(quad, tc->debug_col_override);
+					// checkerboard pattern
+					Vector4 col = color_0;
+					if ((x + (y % 2 == 0) ) % 2 == 0) {
+						col.a = 0.9;
+					}
+					col = v4_lerp(col, biome_col_hex_to_rgba(biome_colors[biome]), 0.1f);
+					float x_pos = x * tile_width;
+					float y_pos = y * tile_width;
+					Draw_Quad* quad = draw_rect_in_frame(v2(x_pos, y_pos), v2(tile_width, tile_width), col, current_draw_frame);
+
+				} else if (dim == DIM_second) {
+
+					Vector4 col = hex_to_rgba(0x8eb149ff);
+
+					float x_pos = x * tile_width;
+					float y_pos = y * tile_width;
+					Draw_Quad* quad = draw_rect_in_frame(v2(x_pos, y_pos), v2(tile_width, tile_width), col, current_draw_frame);
+
+				}
 			}
 		}
 
@@ -5381,6 +5417,8 @@ int entry(int argc, char **argv) {
 
 	// :init
 
+	seed_for_random = rdtsc();
+
 	// :sound init
 	fmod_init();
 	#if defined(LOOP_SOUND)
@@ -5402,7 +5440,7 @@ int entry(int argc, char **argv) {
 		sprites[0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/missing_tex.png"), get_heap_allocator()) };
 		// sprites[SPRITE_player] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), get_heap_allocator()) };
 		sprites[SPRITE_tree0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree0.png"), get_heap_allocator()) };
-		sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree_beeg.png"), get_heap_allocator()) };
+		sprites[SPRITE_tree1] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/tree1.png"), get_heap_allocator()) };
 		sprites[SPRITE_rock0] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/rock0.png"), get_heap_allocator()) };
 		sprites[SPRITE_item_pine_wood] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_pine_wood.png"), get_heap_allocator()) };
 		sprites[SPRITE_item_rock] = (Sprite){ .image=load_image_from_disk(STR("res/sprites/item_rock.png"), get_heap_allocator()) };
@@ -5944,7 +5982,7 @@ int entry(int argc, char **argv) {
 					}
 
 					if (found_pos) {
-						Entity* en = entity_create();
+						Entity* en = entity_create(get_player_dim());
 						setup_meteor(en);
 						en->pos = spawn_pos;
 					} else {
@@ -6000,7 +6038,7 @@ int entry(int argc, char **argv) {
 					}
 
 					if (found_pos) {
-						Entity* en = entity_create();
+						Entity* en = entity_create(get_player_dim());
 						setup_meteor(en);
 						en->pos = spawn_pos;
 					} else {
@@ -6094,7 +6132,7 @@ int entry(int argc, char **argv) {
 							Entity item_data = get_item_data(en->current_crafting_item);
 
 							// :CRAFT!
-							Entity* drop = entity_create();
+							Entity* drop = entity_create(en->dim);
 							setup_item(drop, item_data.furnace_transform_into);
 							drop->pos = en->pos;
 							drop->pos = v2_add(drop->pos, v2(get_random_float32_in_range(-2, 2), get_random_float32_in_range(-2, 2)));
@@ -6497,7 +6535,7 @@ int entry(int argc, char **argv) {
 						*inv_item = empty_item;
 					}
 					if (inv_item->amount > 0) {
-						Entity* drop = entity_create();
+						Entity* drop = entity_create(player->dim);
 						setup_item_with_instance(drop, *inv_item);
 						drop->pos = player->pos;
 					}
@@ -6629,17 +6667,17 @@ int entry(int argc, char **argv) {
 						consume_key_just_pressed(MOUSE_BUTTON_RIGHT);
 
 						if (is_in_range) {
-							Entity* drop = entity_create();
+							Entity* drop = entity_create(selected_en->dim);
 							setup_item(drop, selected_en->arch);
 							drop->pos = selected_en->pos;
 
 							for (int j = 0; j < selected_en->input0.amount; j++) {
-								Entity* drop = entity_create();
+								Entity* drop = entity_create(selected_en->dim);
 								setup_item(drop, selected_en->input0.id);
 								drop->pos = selected_en->pos;
 							}
 							for (int j = 0; j < selected_en->input1.amount; j++) {
-								Entity* drop = entity_create();
+								Entity* drop = entity_create(selected_en->dim);
 								setup_item(drop, selected_en->input1.id);
 								drop->pos = selected_en->pos;
 							}

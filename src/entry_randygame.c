@@ -5207,7 +5207,13 @@ int compare_entity_y(const void* a, const void* b) {
 	} else if (entityA->pos.y > entityB->pos.y) {
 		return -1;
 	}
-	return 0; // They are equal
+
+	// they're equal, so just sort by id so we don't z-fight
+	if (entityA->id < entityB->id) {
+		return 1;
+	} else {
+		return -1;
+	}
 }
 
 
